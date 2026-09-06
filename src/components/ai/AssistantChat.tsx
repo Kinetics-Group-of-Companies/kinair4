@@ -294,11 +294,13 @@ export function AssistantChat({
   const navigate = useNavigate();
   const [input, setInput] = useState('');
   const scrollRef = useRef<HTMLDivElement>(null);
+  const [aiMode, setAiMode] = useState<'standard' | 'advanced'>('standard');
 
   const transport = useMemo(
     () =>
       new DefaultChatTransport({
         api: `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/ai-assistant`,
+        body: { aiMode },
         headers: async () => {
           const { data } = await supabase.auth.getSession();
           return {
@@ -307,7 +309,7 @@ export function AssistantChat({
           };
         },
       }),
-    [],
+    [aiMode],
   );
 
   const { messages, sendMessage, status, error } = useChat({
@@ -947,6 +949,22 @@ export function AssistantChat({
 
   return (
         <Card className={`flex flex-col overflow-hidden ${heightClass}`}>
+          <div className="flex items-center justify-between gap-3 border-b border-border px-4 py-2 bg-muted/20">
+            <div className="flex items-center gap-2 text-xs text-muted-foreground">
+              <Sparkles className="w-3.5 h-3.5 text-primary" />
+              <span>AI provider</span>
+            </div>
+            <select
+              value={aiMode}
+              onChange={(e) => setAiMode(e.target.value as 'standard' | 'advanced')}
+              disabled={busy}
+              aria-label="Choose AI provider"
+              className="h-8 rounded-md border border-border bg-background px-2 text-xs font-medium text-foreground"
+            >
+              <option value="standard">Gemini 2.5 Flash · Free/Standard</option>
+              <option value="advanced">OpenAI GPT-5.6 · Advanced</option>
+            </select>
+          </div>
           <div ref={scrollRef} className="flex-1 overflow-y-auto p-4 space-y-4">
             {messages.length === 0 && (
               <div className="h-full flex flex-col items-center justify-center text-center gap-4 py-8">
