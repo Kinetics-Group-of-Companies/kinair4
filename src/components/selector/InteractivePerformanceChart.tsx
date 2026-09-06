@@ -366,80 +366,9 @@ export function InteractivePerformanceChart({
     return { maxAirflow: zoomedMaxAirflow, maxPressure: zoomedMaxPressure };
   }, [optimalAxisBounds, zoomLevel]);
 
-  // Add origin point and system curve data
-  // System curve must start from (0,0) to connect at axis intersection
-  const combinedChartData = useMemo(() => {
-    const maxPressure = optimalAxisBounds.maxPressure * 1.5;
-    
-    // For non-pressure charts, use raw chartData as-is
-    if (chartType !== 'pressure' || chartData.length < 2) {
-      return chartData;
-    }
-    
-    // Start with origin point for system curve (0, 0)
-    const result: any[] = [];
-    
-    // Add origin point - system curve starts at (0,0)
-    if (showSystemCurve && systemCurveK !== null) {
-      result.push({
-        airflow: 0,
-        staticPressure: null, // No fan curve data at 0
-        shaftPower: null,
-        efficiency: null,
-        systemPressure: 0, // System curve starts at origin (P = k * 0^2 = 0)
-      });
-    }
-    
-    // Add all data points with system curve
-    chartData.forEach(dataPoint => {
-      const point: any = {
-        airflow: dataPoint.airflow,
-        staticPressure: dataPoint.staticPressure,
-        shaftPower: dataPoint.shaftPower,
-        efficiency: dataPoint.efficiency,
-      };
-      
-      // Calculate system pressure (parabola: P = k * Q^2)
-      if (showSystemCurve && systemCurveK !== null) {
-        const sysPressure = systemCurveK * dataPoint.airflow * dataPoint.airflow;
-        point.systemPressure = sysPressure <= maxPressure ? sysPressure : null;
-      }
-      
-      result.push(point);
-    });
-
-    // Recharts interpolates between catalogue airflow samples. If the operating
-    // airflow lies between two samples, the rendered system curve can visually
-    // miss the marker even though k was calculated from that point. Insert the
-    // exact anchor so the blue curve always passes through the dot centre.
-    if (showSystemCurve && systemCurveK !== null && activeDutyPoint) {
-      const anchorIndex = result.findIndex(point =>
-        Math.abs(point.airflow - activeDutyPoint.airflow) < 0.000001
-      );
-
-      if (anchorIndex >= 0) {
-        result[anchorIndex].systemPressure = activeDutyPoint.pressure;
-      } else {
-        result.push({
-          airflow: activeDutyPoint.airflow,
-          staticPressure: null,
-          shaftPower: null,
-          efficiency: null,
-          systemPressure: activeDutyPoint.pressure,
-        });
-        result.sort((a, b) => a.airflow - b.airflow);
-      }
-    }
-    
-    console.log('Combined Chart Data:', {
-      points: result.length,
-      first: result[0],
-      last: result[result.length - 1],
-      maxPressureInData: Math.max(...result.map(r => r.staticPressure || 0))
-    });
-    
-    return result;
-  }, [chartData, systemCurveK, chartType, showSystemCurve, optimalAxisBounds, activeDutyPoint]);
+  // Keep the fan dataset pure. The system curve is rendered from its own
+  // dense dataset below, so no null-valued anchor can split the fan curve.
+  const combinedChartData = chartData;
 
   // Generate the system curve independently from the sparse catalogue points.
   // Dense samples preserve the true P = kQ² parabola and the exact duty anchor.
@@ -1133,19 +1062,19 @@ export function InteractivePerformanceChart({
             labelFormatter={(value) => `Airflow: ${typeof value === 'number' ? roundAirflowForDisplay(value, airflowUnit).toLocaleString() : value} ${AIRFLOW_UNITS[airflowUnit].label}`}
           />
           
-          {/* Fan performance curve area fill - use linear to match exact data points */}
+          {/* Smooth area through every original catalogue performance point */}
           <Area
-            type="linear"
+            type="monotone"
             dataKey={config.dataKey}
             stroke="none"
             fill={`url(#gradient-${chartType})`}
             connectNulls={false}
           />
           
-          {/* Fan performance curve - linear line to match exact data points */}
+          {/* Smooth fan curve through every original catalogue performance point */}
           {!convertedFamilyData && (
             <Line
-              type="linear"
+              type="monotone"
               dataKey={config.dataKey}
               stroke={config.stroke}
               strokeWidth={3}
