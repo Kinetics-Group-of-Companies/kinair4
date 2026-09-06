@@ -294,7 +294,7 @@ export function AssistantChat({
   const navigate = useNavigate();
   const [input, setInput] = useState('');
   const scrollRef = useRef<HTMLDivElement>(null);
-  const [aiMode, setAiMode] = useState<'standard' | 'advanced'>('standard');
+  const [aiMode, setAiMode] = useState<'standard' | 'openai' | 'anthropic'>('standard');
 
   const transport = useMemo(
     () =>
@@ -956,13 +956,14 @@ export function AssistantChat({
             </div>
             <select
               value={aiMode}
-              onChange={(e) => setAiMode(e.target.value as 'standard' | 'advanced')}
+              onChange={(e) => setAiMode(e.target.value as 'standard' | 'openai' | 'anthropic')}
               disabled={busy}
               aria-label="Choose AI provider"
               className="h-8 rounded-md border border-border bg-background px-2 text-xs font-medium text-foreground"
             >
               <option value="standard">Gemini 2.5 Flash · Free/Standard</option>
-              <option value="advanced">OpenAI GPT-5.6 · Advanced</option>
+              <option value="openai">OpenAI GPT-5.6 · Advanced</option>
+              <option value="anthropic">Claude Opus · Advanced</option>
             </select>
           </div>
           <div ref={scrollRef} className="flex-1 overflow-y-auto p-4 space-y-4">
