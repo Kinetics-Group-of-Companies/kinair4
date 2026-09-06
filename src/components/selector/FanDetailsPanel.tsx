@@ -31,7 +31,6 @@ interface FanDetailsPanelProps {
   temperature?: number;
   altitude?: number;
   onDutyPointChange?: (airflow: number, pressure: number) => void;
-  autoDownload?: boolean;
 }
 
 // Calculate fan RPM based on motor poles and frequency
@@ -89,7 +88,7 @@ function applySpeedNoiseLaws(
   };
 }
 
-export function FanDetailsPanel({ selection, airflowUnit, pressureUnit, airDensity = 1.2, temperature = 20, altitude = 0, onDutyPointChange, autoDownload = false }: FanDetailsPanelProps) {
+export function FanDetailsPanel({ selection, airflowUnit, pressureUnit, airDensity = 1.2, temperature = 20, altitude = 0, onDutyPointChange }: FanDetailsPanelProps) {
   const { database } = useSupabaseFanDatabase();
   const { isAuthenticated } = useAuth();
   
@@ -922,18 +921,6 @@ export function FanDetailsPanel({ selection, airflowUnit, pressureUnit, airDensi
       toast.error('Failed to generate datasheet');
     }
   };
-
-  // AI deep links use this same button handler after the normal selector and
-  // all three visible charts have mounted. No separate AI PDF path is used.
-  const autoDownloadRef = useRef<string | null>(null);
-  useEffect(() => {
-    if (!autoDownload || autoDownloadRef.current === selection.fanId) return;
-    autoDownloadRef.current = selection.fanId;
-    const timer = window.setTimeout(() => void generateDatasheet(), 500);
-    return () => window.clearTimeout(timer);
-    // generateDatasheet intentionally uses the current rendered selector state.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [autoDownload, selection.fanId]);
 
   // Generate PDF for project (without saving, returns the document)
   const generatePdfForProject = async (): Promise<jsPDF | null> => {
