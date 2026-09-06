@@ -110,6 +110,21 @@ export const AIR_CURTAIN_SUGGESTIONS = [
 export type AssistantContext = 'general' | 'fan' | 'air_curtain';
 
 
+/**
+ * AI SDK tool parts arrive incrementally. Never run a selector from an
+ * input-streaming part, otherwise the first partial schedule row gets marked
+ * handled before the remaining rows and fields arrive.
+ */
+function hasCompleteToolInput(part: any): boolean {
+  const state = part?.state;
+  return (
+    !state ||
+    state === 'input-available' ||
+    state === 'output-available' ||
+    state === 'output-error'
+  );
+}
+
 type DocOutput = 'full' | 'drawing' | 'noise';
 
 type FanInstallType = 'inline_ducted' | 'wall_mounted' | 'axial';
@@ -458,6 +473,7 @@ export function AssistantChat({
       if (m.role !== 'assistant') continue;
       (m.parts as any[]).forEach((p, idx) => {
         if (p?.type !== 'tool-prepare_datasheet') return;
+        if (!hasCompleteToolInput(p)) return;
         const duty = p?.input as DutyRequest | undefined;
         if (!duty || !duty.airflow || !duty.static_pressure) return;
         const key = `${m.id}-${idx}`;
@@ -651,6 +667,7 @@ export function AssistantChat({
       if (m.role !== 'assistant') continue;
       (m.parts as any[]).forEach((p, idx) => {
         if (p?.type !== 'tool-prepare_air_curtain_datasheet') return;
+        if (!hasCompleteToolInput(p)) return;
         const duty = p?.input as AcDutyRequest | undefined;
         if (!duty) return;
         const key = `ac-${m.id}-${idx}`;
@@ -755,6 +772,7 @@ export function AssistantChat({
       if (m.role !== 'assistant') continue;
       (m.parts as any[]).forEach((p, idx) => {
         if (p?.type !== 'tool-prepare_schedule_selection') return;
+        if (!hasCompleteToolInput(p)) return;
         const input = p?.input as
           | { title?: string | null; items?: ScheduleItem[]; optimize_for?: FanOptimizeFor }
           | undefined;
