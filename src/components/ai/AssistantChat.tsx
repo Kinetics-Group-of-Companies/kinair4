@@ -433,14 +433,12 @@ export function AssistantChat({
           await downloadFanNoiseData(selection);
           toast.success(`${selection.nomenclature} sound data downloaded`);
         } else {
-          const duty = autoSelections[key]?.duty;
-          await generateDatasheetForSelection(
-            selection,
-            database,
-            { airflowUnit: duty?.airflow_unit, pressureUnit: duty?.pressure_unit },
-            dimensionsMap as any,
+          // The manual selector owns selection confirmation, chart rendering and
+          // PDF generation. The AI only supplies duty + preferred model.
+          navigate(
+            `/selector?airflow=${selection.requiredAirflow}&pressure=${selection.requiredPressure}&model=${encodeURIComponent(selection.nomenclature)}&download=1`,
           );
-          toast.success(`${selection.nomenclature} datasheet downloaded`);
+          return;
         }
       } catch (e) {
         toast.error('Could not build that document. Please open it in the Fan Selector.');
@@ -448,7 +446,7 @@ export function AssistantChat({
         setDownloadingKey(null);
       }
     },
-    [database, dimensionsMap, autoSelections],
+    [database, dimensionsMap, navigate],
   );
 
 
@@ -624,16 +622,10 @@ export function AssistantChat({
           await downloadAirCurtainNoiseData(selection);
           toast.success(`${selection.model.model} sound data downloaded`);
         } else {
-          await generateAirCurtainDatasheetForSelection(
-            selection,
-            {
-              doorWidthMm: auto.doorWidthMm,
-              doorHeightM: auto.doorHeightM,
-              minFloorVelocity: auto.minFloorVelocity,
-            },
-            { brands: acBrands, series: acSeries, dimensions: acDimensions, tenant },
+          navigate(
+            `/air-curtain?model=${encodeURIComponent(selection.model.model)}&width=${auto.doorWidthMm}&height=${auto.doorHeightM}&floorVelocity=${auto.minFloorVelocity}&download=1`,
           );
-          toast.success(`${selection.model.model} datasheet downloaded`);
+          return;
         }
       } catch (e) {
         toast.error('Could not build that document. Please open it in the Air Curtain Selector.');
@@ -641,7 +633,7 @@ export function AssistantChat({
         setAcDownloadingKey(null);
       }
     },
-    [acBrands, acSeries, acDimensions, tenant],
+    [navigate],
   );
 
   useEffect(() => {
@@ -875,22 +867,16 @@ export function AssistantChat({
       setScheduleBusyKey(key);
       try {
         if (row.selection.kind === 'fan') {
-          await generateDatasheetForSelection(row.selection.selection, database, {
-            airflowUnit: row.selection.airflowUnit,
-            pressureUnit: row.selection.pressureUnit,
-          });
+          const fan = row.selection.selection;
+          navigate(
+            `/selector?airflow=${fan.requiredAirflow}&pressure=${fan.requiredPressure}&model=${encodeURIComponent(fan.nomenclature)}&download=1`,
+          );
         } else {
-          await generateAirCurtainDatasheetForSelection(
-            row.selection.selection,
-            {
-              doorWidthMm: row.selection.doorWidthMm,
-              doorHeightM: row.selection.doorHeightM,
-              minFloorVelocity: row.selection.minFloorVelocity,
-            },
-            { brands: acBrands, series: acSeries, dimensions: acDimensions, tenant },
+          const ac = row.selection;
+          navigate(
+            `/air-curtain?model=${encodeURIComponent(ac.selection.model.model)}&width=${ac.doorWidthMm}&height=${ac.doorHeightM}&floorVelocity=${ac.minFloorVelocity}&download=1`,
           );
         }
-        toast.success(`${row.tag} datasheet downloaded`);
       } catch {
         toast.error(`Could not build the datasheet for ${row.tag}.`);
       } finally {
