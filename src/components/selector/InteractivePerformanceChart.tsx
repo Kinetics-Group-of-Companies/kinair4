@@ -441,6 +441,48 @@ export function InteractivePerformanceChart({
     return result;
   }, [chartData, systemCurveK, chartType, showSystemCurve, optimalAxisBounds, activeDutyPoint]);
 
+  // Generate the system curve independently from the sparse catalogue points.
+  // Dense samples preserve the true P = kQ² parabola and the exact duty anchor.
+  const systemCurveData = useMemo(() => {
+    if (chartType !== 'pressure' || !showSystemCurve || systemCurveK === null) {
+      return [];
+    }
+
+    const visibleMaxAirflow = zoomedAxisBounds.maxAirflow * 1.10;
+    const visibleMaxPressure = zoomedAxisBounds.maxPressure * 1.10;
+    const pressureLimitedAirflow = Math.sqrt(visibleMaxPressure / systemCurveK);
+    const curveMaxAirflow = Math.min(visibleMaxAirflow, pressureLimitedAirflow);
+    const sampleCount = 80;
+    const points = Array.from({ length: sampleCount + 1 }, (_, index) => {
+      const airflow = (curveMaxAirflow * index) / sampleCount;
+      return {
+        airflow,
+        systemPressure: systemCurveK * airflow * airflow,
+      };
+    });
+
+    if (
+      activeDutyPoint &&
+      activeDutyPoint.airflow >= 0 &&
+      activeDutyPoint.airflow <= curveMaxAirflow &&
+      activeDutyPoint.pressure <= visibleMaxPressure
+    ) {
+      points.push({
+        airflow: activeDutyPoint.airflow,
+        systemPressure: activeDutyPoint.pressure,
+      });
+      points.sort((a, b) => a.airflow - b.airflow);
+    }
+
+    return points;
+  }, [
+    chartType,
+    showSystemCurve,
+    systemCurveK,
+    zoomedAxisBounds,
+    activeDutyPoint,
+  ]);
+
   // Calculate stall zone boundary using ORIGINAL performance data (not trimmed chartData)
   // The stall zone is typically at LOW airflow (left side of curve) where:
   // - Pressure curve peaks and starts to become unstable
@@ -1302,7 +1344,8 @@ export function InteractivePerformanceChart({
           {/* System curve (only for pressure chart) - smooth parabola with dotted line */}
           {chartType === 'pressure' && showSystemCurve && (
             <Line
-              type="monotone"
+              type="linear"
+              data={systemCurveData}
               dataKey="systemPressure"
               stroke="hsl(213, 90%, 45%)"
               strokeWidth={2.5}
