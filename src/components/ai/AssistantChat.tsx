@@ -423,33 +423,19 @@ export function AssistantChat({
   const fanDownloadedRef = useRef<Set<string>>(new Set());
 
   const downloadDatasheet = useCallback(
-    async (key: string, selection: FanSelection, output: DocOutput = 'full') => {
-      setDownloadingKey(key);
-      try {
-        if (output === 'drawing') {
-          await downloadFanDrawing(selection, database, dimensionsMap as any);
-          toast.success(`${selection.nomenclature} drawing downloaded`);
-        } else if (output === 'noise') {
-          await downloadFanNoiseData(selection);
-          toast.success(`${selection.nomenclature} sound data downloaded`);
-        } else {
-          // The manual selector owns selection confirmation, chart rendering and
-          // PDF generation. The AI only supplies duty + preferred model.
-          navigate(
-            `/selector?airflow=${selection.requiredAirflow}&pressure=${selection.requiredPressure}&model=${encodeURIComponent(selection.nomenclature)}`,
-          );
-          toast.info('Loaded in the manual Fan Selector. Click Datasheet to download.');
-          return;
-        }
-      } catch (e) {
-        toast.error('Could not build that document. Please open it in the Fan Selector.');
-      } finally {
-        setDownloadingKey(null);
-      }
+    (_key: string, selection: FanSelection, output: DocOutput = 'full') => {
+      const params = new URLSearchParams({
+        airflow: String(selection.requiredAirflow),
+        pressure: String(selection.requiredPressure),
+        model: selection.nomenclature,
+        document: output,
+      });
+      // A hard navigation closes the global assistant drawer and loads the
+      // genuine manual selector. No chat-side document generator is involved.
+      window.location.assign(`/selector?${params.toString()}`);
     },
-    [database, dimensionsMap, navigate],
+    [],
   );
-
 
   useEffect(() => {
     if (!database?.fans?.length) return;
@@ -608,34 +594,22 @@ export function AssistantChat({
 
 
   const downloadAcDatasheet = useCallback(
-    async (
-      key: string,
+    (
+      _key: string,
       selection: AirCurtainSelection,
       auto: AcAutoSelection,
       output: DocOutput = 'full',
     ) => {
-      setAcDownloadingKey(key);
-      try {
-        if (output === 'drawing') {
-          await downloadAirCurtainDrawing(selection);
-          toast.success(`${selection.model.model} drawing downloaded`);
-        } else if (output === 'noise') {
-          await downloadAirCurtainNoiseData(selection);
-          toast.success(`${selection.model.model} sound data downloaded`);
-        } else {
-          navigate(
-            `/air-curtain?model=${encodeURIComponent(selection.model.model)}&width=${auto.doorWidthMm}&height=${auto.doorHeightM}&floorVelocity=${auto.minFloorVelocity}`,
-          );
-          toast.info('Loaded in the manual Air Curtain Selector. Click Datasheet PDF to download.');
-          return;
-        }
-      } catch (e) {
-        toast.error('Could not build that document. Please open it in the Air Curtain Selector.');
-      } finally {
-        setAcDownloadingKey(null);
-      }
+      const params = new URLSearchParams({
+        model: selection.model.model,
+        width: String(auto.doorWidthMm),
+        height: String(auto.doorHeightM),
+        floorVelocity: String(auto.minFloorVelocity),
+        document: output,
+      });
+      window.location.assign(`/air-curtain?${params.toString()}`);
     },
-    [navigate],
+    [],
   );
 
   useEffect(() => {
@@ -870,12 +844,12 @@ export function AssistantChat({
       try {
         if (row.selection.kind === 'fan') {
           const fan = row.selection.selection;
-          navigate(
+          window.location.assign(
             `/selector?airflow=${fan.requiredAirflow}&pressure=${fan.requiredPressure}&model=${encodeURIComponent(fan.nomenclature)}`,
           );
         } else {
           const ac = row.selection;
-          navigate(
+          window.location.assign(
             `/air-curtain?model=${encodeURIComponent(ac.selection.model.model)}&width=${ac.doorWidthMm}&height=${ac.doorHeightM}&floorVelocity=${ac.minFloorVelocity}`,
           );
         }
