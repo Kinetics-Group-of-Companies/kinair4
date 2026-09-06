@@ -971,7 +971,7 @@ export function AssistantChat({
               className="h-8 rounded-md border border-border bg-background px-2 text-xs font-medium text-foreground"
             >
               <option value="auto">Auto · Based on request</option>
-              <option value="standard">Gemini 2.5 Flash · Free/Standard</option>
+              <option value="standard">Gemini 3.6 Flash · Free/Standard</option>
               <option value="openai">OpenAI GPT-5.6 · Advanced</option>
               <option value="anthropic">Claude Opus · Advanced</option>
             </select>
