@@ -783,18 +783,16 @@ export function InteractivePerformanceChart({
   const xAxisTicks = useMemo(() => {
     const maxVal = zoomedAxisBounds.maxAirflow;
     
-    // Add small padding for visual clarity
-    const paddedMax = maxVal * 1.1;
+    // Keep the visible limit exactly 10% above the maximum airflow data point.
+    const paddedMax = maxVal * 1.10;
     
-    // Get dynamic step size based on data range
+    // Use nice interior ticks without rounding the chart domain beyond the 10% limit.
     const stepSize = getNiceStepSize(paddedMax, 10);
-    const roundedMax = Math.ceil(paddedMax / stepSize) * stepSize;
-    
-    // Generate ticks - include 0 for proper origin display
     const ticks: number[] = [0];
-    for (let v = stepSize; v <= roundedMax; v += stepSize) {
-      ticks.push(Math.round(v));
+    for (let v = stepSize; v < paddedMax; v += stepSize) {
+      ticks.push(Math.round(v * 1000) / 1000);
     }
+    ticks.push(Math.round(paddedMax * 1000) / 1000);
     
     return ticks;
   }, [zoomedAxisBounds, getNiceStepSize]);
@@ -853,8 +851,8 @@ export function InteractivePerformanceChart({
       }
     }
     
-    // Add 15% padding for visual clarity (consistent with PerformanceChart)
-    const paddedMax = maxVal * 1.15;
+    // Keep the visible limit exactly 10% above the maximum data point.
+    const paddedMax = maxVal * 1.10;
     
     // Dynamic step size based on chart type and data range
     let stepSize: number;
@@ -865,15 +863,14 @@ export function InteractivePerformanceChart({
       stepSize = getNiceStepSize(paddedMax, 8);
     }
     
-    const roundedMax = Math.ceil(paddedMax / stepSize) * stepSize;
+    console.log('Y-AXIS TICKS DEBUG:', { chartType, key, maxVal, paddedMax, stepSize });
     
-    console.log('Y-AXIS TICKS DEBUG:', { chartType, key, maxVal, paddedMax, stepSize, roundedMax });
-    
-    // Generate ticks - include 0 for proper origin display
+    // Use nice interior ticks without rounding the chart domain beyond the 10% limit.
     const ticks: number[] = [0];
-    for (let v = stepSize; v <= roundedMax; v += stepSize) {
+    for (let v = stepSize; v < paddedMax; v += stepSize) {
       ticks.push(Math.round(v * 1000) / 1000);
     }
+    ticks.push(Math.round(paddedMax * 1000) / 1000);
     
     return ticks;
   }, [chartData, performanceData, config.dataKey, chartType, zoomedAxisBounds, getNiceStepSize, convertedFamilyData]);
