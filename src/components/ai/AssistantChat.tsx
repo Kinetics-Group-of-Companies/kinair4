@@ -456,20 +456,50 @@ export function AssistantChat({
         if (handledRef.current.has(key)) return;
         handledRef.current.add(key);
 
-        // Installation type is a hard rule: KVF-P / KVF-M are inline ducted,
-        // KIN-E is wall mounted. Low noise then means KVF-P (inline) / KIN-E (wall).
+        // Do not trust the model alone for hard catalogue filters. Recover the
+        // requirement from the user's own preceding message when a tool argument
+        // was omitted, so plastic and metal alternatives can never be mixed.
+        const messageIndex = messages.findIndex((message) => message.id === m.id);
+        const priorUser = messages
+          .slice(0, messageIndex)
+          .reverse()
+          .find((message) => message.role === 'user');
+        const userText = (priorUser?.parts as any[] | undefined)
+          ?.filter((part) => part?.type === 'text')
+          .map((part) => String(part.text ?? ''))
+          .join(' ')
+          .toLowerCase() ?? '';
+
+        const mentionsPlastic = /\b(plastic|pvc|abs|polypropylene|polymer|pp)\b/i.test(userText);
+        const mentionsMetal = /\b(metal|metallic|steel|galvanized|galvanised|gi)\b/i.test(userText);
+        const mentionsWall = /\b(wall[ -]?mounted|wall extract|wall fan)\b/i.test(userText);
+        const mentionsAxial = /\b(ktaf|tube axial|axial fan|axial flow)\b/i.test(userText);
+        const mentionsKvfp = /\bkvf[ -]?p\b/i.test(userText);
+        const mentionsKvfm = /\bkvf[ -]?m\b/i.test(userText);
+        const mentionsKine = /\bkin[ -]?e\b/i.test(userText);
+
+        const inferredSeries =
+          mentionsKvfp ? 'KVF-P' :
+          mentionsKvfm ? 'KVF-M' :
+          mentionsKine ? 'KIN-E' :
+          mentionsAxial ? 'KTAF' :
+          null;
+        const effectiveMaterial =
+          duty.material ?? (mentionsPlastic ? 'plastic' : mentionsMetal ? 'metal' : null);
+        const effectiveSeriesName = duty.series_name ?? inferredSeries;
         const lowNoise = duty.optimize_for === 'low_noise';
-        const askedKinE = (duty.series_name || '').toLowerCase().includes('kin-e');
+        const askedKinE = (effectiveSeriesName || '').toLowerCase().includes('kin-e');
         const install: FanInstallType | null =
-          duty.fan_type ?? (askedKinE ? 'wall_mounted' : null);
+          duty.fan_type ??
+          (mentionsAxial ? 'axial' : mentionsWall || askedKinE ? 'wall_mounted' : null);
         const series =
           install === 'wall_mounted'
             ? resolveFanSeries(database, null, null, 'wall_mounted')
             : install === 'axial'
               ? resolveFanSeries(database, 'KTAF', null, 'axial')
               : lowNoise
-              ? resolveFanSeries(database, 'KVF-P', null, 'inline_ducted')
-              : resolveFanSeries(database, duty.series_name, duty.material, install);
+                ? resolveFanSeries(database, 'KVF-P', null, 'inline_ducted')
+                : resolveFanSeries(database, effectiveSeriesName, effectiveMaterial, install);
 
 
         const results = findOptimalSelections(
