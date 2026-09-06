@@ -767,13 +767,32 @@ Deno.serve(async (req) => {
     // the automatic Gemini -> OpenAI -> Claude fallback chain.
     const routedMode = aiMode === "auto" ? "standard" : aiMode;
 
+    // Resolve the newest enabled model in each price tier from the dynamic
+    // registry. Static constants remain as safe fallbacks if discovery is down.
+    const { data: registeredModels } = await supabase
+      .from("ai_models")
+      .select("provider,model_id,tier,cost_rank")
+      .eq("enabled", true)
+      .eq("supports_tools", true)
+      .order("model_id", { ascending: false });
+    const registeredModel = (provider: string, tier: string, fallback: string) =>
+      registeredModels?.find((item: Row) => item.provider === provider && item.tier === tier)?.model_id ??
+      fallback;
+    const geminiRuntimeModel = registeredModel("google", "free", GEMINI_MODEL);
+    const openaiCheapRuntimeModel = registeredModel("openai", "cheap", OPENAI_CHEAP_MODEL);
+    const openaiBalancedRuntimeModel = registeredModel("openai", "balanced", OPENAI_BALANCED_MODEL);
+    const openaiPremiumRuntimeModel = registeredModel("openai", "premium", OPENAI_PREMIUM_MODEL);
+    const anthropicCheapRuntimeModel = registeredModel("anthropic", "cheap", ANTHROPIC_CHEAP_MODEL);
+    const anthropicBalancedRuntimeModel = registeredModel("anthropic", "balanced", ANTHROPIC_BALANCED_MODEL);
+    const anthropicPremiumRuntimeModel = registeredModel("anthropic", "premium", ANTHROPIC_PREMIUM_MODEL);
+
     // Provider availability checks happen before streaming so failover can
     // switch cleanly without losing tool-call state.
     let geminiAvailable = Boolean(geminiApiKey);
     if ((routedMode === "standard" || routedMode === "gemini") && geminiApiKey) {
       try {
         const health = await fetch(
-          `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}?key=${encodeURIComponent(geminiApiKey)}`,
+          `https://generativelanguage.googleapis.com/v1beta/models/${geminiRuntimeModel}?key=${encodeURIComponent(geminiApiKey)}`,
           { signal: AbortSignal.timeout(4000) },
         );
         if (!health.ok) {
@@ -821,17 +840,17 @@ Deno.serve(async (req) => {
     let model;
 
     const openaiModelByMode: Record<string, string> = {
-      openai: OPENAI_CHEAP_MODEL,
-      advanced: OPENAI_PREMIUM_MODEL,
-      openai_luna: OPENAI_CHEAP_MODEL,
-      openai_terra: OPENAI_BALANCED_MODEL,
-      openai_sol: OPENAI_PREMIUM_MODEL,
+      openai: openaiCheapRuntimeModel,
+      advanced: openaiPremiumRuntimeModel,
+      openai_luna: openaiCheapRuntimeModel,
+      openai_terra: openaiBalancedRuntimeModel,
+      openai_sol: openaiPremiumRuntimeModel,
     };
     const anthropicModelByMode: Record<string, string> = {
-      anthropic: ANTHROPIC_CHEAP_MODEL,
-      anthropic_haiku: ANTHROPIC_CHEAP_MODEL,
-      anthropic_sonnet: ANTHROPIC_BALANCED_MODEL,
-      anthropic_opus: ANTHROPIC_PREMIUM_MODEL,
+      anthropic: anthropicCheapRuntimeModel,
+      anthropic_haiku: anthropicCheapRuntimeModel,
+      anthropic_sonnet: anthropicBalancedRuntimeModel,
+      anthropic_opus: anthropicPremiumRuntimeModel,
     };
 
     if (openaiModelByMode[routedMode] && openaiAvailable && openaiApiKey) {
@@ -844,19 +863,19 @@ Deno.serve(async (req) => {
       model = createAnthropic({ apiKey: anthropicApiKey })(modelName);
     } else if ((routedMode === "gemini" || routedMode === "standard") && geminiAvailable && geminiApiKey) {
       providerName = "Google Gemini";
-      modelName = GEMINI_MODEL;
+      modelName = geminiRuntimeModel;
       model = createGoogleGenerativeAI({ apiKey: geminiApiKey })(modelName);
     } else if (openaiAvailable && openaiApiKey) {
       providerName = "OpenAI";
-      modelName = OPENAI_CHEAP_MODEL;
+      modelName = openaiCheapRuntimeModel;
       model = createOpenAI({ apiKey: openaiApiKey })(modelName);
     } else if (anthropicApiKey) {
       providerName = "Anthropic";
-      modelName = ANTHROPIC_CHEAP_MODEL;
+      modelName = anthropicCheapRuntimeModel;
       model = createAnthropic({ apiKey: anthropicApiKey })(modelName);
     } else if (geminiApiKey) {
       providerName = "Google Gemini";
-      modelName = GEMINI_MODEL;
+      modelName = geminiRuntimeModel;
       model = createGoogleGenerativeAI({ apiKey: geminiApiKey })(modelName);
     } else {
       return new Response(JSON.stringify({ error: "No available AI provider." }), {
