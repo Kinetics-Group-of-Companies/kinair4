@@ -436,8 +436,9 @@ export function AssistantChat({
           // The manual selector owns selection confirmation, chart rendering and
           // PDF generation. The AI only supplies duty + preferred model.
           navigate(
-            `/selector?airflow=${selection.requiredAirflow}&pressure=${selection.requiredPressure}&model=${encodeURIComponent(selection.nomenclature)}&download=1`,
+            `/selector?airflow=${selection.requiredAirflow}&pressure=${selection.requiredPressure}&model=${encodeURIComponent(selection.nomenclature)}`,
           );
+          toast.info('Loaded in the manual Fan Selector. Click Datasheet to download.');
           return;
         }
       } catch (e) {
@@ -623,8 +624,9 @@ export function AssistantChat({
           toast.success(`${selection.model.model} sound data downloaded`);
         } else {
           navigate(
-            `/air-curtain?model=${encodeURIComponent(selection.model.model)}&width=${auto.doorWidthMm}&height=${auto.doorHeightM}&floorVelocity=${auto.minFloorVelocity}&download=1`,
+            `/air-curtain?model=${encodeURIComponent(selection.model.model)}&width=${auto.doorWidthMm}&height=${auto.doorHeightM}&floorVelocity=${auto.minFloorVelocity}`,
           );
+          toast.info('Loaded in the manual Air Curtain Selector. Click Datasheet PDF to download.');
           return;
         }
       } catch (e) {
@@ -869,12 +871,12 @@ export function AssistantChat({
         if (row.selection.kind === 'fan') {
           const fan = row.selection.selection;
           navigate(
-            `/selector?airflow=${fan.requiredAirflow}&pressure=${fan.requiredPressure}&model=${encodeURIComponent(fan.nomenclature)}&download=1`,
+            `/selector?airflow=${fan.requiredAirflow}&pressure=${fan.requiredPressure}&model=${encodeURIComponent(fan.nomenclature)}`,
           );
         } else {
           const ac = row.selection;
           navigate(
-            `/air-curtain?model=${encodeURIComponent(ac.selection.model.model)}&width=${ac.doorWidthMm}&height=${ac.doorHeightM}&floorVelocity=${ac.minFloorVelocity}&download=1`,
+            `/air-curtain?model=${encodeURIComponent(ac.selection.model.model)}&width=${ac.doorWidthMm}&height=${ac.doorHeightM}&floorVelocity=${ac.minFloorVelocity}`,
           );
         }
       } catch {
