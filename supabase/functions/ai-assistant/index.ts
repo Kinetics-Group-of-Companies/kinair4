@@ -15,7 +15,7 @@ import { createClient } from "npm:@supabase/supabase-js@2";
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
-  "Access-Control-Expose-Headers": "X-KINAIR-AI-Provider, X-KINAIR-AI-Model",
+  "Access-Control-Expose-Headers": "X-KINAIR-AI-Provider, X-KINAIR-AI-Model, X-KINAIR-AI-Routing-Ms",
 };
 
 const ANTHROPIC_CHEAP_MODEL = "claude-haiku-4-5-20251001";
@@ -25,6 +25,58 @@ const OPENAI_CHEAP_MODEL = "gpt-5.6-luna";
 const OPENAI_BALANCED_MODEL = "gpt-5.6-terra";
 const OPENAI_PREMIUM_MODEL = "gpt-5.6-sol";
 const GEMINI_MODEL = "gemini-3.6-flash";
+
+const PROVIDER_PROBE_TIMEOUT_MS = 800;
+const PROVIDER_HEALTHY_TTL_MS = 5 * 60 * 1000;
+const PROVIDER_UNHEALTHY_TTL_MS = 15 * 1000;
+
+type ProviderHealthEntry = { available: boolean; expiresAt: number };
+const providerHealthCache = new Map<string, ProviderHealthEntry>();
+const providerProbeInFlight = new Map<string, Promise<boolean>>();
+
+async function probeProvider(cacheKey: string, request: () => Promise<Response>): Promise<boolean> {
+  const now = Date.now();
+  const cached = providerHealthCache.get(cacheKey);
+  if (cached && cached.expiresAt > now) return cached.available;
+
+  const inFlight = providerProbeInFlight.get(cacheKey);
+  if (inFlight) return inFlight;
+
+  const probe = (async () => {
+    const startedAt = Date.now();
+    try {
+      const response = await request();
+      const available = response.ok;
+      providerHealthCache.set(cacheKey, {
+        available,
+        expiresAt: Date.now() + (available ? PROVIDER_HEALTHY_TTL_MS : PROVIDER_UNHEALTHY_TTL_MS),
+      });
+      console.info("AI provider probe completed", {
+        provider: cacheKey.split(":")[0],
+        available,
+        status: response.status,
+        duration_ms: Date.now() - startedAt,
+      });
+      return available;
+    } catch (error) {
+      providerHealthCache.set(cacheKey, {
+        available: false,
+        expiresAt: Date.now() + PROVIDER_UNHEALTHY_TTL_MS,
+      });
+      console.warn("AI provider probe failed", {
+        provider: cacheKey.split(":")[0],
+        duration_ms: Date.now() - startedAt,
+        error: String(error),
+      });
+      return false;
+    } finally {
+      providerProbeInFlight.delete(cacheKey);
+    }
+  })();
+
+  providerProbeInFlight.set(cacheKey, probe);
+  return probe;
+}
 
 type Row = Record<string, any>;
 
@@ -83,10 +135,35 @@ Deno.serve(async (req) => {
       { global: { headers: { Authorization: authHeader } } },
     );
 
-    // The frontend only shows the assistant to signed-in users, but that's a UI
-    // gate, not access control — verify the session here too, since every tool
-    // call below uses the caller's own AI credits and quota.
-    const { data: userData, error: userError } = await supabase.auth.getUser();
+    // Run independent first-message startup work together. This removes the
+    // auth -> body parse -> model registry waterfall that made cold chats slow.
+    const [authResult, registryResult, requestBody] = await Promise.all([
+      supabase.auth.getUser(),
+      supabase
+        .from("ai_models")
+        .select("provider,model_id,tier,cost_rank")
+        .eq("enabled", true)
+        .eq("supports_tools", true)
+        .order("model_id", { ascending: false }),
+      req.json() as Promise<{
+        messages: UIMessage[];
+        aiMode?:
+          | "auto"
+          | "standard"
+          | "advanced"
+          | "gemini"
+          | "openai"
+          | "openai_luna"
+          | "openai_terra"
+          | "openai_sol"
+          | "anthropic"
+          | "anthropic_haiku"
+          | "anthropic_sonnet"
+          | "anthropic_opus";
+      }>,
+    ]);
+
+    const { data: userData, error: userError } = authResult;
     if (userError || !userData?.user) {
       return new Response(JSON.stringify({ error: "Authentication required." }), {
         status: 401,
@@ -94,22 +171,8 @@ Deno.serve(async (req) => {
       });
     }
 
-    const { messages, aiMode = "standard" }: {
-      messages: UIMessage[];
-      aiMode?:
-        | "auto"
-        | "standard"
-        | "advanced"
-        | "gemini"
-        | "openai"
-        | "openai_luna"
-        | "openai_terra"
-        | "openai_sol"
-        | "anthropic"
-        | "anthropic_haiku"
-        | "anthropic_sonnet"
-        | "anthropic_opus";
-    } = await req.json();
+    const { data: registeredModels } = registryResult;
+    const { messages, aiMode = "standard" } = requestBody;
 
     const listSeries = tool({
       description:
@@ -769,12 +832,7 @@ Deno.serve(async (req) => {
 
     // Resolve the newest enabled model in each price tier from the dynamic
     // registry. Static constants remain as safe fallbacks if discovery is down.
-    const { data: registeredModels } = await supabase
-      .from("ai_models")
-      .select("provider,model_id,tier,cost_rank")
-      .eq("enabled", true)
-      .eq("supports_tools", true)
-      .order("model_id", { ascending: false });
+    // The enabled model registry was loaded in parallel with auth and request parsing.
     const registeredModel = (provider: string, tier: string, fallback: string) =>
       registeredModels?.find((item: Row) => item.provider === provider && item.tier === tier)?.model_id ??
       fallback;
@@ -786,54 +844,37 @@ Deno.serve(async (req) => {
     const anthropicBalancedRuntimeModel = registeredModel("anthropic", "balanced", ANTHROPIC_BALANCED_MODEL);
     const anthropicPremiumRuntimeModel = registeredModel("anthropic", "premium", ANTHROPIC_PREMIUM_MODEL);
 
-    // Provider availability checks happen before streaming so failover can
-    // switch cleanly without losing tool-call state.
-    let geminiAvailable = Boolean(geminiApiKey);
-    if ((routedMode === "standard" || routedMode === "gemini") && geminiApiKey) {
-      try {
-        const health = await fetch(
-          `https://generativelanguage.googleapis.com/v1beta/models/${geminiRuntimeModel}?key=${encodeURIComponent(geminiApiKey)}`,
-          { signal: AbortSignal.timeout(4000) },
-        );
-        if (!health.ok) {
-          geminiAvailable = false;
-          console.warn("Gemini preflight failed; switching to OpenAI", {
-            status: health.status,
-          });
-        }
-      } catch (error) {
-        geminiAvailable = false;
-        console.warn("Gemini connection failed; switching to OpenAI", {
-          error: String(error),
-        });
-      }
-    }
-
-    const shouldTryOpenAI =
-      routedMode === "openai" ||
-      routedMode === "advanced" ||
-      routedMode.startsWith("openai_") ||
-      (routedMode === "standard" && !geminiAvailable);
-    let openaiAvailable = Boolean(openaiApiKey);
-    if (shouldTryOpenAI && openaiApiKey) {
-      try {
-        const health = await fetch("https://api.openai.com/v1/models", {
-          headers: { Authorization: `Bearer ${openaiApiKey}` },
-          signal: AbortSignal.timeout(4000),
-        });
-        if (!health.ok) {
-          openaiAvailable = false;
-          console.warn("OpenAI preflight failed; switching to Anthropic", {
-            status: health.status,
-          });
-        }
-      } catch (error) {
-        openaiAvailable = false;
-        console.warn("OpenAI connection failed; switching to Anthropic", {
-          error: String(error),
-        });
-      }
-    }
+    // Probe all configured providers concurrently. A failed provider can no
+    // longer hold the request for 4 seconds before the next 4-second probe.
+    // Warm isolates reuse successful results for five minutes.
+    const providerProbeStartedAt = Date.now();
+    const [geminiAvailable, openaiAvailable, anthropicAvailable] = await Promise.all([
+      geminiApiKey
+        ? probeProvider(`gemini:${geminiRuntimeModel}`, () =>
+            fetch(
+              `https://generativelanguage.googleapis.com/v1beta/models/${geminiRuntimeModel}?key=${encodeURIComponent(geminiApiKey)}`,
+              { signal: AbortSignal.timeout(PROVIDER_PROBE_TIMEOUT_MS) },
+            ))
+        : Promise.resolve(false),
+      openaiApiKey
+        ? probeProvider(`openai:${openaiCheapRuntimeModel}`, () =>
+            fetch(`https://api.openai.com/v1/models/${encodeURIComponent(openaiCheapRuntimeModel)}`, {
+              headers: { Authorization: `Bearer ${openaiApiKey}` },
+              signal: AbortSignal.timeout(PROVIDER_PROBE_TIMEOUT_MS),
+            }))
+        : Promise.resolve(false),
+      anthropicApiKey
+        ? probeProvider(`anthropic:${anthropicCheapRuntimeModel}`, () =>
+            fetch(`https://api.anthropic.com/v1/models/${encodeURIComponent(anthropicCheapRuntimeModel)}`, {
+              headers: {
+                "x-api-key": anthropicApiKey,
+                "anthropic-version": "2023-06-01",
+              },
+              signal: AbortSignal.timeout(PROVIDER_PROBE_TIMEOUT_MS),
+            }))
+        : Promise.resolve(false),
+    ]);
+    const routingProbeMs = Date.now() - providerProbeStartedAt;
 
     let providerName: "Google Gemini" | "OpenAI" | "Anthropic";
     let modelName: string;
@@ -857,7 +898,7 @@ Deno.serve(async (req) => {
       providerName = "OpenAI";
       modelName = openaiModelByMode[routedMode];
       model = createOpenAI({ apiKey: openaiApiKey })(modelName);
-    } else if (anthropicModelByMode[routedMode] && anthropicApiKey) {
+    } else if (anthropicModelByMode[routedMode] && anthropicAvailable && anthropicApiKey) {
       providerName = "Anthropic";
       modelName = anthropicModelByMode[routedMode];
       model = createAnthropic({ apiKey: anthropicApiKey })(modelName);
@@ -869,11 +910,11 @@ Deno.serve(async (req) => {
       providerName = "OpenAI";
       modelName = openaiCheapRuntimeModel;
       model = createOpenAI({ apiKey: openaiApiKey })(modelName);
-    } else if (anthropicApiKey) {
+    } else if (anthropicAvailable && anthropicApiKey) {
       providerName = "Anthropic";
       modelName = anthropicCheapRuntimeModel;
       model = createAnthropic({ apiKey: anthropicApiKey })(modelName);
-    } else if (geminiApiKey) {
+    } else if (geminiAvailable && geminiApiKey) {
       providerName = "Google Gemini";
       modelName = geminiRuntimeModel;
       model = createGoogleGenerativeAI({ apiKey: geminiApiKey })(modelName);
@@ -984,6 +1025,7 @@ Deno.serve(async (req) => {
         ...corsHeaders,
         "X-KINAIR-AI-Provider": providerName,
         "X-KINAIR-AI-Model": modelName,
+        "X-KINAIR-AI-Routing-Ms": String(routingProbeMs),
       },
       // The AI SDK's default onError swallows mid-stream errors as "An error
       // occurred." to avoid leaking internals; surface the real reason (e.g.
