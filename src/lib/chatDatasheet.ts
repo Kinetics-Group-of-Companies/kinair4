@@ -84,7 +84,7 @@ export async function generateDatasheetForSelection(
   const airDensity = calculateAirDensity(0, 20);
   const operating = selection.operatingPoint;
   const outletVelocity = outletVelocityOf(operating.airflow, selection.diameter);
-  const dynamicPressure = 0.5 * 1.2 * Math.pow(outletVelocity, 2);
+  const dynamicPressure = 0.5 * airDensity * Math.pow(outletVelocity, 2);
   const totalPressure = operating.staticPressure + dynamicPressure;
   const fanRPM = motorSpec?.rpm || calculateRPM(selection.motorPole, frequency);
 
