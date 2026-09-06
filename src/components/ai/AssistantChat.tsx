@@ -663,11 +663,36 @@ export function AssistantChat({
         if (!doorHeightM) return;
         acHandledRef.current.add(key);
 
+        // Mounting type is a hard product constraint. Recover it from the
+        // user's own wording so an incorrect AI tool argument can never turn a
+        // ceiling/recessed request into a wall-mounted selection.
+        const messageIndex = messages.findIndex((message) => message.id === m.id);
+        const priorUser = messages
+          .slice(0, messageIndex)
+          .reverse()
+          .find((message) => message.role === 'user');
+        const userText = (priorUser?.parts as any[] | undefined)
+          ?.filter((part) => part?.type === 'text')
+          .map((part) => String(part.text ?? ''))
+          .join(' ')
+          .toLowerCase() ?? '';
+        const effectiveMounting: AirCurtainCategory | 'any' =
+          /\b(ceiling|recess(?:ed)?|concealed|flush[ -]?mount(?:ed)?)\b/i.test(userText)
+            ? 'recessed'
+            : /\b(wall[ -]?mount(?:ed)?|surface[ -]?mount(?:ed)?|exposed)\b/i.test(userText)
+              ? 'surface'
+              : duty.mounting ?? 'any';
+
         const wanted = (duty.series_name || '').trim().toLowerCase();
-        const series = wanted
+        const seriesMatch = wanted
           ? acSeries.find((s) => s.name.toLowerCase() === wanted) ||
             acSeries.find((s) => s.name.toLowerCase().includes(wanted))
           : undefined;
+        const series =
+          seriesMatch &&
+          (effectiveMounting === 'any' || seriesMatch.category === effectiveMounting)
+            ? seriesMatch
+            : undefined;
         const brandName = (duty.brand || '').trim();
         const brandMatch = brandName
           ? acBrands.find((b) => b.name.toLowerCase() === brandName.toLowerCase())?.name
@@ -680,7 +705,7 @@ export function AssistantChat({
         const results = selectAirCurtains(acModels, {
           doorWidthMm,
           doorHeightM,
-          category: duty.mounting ?? 'any',
+          category: effectiveMounting,
           speed: duty.speed ?? 'high',
           minNozzleVelocity: 0,
           minAirflowCmh,
