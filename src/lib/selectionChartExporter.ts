@@ -27,7 +27,7 @@ export async function captureSelectionCharts(
 
   const host = document.createElement('div');
   host.style.cssText =
-    'position:fixed;left:-10000px;top:0;width:820px;height:900px;visibility:hidden;pointer-events:none;';
+    'position:fixed;left:-10000px;top:0;width:820px;height:900px;opacity:0;pointer-events:none;';
   document.body.appendChild(host);
 
   const refs = [createRef<HTMLDivElement>(), createRef<HTMLDivElement>(), createRef<HTMLDivElement>()];
@@ -67,7 +67,7 @@ export async function captureSelectionCharts(
     );
 
     await new Promise<void>((resolve) =>
-      requestAnimationFrame(() => requestAnimationFrame(() => setTimeout(resolve, 80))),
+      requestAnimationFrame(() => requestAnimationFrame(() => setTimeout(resolve, 150))),
     );
 
     const [chartImage, powerChartImage, efficiencyChartImage] = await Promise.all(
