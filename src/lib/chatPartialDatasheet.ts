@@ -3,6 +3,8 @@ import autoTable from 'jspdf-autotable';
 import type { FanDatabase, FanSelection } from './fanData';
 import type { AirCurtainSelection } from './airCurtainData';
 import { rewriteStorageUrls } from './offline/fileCache';
+import { generateDrawingOnlyPDF, generateSoundDataOnlyPDF } from './pdfDatasheetGenerator';
+import { supabase } from '@/integrations/backend/client';
 
 /**
  * Add-on layer: light single-purpose PDFs (drawing only / noise data only)
@@ -77,40 +79,33 @@ export async function downloadFanDrawing(
   dimensionsMap?: Map<string, any>,
 ): Promise<void> {
   const series: any = (database.series || []).find(
-    (s: any) => s.id === selection.seriesId || s.name === selection.series,
+    (item: any) => item.id === selection.seriesId || item.name === selection.series,
   );
-  const img = await loadImage(series?.drawingUrl);
-  const doc = new jsPDF('p', 'mm', 'a4');
-  header(doc, `${selection.nomenclature} — Dimensional Drawing`, `${series?.name ?? selection.series} · Ø${selection.diameter} mm`);
-
-  let y = 28;
-  if (img) {
-    y = placeImage(doc, img, y) + 6;
-  } else {
-    doc.setFontSize(10);
-    doc.text('No dimensional drawing is uploaded for this series.', 10, y);
-    y += 8;
+  let flexibleDimensionSchema: any[] | undefined;
+  let flexibleDimensionValue: any | undefined;
+  if (selection.seriesId) {
+    const [{ data: schema }, { data: value }] = await Promise.all([
+      supabase.from('series_dimension_schema')
+        .select('param_key,param_label,param_type,display_order')
+        .eq('series_id', selection.seriesId)
+        .order('display_order'),
+      supabase.from('series_dimension_values')
+        .select('size,values')
+        .eq('series_id', selection.seriesId)
+        .eq('size', selection.diameter)
+        .maybeSingle(),
+    ]);
+    flexibleDimensionSchema = schema ?? undefined;
+    flexibleDimensionValue = value ?? undefined;
   }
-
-  const dim = dimensionsMap?.get(`${selection.seriesId}-${selection.diameter}`);
-  if (dim) {
-    const rows = DIM_LABELS.map(([k, label]) => [label, dim[k] ? String(dim[k]) : '—']).filter(
-      (r) => r[1] !== '—',
-    );
-    if (rows.length) {
-      autoTable(doc, {
-        startY: y,
-        head: [['Dimension', 'Value (mm)']],
-        body: rows,
-        theme: 'grid',
-        styles: { fontSize: 9 },
-        headStyles: { fillColor: [37, 99, 235] },
-        margin: { left: 10, right: 10 },
-      });
-    }
-  }
-
-  doc.save(`${selection.nomenclature}-drawing.pdf`);
+  await generateDrawingOnlyPDF({
+    selection,
+    database,
+    seriesDrawingUrl: series?.drawingUrl,
+    flexibleDimensionSchema,
+    flexibleDimensionValue,
+    fanDimensions: dimensionsMap?.get(`${selection.seriesId}-${selection.diameter}`),
+  });
 }
 
 const BANDS: [string, string][] = [
@@ -124,45 +119,19 @@ const BANDS: [string, string][] = [
   ['hz8k', '8 kHz'],
 ];
 
-export async function downloadFanNoiseData(selection: FanSelection): Promise<void> {
-  const noise: any = selection.noiseData || {};
-  const doc = new jsPDF('p', 'mm', 'a4');
-  header(
-    doc,
-    `${selection.nomenclature} — Sound Data`,
-    `${Math.round(selection.operatingPoint.airflow).toLocaleString()} m³/h @ ${Math.round(
-      selection.operatingPoint.staticPressure,
-    )} Pa`,
+export async function downloadFanNoiseData(
+  selection: FanSelection,
+  database?: FanDatabase,
+): Promise<void> {
+  if (!database) throw new Error('Fan database is unavailable');
+  const series: any = (database.series || []).find(
+    (item: any) => item.id === selection.seriesId || item.name === selection.series,
   );
-
-  const body = BANDS.map(([k, label]) => [label, noise[k] != null ? `${Math.round(noise[k])}` : '—']);
-  autoTable(doc, {
-    startY: 28,
-    head: [['Octave band', 'Sound power Lw (dB)']],
-    body,
-    theme: 'grid',
-    styles: { fontSize: 10 },
-    headStyles: { fillColor: [37, 99, 235] },
-    margin: { left: 10, right: 10 },
+  await generateSoundDataOnlyPDF({
+    selection,
+    database,
+    noiseDistance: series?.defaultNoiseDistance ?? 0,
   });
-
-  const endY = (doc as any).lastAutoTable?.finalY ?? 100;
-  doc.setFontSize(11);
-  doc.setFont('helvetica', 'bold');
-  doc.text(
-    `Overall sound power: ${noise.overall ? `${Math.round(noise.overall)} dB(A)` : 'not available'}`,
-    10,
-    endY + 10,
-  );
-  doc.setFont('helvetica', 'normal');
-  doc.setFontSize(8);
-  doc.text(
-    'Sound power levels at the fan. Sound pressure at a distance depends on directivity and room absorption.',
-    10,
-    endY + 17,
-  );
-
-  doc.save(`${selection.nomenclature}-sound-data.pdf`);
 }
 
 export async function downloadAirCurtainDrawing(selection: AirCurtainSelection): Promise<void> {
