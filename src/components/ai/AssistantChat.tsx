@@ -110,6 +110,19 @@ export const AIR_CURTAIN_SUGGESTIONS = [
 
 export type AssistantContext = 'general' | 'fan' | 'air_curtain';
 
+type AiMode =
+  | 'auto'
+  | 'standard'
+  | 'gemini'
+  | 'openai'
+  | 'openai_luna'
+  | 'openai_terra'
+  | 'openai_sol'
+  | 'anthropic'
+  | 'anthropic_haiku'
+  | 'anthropic_sonnet'
+  | 'anthropic_opus';
+
 
 /**
  * AI SDK tool parts arrive incrementally. Never run a selector from an
@@ -310,7 +323,7 @@ export function AssistantChat({
   const navigate = useNavigate();
   const [input, setInput] = useState('');
   const scrollRef = useRef<HTMLDivElement>(null);
-  const [aiMode, setAiMode] = useState<'auto' | 'standard' | 'openai' | 'anthropic'>('auto');
+  const [aiMode, setAiMode] = useState<AiMode>('auto');
 
   const [activeProvider, setActiveProvider] = useState('Automatic routing');
 
@@ -330,9 +343,9 @@ export function AssistantChat({
             'openai_sol',
             'anthropic_opus',
           ] as const;
-          const fallbackModes =
+          const fallbackModes: readonly string[] =
             aiMode === 'openai'
-              ? ([
+              ? [
                   'openai_luna',
                   'openai_terra',
                   'openai_sol',
@@ -340,9 +353,9 @@ export function AssistantChat({
                   'anthropic_sonnet',
                   'anthropic_opus',
                   'gemini',
-                ] as const)
+                ]
               : aiMode === 'anthropic'
-                ? ([
+                ? [
                     'anthropic_haiku',
                     'anthropic_sonnet',
                     'anthropic_opus',
@@ -350,8 +363,10 @@ export function AssistantChat({
                     'openai_terra',
                     'openai_sol',
                     'gemini',
-                  ] as const)
-                : economyLadder;
+                  ]
+                : aiMode === 'auto' || aiMode === 'standard'
+                  ? economyLadder
+                  : [aiMode, ...economyLadder.filter((mode) => mode !== aiMode)];
           const expectedProvider: Record<string, string> = {
             gemini: 'Google Gemini',
             openai_luna: 'OpenAI',
@@ -1112,15 +1127,27 @@ export function AssistantChat({
             </div>
             <select
               value={aiMode}
-              onChange={(e) => setAiMode(e.target.value as 'auto' | 'standard' | 'openai' | 'anthropic')}
+              onChange={(e) => setAiMode(e.target.value as AiMode)}
               disabled={busy}
-              aria-label="Choose AI provider"
-              className="h-8 rounded-md border border-border bg-background px-2 text-xs font-medium text-foreground"
+              aria-label="Choose AI provider and model"
+              className="h-8 max-w-[58vw] rounded-md border border-border bg-background px-2 text-xs font-medium text-foreground sm:max-w-none"
             >
-              <option value="auto">Auto · Based on request</option>
-              <option value="standard">Gemini 3.6 Flash · Free/Standard</option>
-              <option value="openai">OpenAI GPT-5.6 · Advanced</option>
-              <option value="anthropic">Claude Opus · Advanced</option>
+              <option value="auto">Automatic · Free → Premium</option>
+              <optgroup label="Free">
+                <option value="gemini">Gemini 3.6 Flash · Free</option>
+              </optgroup>
+              <optgroup label="Cheapest">
+                <option value="openai_luna">OpenAI GPT-5.6 Luna</option>
+                <option value="anthropic_haiku">Claude Haiku 4.5</option>
+              </optgroup>
+              <optgroup label="Balanced">
+                <option value="openai_terra">OpenAI GPT-5.6 Terra</option>
+                <option value="anthropic_sonnet">Claude Sonnet 5</option>
+              </optgroup>
+              <optgroup label="Advanced">
+                <option value="openai_sol">OpenAI GPT-5.6 Sol</option>
+                <option value="anthropic_opus">Claude Opus 5</option>
+              </optgroup>
             </select>
           </div>
           <div ref={scrollRef} className="flex-1 overflow-y-auto p-4 space-y-4">
