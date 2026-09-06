@@ -7,6 +7,7 @@ import { convertToModelMessages, streamText, tool, stepCountIs, type UIMessage }
 // model version v4 ... AI SDK 5 only supports models that implement
 // specification version 'v2'".
 import { createAnthropic } from "npm:@ai-sdk/anthropic@2.0.101";
+import { createOpenAI } from "npm:@ai-sdk/openai@2.0.101";
 import { z } from "npm:zod@3";
 import { createClient } from "npm:@supabase/supabase-js@2";
 
@@ -15,7 +16,8 @@ const corsHeaders = {
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
 };
 
-const MODEL = "claude-opus-5";
+const ANTHROPIC_MODEL = "claude-opus-5";
+const OPENAI_MODEL = "gpt-5.6-sol";
 
 type Row = Record<string, any>;
 
@@ -45,18 +47,25 @@ Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
 
   try {
-    const apiKey = Deno.env.get("ANTHROPIC_API_KEY");
-    if (!apiKey) {
-      return new Response(JSON.stringify({ error: "ANTHROPIC_API_KEY is not set on this function." }), {
+    const anthropicApiKey = Deno.env.get("ANTHROPIC_API_KEY");
+    const openaiApiKey = Deno.env.get("OPENAI_API_KEY");
+    if (!openaiApiKey && !anthropicApiKey) {
+      return new Response(JSON.stringify({ error: "No AI provider key is configured." }), {
         status: 500,
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
-    if (!apiKey.startsWith("sk-ant-")) {
-      return new Response(
-        JSON.stringify({ error: "ANTHROPIC_API_KEY does not look like a valid Anthropic key (should start with sk-ant-)." }),
-        { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } },
-      );
+    if (openaiApiKey && !openaiApiKey.startsWith("sk-")) {
+      return new Response(JSON.stringify({ error: "OPENAI_API_KEY is invalid." }), {
+        status: 500,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+    if (!openaiApiKey && anthropicApiKey && !anthropicApiKey.startsWith("sk-ant-")) {
+      return new Response(JSON.stringify({ error: "ANTHROPIC_API_KEY is invalid." }), {
+        status: 500,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
     }
 
     const authHeader = req.headers.get("Authorization") ?? "";
@@ -112,7 +121,7 @@ Deno.serve(async (req) => {
       execute: async (input) => {
         const limit = Math.min(Math.max(input.limit ?? 6, 1), 12);
 
-        let seriesQuery = supabase.from("fan_series").select("id,name,fan_type,description");
+        let seriesQuery = supabase.from("fan_series").select("id,name,fan_type,description,nomenclature_template");
         if (input.fan_type) seriesQuery = seriesQuery.ilike("fan_type", `%${input.fan_type}%`);
         if (input.series_name) seriesQuery = seriesQuery.ilike("name", `%${input.series_name}%`);
         const { data: series, error: seriesError } = await seriesQuery.limit(100);
@@ -248,7 +257,12 @@ Deno.serve(async (req) => {
             return {
               series: s.name,
               fan_type: s.fan_type,
-              model: model.model_name ?? model.product_code,
+              model:
+                model.model_name ||
+                model.product_code ||
+                String(s.nomenclature_template || "{series}-{size}")
+                  .replaceAll("{series}", String(s.name || "KINAIR"))
+                  .replaceAll("{size}", String(model.diameter || "")),
               diameter_mm: model.diameter,
               motor_poles: c.poles,
               blade_angle_deg: c.blade_angle,
@@ -280,10 +294,10 @@ Deno.serve(async (req) => {
         pressure_unit: z.enum(["Pa", "inwg", "mmwg"]).describe("Unit of the pressure value"),
         series_name: z.string().nullable().describe("Series the user asked for, e.g. 'KVF-P'. Null if not specified."),
         fan_type: z
-          .enum(["inline_ducted", "wall_mounted"])
+          .enum(["inline_ducted", "wall_mounted", "axial"])
           .nullable()
           .describe(
-            "How the fan is installed. IMPORTANT: KVF-P and KVF-M are INLINE DUCTED series, KIN-E is the WALL MOUNTED series. For a wall mounted / wall extract request always pass 'wall_mounted' — a KVF model must never be offered for wall mounting. Null only if the user gave no hint.",
+            "Product installation: KVF-P/KVF-M = inline_ducted, KIN-E = wall_mounted, KTAF = axial. Pass axial for tube axial/axial-flow/KTAF requests. Never substitute across these families. Null only if the user gave no hint.",
           ),
         material: z
           .string()
@@ -373,7 +387,7 @@ Deno.serve(async (req) => {
               pressure_unit: z.enum(["Pa", "inwg", "mmwg"]).describe("Unit of the pressure"),
               series_name: z.string().nullable(),
               fan_type: z
-                .enum(["inline_ducted", "wall_mounted"])
+                .enum(["inline_ducted", "wall_mounted", "axial"])
                 .nullable()
                 .describe("Fan installation type for the row: KVF-P/KVF-M are inline ducted, KIN-E is wall mounted. Never put a KVF series on a wall mounted row."),
               material: z.string().nullable().describe("Casing material for the row, e.g. 'plastic' or 'metal', else null"),
@@ -688,10 +702,14 @@ Deno.serve(async (req) => {
       },
     });
 
-    const anthropic = createAnthropic({ apiKey });
+    // OpenAI is preferred when configured; Anthropic remains an automatic
+    // configuration fallback so either provider can keep the assistant online.
+    const model = openaiApiKey
+      ? createOpenAI({ apiKey: openaiApiKey })(OPENAI_MODEL)
+      : createAnthropic({ apiKey: anthropicApiKey! })(ANTHROPIC_MODEL);
 
     const result = streamText({
-      model: anthropic(MODEL),
+      model,
       system: [
         "You are KINAIR, KINAIR's AI selection engineer. You talk to consultants and contractors the way a friendly, experienced colleague does on the phone.",
         "",
@@ -739,7 +757,7 @@ Deno.serve(async (req) => {
         "",
         "Material is a hard filter: if the user says plastic, every model you name or offer as an alternative must be from a plastic-cased series; same for metal. Pass it in the material field and never suggest a model of the other material.",
         "Plastic synonyms: 'plastic', 'PVC', 'PP', 'polypropylene', 'polymer' and 'ABS' all mean the same thing. For an inline ducted fan they always mean the KVF-P series — pass material='plastic' and prefer series_name='KVF-P'. KIN-E is also a plastic (PVC/PP) series: use it for plastic WALL MOUNTED requests. Never offer a metal (-M) model, main or alternative, on a plastic request.",
-        "Installation type is a hard rule: KVF-P and KVF-M are INLINE DUCTED series and KIN-E is the WALL MOUNTED series. A wall mounted / wall extract request always means fan_type='wall_mounted' and series KIN-E — never select or offer a KVF model for wall mounting. An inline ducted request never selects KIN-E. This applies to the main pick and every alternative, in single duties and schedule rows.",
+        "Installation type is a hard rule: KVF-P and KVF-M are INLINE DUCTED series, KIN-E is WALL MOUNTED, and KTAF is AXIAL. A wall mounted / wall extract request always means fan_type='wall_mounted' and series KIN-E — never select or offer a KVF model for wall mounting. An inline ducted request never selects KIN-E or KTAF. An axial / tube axial request always uses KTAF and passes fan_type=\'axial\'. This applies to the main pick and every alternative, in single duties and schedule rows.",
         "Nothing available = say so immediately: if the requested series or type has no model that meets the duty, do NOT silently switch to another series. Say plainly in the reply that no model is available in that series for the duty, and only then suggest the closest alternative (e.g. another series) clearly labelled as an alternative.",
         "Low noise requests: when the user asks for a quiet / low noise / silent fan, always select from KVF-P for inline ducted fans and from KIN-E for wall mounted fans — pass series_name='KVF-P' or series_name='KIN-E' accordingly together with optimize_for='low_noise'.",
         "Standard static pressure assumptions (KINAIR): inline ducted fan -> assume 75 Pa static; wall mounted fan -> assume 3 Pa static when airflow is 25 lps or less, and 10 Pa when airflow is above 25 lps. Apply these whenever the fan type is known but static pressure is not given; state the assumption in one line.",
