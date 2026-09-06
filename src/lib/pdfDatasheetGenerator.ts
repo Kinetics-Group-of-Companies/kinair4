@@ -389,15 +389,15 @@ function drawPerformanceCurve(
   }
   
   // X-axis: ALWAYS start from 0 to avoid gap between Y-axis and curve (match webpage)
-  // Add 15% padding to X-axis max so arrow isn't too close to curve end
+  // Axis limit follows the catalogue curve, with exactly 10% headroom.
   const xMin = 0;
   const rawXMax = options.sharedXMax || dataXMax;
-  const xMax = rawXMax * 1.15;
+  const xMax = rawXMax * 1.10;
   
-  // Y-axis: start from 0, add 15% padding so arrow isn't too close to curve peak
-  // Use sharedYMax if provided, otherwise use calculated max
+  // Y-axis follows the maximum catalogue pressure with exactly 10% headroom.
+  // Include a comparison/base curve maximum when one is displayed.
   const yMin = 0;
-  const yMax = (options.sharedYMax || dataYMax) * 1.15;
+  const yMax = (options.sharedYMax || dataYMax) * 1.10;
 
   // Helper: Calculate nice tick values like Recharts
   const calculateNiceTicks = (min: number, max: number, targetCount: number): number[] => {
