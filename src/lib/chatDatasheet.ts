@@ -10,6 +10,7 @@ import {
 import { generateEnhancedDatasheet } from './pdfDatasheetGenerator';
 import { supabase } from '@/integrations/backend/client';
 import type jsPDF from 'jspdf';
+import { captureSelectionCharts } from './selectionChartExporter';
 
 /**
  * Generate and download the standard KINAIR datasheet PDF for a selection
@@ -127,9 +128,19 @@ export async function generateDatasheetForSelection(
     }
   }
 
+  // Capture the exact same Recharts output used by the manual selector.
+  const chartImages = await captureSelectionCharts(
+    selection,
+    performanceData,
+    units?.airflowUnit || 'CMH',
+    units?.pressureUnit || 'Pa',
+    airDensity,
+  );
+
   return generateEnhancedDatasheet({
     selection,
     database,
+    ...chartImages,
     airflowUnit: (units?.airflowUnit || 'CMH') as any,
     pressureUnit: (units?.pressureUnit || 'Pa') as any,
     performanceData,
