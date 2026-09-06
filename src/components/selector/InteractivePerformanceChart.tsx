@@ -407,6 +407,29 @@ export function InteractivePerformanceChart({
       
       result.push(point);
     });
+
+    // Recharts interpolates between catalogue airflow samples. If the operating
+    // airflow lies between two samples, the rendered system curve can visually
+    // miss the marker even though k was calculated from that point. Insert the
+    // exact anchor so the blue curve always passes through the dot centre.
+    if (showSystemCurve && systemCurveK !== null && activeDutyPoint) {
+      const anchorIndex = result.findIndex(point =>
+        Math.abs(point.airflow - activeDutyPoint.airflow) < 0.000001
+      );
+
+      if (anchorIndex >= 0) {
+        result[anchorIndex].systemPressure = activeDutyPoint.pressure;
+      } else {
+        result.push({
+          airflow: activeDutyPoint.airflow,
+          staticPressure: null,
+          shaftPower: null,
+          efficiency: null,
+          systemPressure: activeDutyPoint.pressure,
+        });
+        result.sort((a, b) => a.airflow - b.airflow);
+      }
+    }
     
     console.log('Combined Chart Data:', {
       points: result.length,
@@ -416,7 +439,7 @@ export function InteractivePerformanceChart({
     });
     
     return result;
-  }, [chartData, systemCurveK, chartType, showSystemCurve, optimalAxisBounds]);
+  }, [chartData, systemCurveK, chartType, showSystemCurve, optimalAxisBounds, activeDutyPoint]);
 
   // Calculate stall zone boundary using ORIGINAL performance data (not trimmed chartData)
   // The stall zone is typically at LOW airflow (left side of curve) where:
