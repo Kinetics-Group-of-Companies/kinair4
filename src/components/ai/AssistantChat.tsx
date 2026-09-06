@@ -72,6 +72,7 @@ function fanSelectorDefaults(db: any, series?: any) {
 /** Exact defaults used by AirCurtainSelectorPage. */
 const AC_MIN_MATCH_PERCENT = 95;
 const AC_MAX_MATCH_PERCENT = 110;
+const BACKGROUND_SCHEDULE_MARKER = '<<<KINAIR_BACKGROUND_SCHEDULE_DATA>>>';
 import {
   spreadsheetToText,
   isSpreadsheet,
@@ -421,7 +422,12 @@ export function AssistantChat({
       const intro =
         value ||
         'Here is a schedule. Please select a model for every line and give me the datasheets.';
-      const body = [intro, ...sheetTexts].join('\n\n');
+      const attachmentLabel = `📎 Attached: ${files.map((file) => file.name).join(', ')}`;
+      // Keep extracted table text in the model message, but mark it as
+      // background data so the chat UI does not expose the full schedule.
+      const body = sheetTexts.length
+        ? [intro, attachmentLabel, BACKGROUND_SCHEDULE_MARKER, ...sheetTexts].join('\n\n')
+        : [intro, attachmentLabel].join('\n');
       sendMessage({ role: 'user', parts: [{ type: 'text', text: body }, ...parts] } as any);
     } catch {
       toast.error('Could not read that file. Please try a PDF, image or Excel file.');
@@ -1062,10 +1068,15 @@ export function AssistantChat({
 
             {messages.map((m) => {
               const isUser = m.role === 'user';
-              const text = m.parts
+              const rawText = m.parts
                 .filter((p) => p.type === 'text')
                 .map((p) => (p as { text: string }).text)
                 .join('');
+              // The model receives extracted schedule rows after this marker;
+              // users see only their request and the attachment label.
+              const text = isUser
+                ? rawText.split(BACKGROUND_SCHEDULE_MARKER, 1)[0].trim()
+                : rawText;
               const tools = m.parts.filter((p) => p.type.startsWith('tool-'));
               const recs: { model: string; airflow: number; pressure: number }[] = [];
               const airCurtainRecs: string[] = [];
