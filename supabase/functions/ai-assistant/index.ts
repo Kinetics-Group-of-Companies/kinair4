@@ -8,16 +8,19 @@ import { convertToModelMessages, streamText, tool, stepCountIs, type UIMessage }
 // specification version 'v2'".
 import { createAnthropic } from "npm:@ai-sdk/anthropic@2.0.101";
 import { createOpenAI } from "npm:@ai-sdk/openai@2.0.101";
+import { createGoogleGenerativeAI } from "npm:@ai-sdk/google@2.0.0";
 import { z } from "npm:zod@3";
 import { createClient } from "npm:@supabase/supabase-js@2";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
+  "Access-Control-Expose-Headers": "X-KINAIR-AI-Provider, X-KINAIR-AI-Model",
 };
 
 const ANTHROPIC_MODEL = "claude-opus-5";
 const OPENAI_MODEL = "gpt-5.6-sol";
+const GEMINI_MODEL = "gemini-2.5-flash";
 
 type Row = Record<string, any>;
 
@@ -49,7 +52,8 @@ Deno.serve(async (req) => {
   try {
     const anthropicApiKey = Deno.env.get("ANTHROPIC_API_KEY");
     const openaiApiKey = Deno.env.get("OPENAI_API_KEY");
-    if (!openaiApiKey && !anthropicApiKey) {
+    const geminiApiKey = Deno.env.get("GEMINI_API_KEY");
+    if (!openaiApiKey && !geminiApiKey && !anthropicApiKey) {
       return new Response(JSON.stringify({ error: "No AI provider key is configured." }), {
         status: 500,
         headers: { ...corsHeaders, "Content-Type": "application/json" },
@@ -86,7 +90,10 @@ Deno.serve(async (req) => {
       });
     }
 
-    const { messages }: { messages: UIMessage[] } = await req.json();
+    const { messages, aiMode = "standard" }: {
+      messages: UIMessage[];
+      aiMode?: "standard" | "advanced";
+    } = await req.json();
 
     const listSeries = tool({
       description:
@@ -702,11 +709,29 @@ Deno.serve(async (req) => {
       },
     });
 
-    // OpenAI is preferred when configured; Anthropic remains an automatic
-    // configuration fallback so either provider can keep the assistant online.
-    const model = openaiApiKey
-      ? createOpenAI({ apiKey: openaiApiKey })(OPENAI_MODEL)
-      : createAnthropic({ apiKey: anthropicApiKey! })(ANTHROPIC_MODEL);
+    // Standard mode uses Gemini's economical/free-tier model. Advanced mode
+    // uses OpenAI credits. If the requested provider is not configured, keep
+    // the assistant available through the next configured provider.
+    let providerName: "Google Gemini" | "OpenAI" | "Anthropic";
+    let modelName: string;
+    let model;
+    if (aiMode === "advanced" && openaiApiKey) {
+      providerName = "OpenAI";
+      modelName = OPENAI_MODEL;
+      model = createOpenAI({ apiKey: openaiApiKey })(modelName);
+    } else if (geminiApiKey) {
+      providerName = "Google Gemini";
+      modelName = GEMINI_MODEL;
+      model = createGoogleGenerativeAI({ apiKey: geminiApiKey })(modelName);
+    } else if (openaiApiKey) {
+      providerName = "OpenAI";
+      modelName = OPENAI_MODEL;
+      model = createOpenAI({ apiKey: openaiApiKey })(modelName);
+    } else {
+      providerName = "Anthropic";
+      modelName = ANTHROPIC_MODEL;
+      model = createAnthropic({ apiKey: anthropicApiKey! })(modelName);
+    }
 
     const result = streamText({
       model,
@@ -784,7 +809,11 @@ Deno.serve(async (req) => {
     });
 
     return result.toUIMessageStreamResponse({
-      headers: corsHeaders,
+      headers: {
+        ...corsHeaders,
+        "X-KINAIR-AI-Provider": providerName,
+        "X-KINAIR-AI-Model": modelName,
+      },
       // The AI SDK's default onError swallows mid-stream errors as "An error
       // occurred." to avoid leaking internals; surface the real reason (e.g.
       // an invalid/expired ANTHROPIC_API_KEY or a quota error) instead, since
