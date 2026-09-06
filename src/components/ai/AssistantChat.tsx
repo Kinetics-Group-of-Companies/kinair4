@@ -55,9 +55,9 @@ import {
  * Selection defaults that mirror the Fan Selector / Air Curtain Selector forms,
  * so an AI selection always matches a manual one for the same duty.
  */
-function fanSelectorDefaults(db: any) {
+function fanSelectorDefaults(db: any, series?: any) {
   return {
-    safetyFactor: 1.15,
+    safetyFactor: series?.defaultSafetyFactor ?? 1.15,
     frequency: 50 as const,
     fireClass: '' as const,
     accessory: '' as const,
@@ -69,11 +69,9 @@ function fanSelectorDefaults(db: any) {
   };
 }
 
-/** Widest length-match window the Air Curtain Selector's sliders allow, so the
- * assistant can find whatever a person could by pushing both sliders to their
- * limits, instead of giving up at the selector's tighter default window. */
-const AC_MIN_MATCH_PERCENT = 50;
-const AC_MAX_MATCH_PERCENT = 200;
+/** Exact defaults used by AirCurtainSelectorPage. */
+const AC_MIN_MATCH_PERCENT = 95;
+const AC_MAX_MATCH_PERCENT = 110;
 import {
   spreadsheetToText,
   isSpreadsheet,
@@ -512,9 +510,9 @@ export function AssistantChat({
             seriesId: (series as any)?.id,
             motorPole: duty.motor_poles ?? undefined,
             dimensionsBySeriesAndSize: dimensionsMap,
-            ...fanSelectorDefaults(database),
+            ...fanSelectorDefaults(database, series),
           },
-          10,
+          50,
         );
 
 
@@ -821,7 +819,7 @@ export function AssistantChat({
               seriesId: (series as any)?.id,
               motorPole: item.motor_poles ?? undefined,
               dimensionsBySeriesAndSize: dimensionsMap,
-              ...fanSelectorDefaults(database),
+              ...fanSelectorDefaults(database, series),
             },
             10,
           );
