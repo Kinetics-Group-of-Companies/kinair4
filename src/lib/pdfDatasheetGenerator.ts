@@ -1970,8 +1970,9 @@ export async function generateEnhancedDatasheet(options: DatasheetOptions): Prom
           label: baseCurveData?.label || '50Hz',
           dutyPoint: baseOperatingPointPressure,
         } : undefined,
-        // CRITICAL: System curve must pass through base 50Hz duty point (system resistance is fixed)
-        systemCurveDutyPoint: { x: baseDisplayAirflow, y: baseDisplayPressure },
+        // Match the selector chart: anchor the system resistance curve to
+        // the plotted operating point so it intersects the fan curve and dot.
+        systemCurveDutyPoint: { x: displayAirflow, y: displayPressure },
         // Label for adjusted curve (when VFD/voltage is active)
         adjustedCurveLabel: isSpeedControlActive ? adjustedCurveLabel : undefined,
       });
