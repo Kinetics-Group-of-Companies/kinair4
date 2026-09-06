@@ -114,7 +114,7 @@ export type AssistantContext = 'general' | 'fan' | 'air_curtain';
 
 type DocOutput = 'full' | 'drawing' | 'noise';
 
-type FanInstallType = 'inline_ducted' | 'wall_mounted';
+type FanInstallType = 'inline_ducted' | 'wall_mounted' | 'axial';
 
 type DutyRequest = {
   airflow: number;
@@ -156,6 +156,9 @@ function resolveFanSeries(
   if (installType === 'wall_mounted') {
     return byName('kin-e') || list.find(isWallSeries);
   }
+  if (installType === 'axial') {
+    return byName('ktaf') || list.find((s) => /axial/i.test(text(s)));
+  }
 
   const wanted = (seriesName || '').trim().toLowerCase();
   if (wanted) {
@@ -163,8 +166,12 @@ function resolveFanSeries(
       list.find((s) => nameOf(s).toLowerCase() === wanted) ||
       list.find((s) => nameOf(s).toLowerCase().includes(wanted));
     // An inline ducted request must never come back with the wall mounted series.
-    if (match && installType === 'inline_ducted' && isWallSeries(match)) {
-      return byName('kvf-p') || list.find(isInlineSeries);
+    if (
+      match &&
+      installType === 'inline_ducted' &&
+      (isWallSeries(match) || /ktaf/i.test(nameOf(match)))
+    ) {
+      return byName('kvf-p') || byName('kvf-m') || list.find(isInlineSeries);
     }
     if (match) return match;
   }
@@ -458,7 +465,9 @@ export function AssistantChat({
         const series =
           install === 'wall_mounted'
             ? resolveFanSeries(database, null, null, 'wall_mounted')
-            : lowNoise
+            : install === 'axial'
+              ? resolveFanSeries(database, 'KTAF', null, 'axial')
+              : lowNoise
               ? resolveFanSeries(database, 'KVF-P', null, 'inline_ducted')
               : resolveFanSeries(database, duty.series_name, duty.material, install);
 
