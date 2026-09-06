@@ -67,14 +67,19 @@ export function PerformanceChart({
 
   const config = getChartConfig();
 
-  // Calculate Y-axis domain based on data with 15% padding
+  // Keep both axes exactly 10% above the maximum plotted data points.
+  const xAxisDomain = useMemo(() => {
+    if (chartData.length === 0) return [0, 100];
+    const maxAirflow = Math.max(...chartData.map(d => d.airflow));
+    return [0, maxAirflow * 1.10];
+  }, [chartData]);
+
   const yAxisDomain = useMemo(() => {
     if (chartData.length === 0) return [0, 100];
     const values = chartData.map(d => d[config.dataKey as keyof typeof d] as number).filter(v => v > 0);
     if (values.length === 0) return [0, 100];
     const maxValue = Math.max(...values);
-    const paddedMax = maxValue * 1.15; // 15% padding
-    return [0, Math.ceil(paddedMax)];
+    return [0, maxValue * 1.10];
   }, [chartData, config.dataKey]);
 
   return (
@@ -93,7 +98,9 @@ export function PerformanceChart({
             vertical={false}
           />
           <XAxis 
-            dataKey="airflow" 
+            dataKey="airflow"
+            type="number"
+            domain={xAxisDomain} 
             stroke="hsl(215, 15%, 45%)"
             fontSize={11}
             tickFormatter={(value) => {
