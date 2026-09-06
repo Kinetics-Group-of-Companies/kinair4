@@ -18,8 +18,12 @@ const corsHeaders = {
   "Access-Control-Expose-Headers": "X-KINAIR-AI-Provider, X-KINAIR-AI-Model",
 };
 
-const ANTHROPIC_MODEL = "claude-opus-5";
-const OPENAI_MODEL = "gpt-5.6-sol";
+const ANTHROPIC_CHEAP_MODEL = "claude-haiku-4-5-20251001";
+const ANTHROPIC_BALANCED_MODEL = "claude-sonnet-5";
+const ANTHROPIC_PREMIUM_MODEL = "claude-opus-5";
+const OPENAI_CHEAP_MODEL = "gpt-5.6-luna";
+const OPENAI_BALANCED_MODEL = "gpt-5.6-terra";
+const OPENAI_PREMIUM_MODEL = "gpt-5.6-sol";
 const GEMINI_MODEL = "gemini-3.6-flash";
 
 type Row = Record<string, any>;
@@ -92,7 +96,19 @@ Deno.serve(async (req) => {
 
     const { messages, aiMode = "standard" }: {
       messages: UIMessage[];
-      aiMode?: "auto" | "standard" | "advanced" | "openai" | "anthropic";
+      aiMode?:
+        | "auto"
+        | "standard"
+        | "advanced"
+        | "gemini"
+        | "openai"
+        | "openai_luna"
+        | "openai_terra"
+        | "openai_sol"
+        | "anthropic"
+        | "anthropic_haiku"
+        | "anthropic_sonnet"
+        | "anthropic_opus";
     } = await req.json();
 
     const listSeries = tool({
@@ -729,25 +745,44 @@ Deno.serve(async (req) => {
     let providerName: "Google Gemini" | "OpenAI" | "Anthropic";
     let modelName: string;
     let model;
-    if ((routedMode === "advanced" || routedMode === "openai") && openaiApiKey) {
+
+    const openaiModelByMode: Record<string, string> = {
+      openai: OPENAI_CHEAP_MODEL,
+      advanced: OPENAI_PREMIUM_MODEL,
+      openai_luna: OPENAI_CHEAP_MODEL,
+      openai_terra: OPENAI_BALANCED_MODEL,
+      openai_sol: OPENAI_PREMIUM_MODEL,
+    };
+    const anthropicModelByMode: Record<string, string> = {
+      anthropic: ANTHROPIC_CHEAP_MODEL,
+      anthropic_haiku: ANTHROPIC_CHEAP_MODEL,
+      anthropic_sonnet: ANTHROPIC_BALANCED_MODEL,
+      anthropic_opus: ANTHROPIC_PREMIUM_MODEL,
+    };
+
+    if (openaiModelByMode[routedMode] && openaiApiKey) {
       providerName = "OpenAI";
-      modelName = OPENAI_MODEL;
+      modelName = openaiModelByMode[routedMode];
       model = createOpenAI({ apiKey: openaiApiKey })(modelName);
-    } else if (routedMode === "anthropic" && anthropicApiKey) {
+    } else if (anthropicModelByMode[routedMode] && anthropicApiKey) {
       providerName = "Anthropic";
-      modelName = ANTHROPIC_MODEL;
+      modelName = anthropicModelByMode[routedMode];
       model = createAnthropic({ apiKey: anthropicApiKey })(modelName);
+    } else if ((routedMode === "gemini" || routedMode === "standard") && geminiApiKey) {
+      providerName = "Google Gemini";
+      modelName = GEMINI_MODEL;
+      model = createGoogleGenerativeAI({ apiKey: geminiApiKey })(modelName);
     } else if (geminiApiKey) {
       providerName = "Google Gemini";
       modelName = GEMINI_MODEL;
       model = createGoogleGenerativeAI({ apiKey: geminiApiKey })(modelName);
     } else if (openaiApiKey) {
       providerName = "OpenAI";
-      modelName = OPENAI_MODEL;
+      modelName = OPENAI_CHEAP_MODEL;
       model = createOpenAI({ apiKey: openaiApiKey })(modelName);
     } else {
       providerName = "Anthropic";
-      modelName = ANTHROPIC_MODEL;
+      modelName = ANTHROPIC_CHEAP_MODEL;
       model = createAnthropic({ apiKey: anthropicApiKey! })(modelName);
     }
 
