@@ -1073,6 +1073,7 @@ export function InteractivePerformanceChart({
           
           {/* Fan performance curve area fill - use linear to match exact data points */}
           <Area
+            isAnimationActive={false}
             type="linear"
             dataKey={config.dataKey}
             stroke="none"
@@ -1083,6 +1084,7 @@ export function InteractivePerformanceChart({
           {/* Fan performance curve - linear line to match exact data points */}
           {!convertedFamilyData && (
             <Line
+              isAnimationActive={false}
               type="linear"
               dataKey={config.dataKey}
               stroke={config.stroke}
@@ -1147,6 +1149,7 @@ export function InteractivePerformanceChart({
             }));
             return (
               <Line
+              isAnimationActive={false}
                 key={`family-${curve.angle}`}
                 type="monotone"
                 data={familyData}
@@ -1224,6 +1227,7 @@ export function InteractivePerformanceChart({
           {/* Base curve (50Hz reference when VFD is active) - dashed line with label */}
           {chartType === 'pressure' && convertedBaseCurveData && convertedBaseCurveData.data.length > 0 && (
             <Line
+              isAnimationActive={false}
               type="linear"
               data={convertedBaseCurveData.data.map(d => ({ airflow: d.airflow, basePressure: d.staticPressure }))}
               dataKey="basePressure"
@@ -1282,6 +1286,7 @@ export function InteractivePerformanceChart({
           {/* System curve (only for pressure chart) - smooth parabola with dotted line */}
           {chartType === 'pressure' && showSystemCurve && (
             <Line
+              isAnimationActive={false}
               type="monotone"
               dataKey="systemPressure"
               stroke="hsl(213, 90%, 45%)"
