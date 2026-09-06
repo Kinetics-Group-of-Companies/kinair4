@@ -23,6 +23,12 @@ const TABLES_TO_MIGRATE = [
   'unit_preferences', 'datasheet_config', 'documentation_sections', 'page_content',
   'accessory_descriptions', 'fire_rating_descriptions', 'atex_rating_descriptions',
   'series_dimension_schema', 'series_dimension_values', 'projects', 'project_items',
+  // Air Curtain Selector and LPO order-tracking tables. Order matters here:
+  // each table must come after every other table it has a foreign key to,
+  // so upserting a row never references a parent that hasn't been copied yet.
+  'software_releases',
+  'air_curtain_brands', 'air_curtain_series', 'air_curtain_models', 'air_curtain_dimensions',
+  'lpo_contacts', 'lpo_orders', 'lpo_order_updates', 'lpo_alert_log', 'lpo_revisions', 'lpo_documents',
 ];
 
 // Generate individual CREATE TABLE statements (one per table for better error handling)
@@ -305,16 +311,165 @@ function getTableDDL(): { name: string; sql: string }[] {
       created_at timestamp with time zone NOT NULL DEFAULT now(),
       updated_at timestamp with time zone NOT NULL DEFAULT now()
     )` },
+
+    { name: 'software_releases', sql: `CREATE TABLE IF NOT EXISTS public.software_releases (
+      id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+      version text NOT NULL, platform text NOT NULL DEFAULT 'Windows x64',
+      title text NOT NULL, notes text, storage_path text NOT NULL, file_size_bytes bigint,
+      is_latest boolean NOT NULL DEFAULT false,
+      published_at timestamptz NOT NULL DEFAULT now(),
+      created_at timestamptz NOT NULL DEFAULT now()
+    )` },
+
+    { name: 'air_curtain_brands', sql: `CREATE TABLE IF NOT EXISTS public.air_curtain_brands (
+      id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+      tenant_id uuid NOT NULL REFERENCES public.tenants(id) ON DELETE CASCADE,
+      name text NOT NULL, logo_url text, website text, notes text,
+      display_order integer NOT NULL DEFAULT 0,
+      created_at timestamptz NOT NULL DEFAULT now(),
+      updated_at timestamptz NOT NULL DEFAULT now()
+    )` },
+
+    { name: 'air_curtain_series', sql: `CREATE TABLE IF NOT EXISTS public.air_curtain_series (
+      id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+      tenant_id uuid NOT NULL REFERENCES public.tenants(id) ON DELETE CASCADE,
+      brand_id uuid NOT NULL REFERENCES public.air_curtain_brands(id) ON DELETE CASCADE,
+      name text NOT NULL, description text, category text NOT NULL DEFAULT 'surface',
+      motor_type text NOT NULL DEFAULT 'AC', image_url text, drawing_url text, catalogue_url text,
+      datasheet_description text, display_order integer NOT NULL DEFAULT 0,
+      voltage text, frequency_hz numeric,
+      created_at timestamptz NOT NULL DEFAULT now(),
+      updated_at timestamptz NOT NULL DEFAULT now()
+    )` },
+
+    { name: 'air_curtain_models', sql: `CREATE TABLE IF NOT EXISTS public.air_curtain_models (
+      id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+      tenant_id uuid NOT NULL REFERENCES public.tenants(id) ON DELETE CASCADE,
+      model text NOT NULL, category text NOT NULL DEFAULT 'surface', impeller_diameter integer,
+      length_mm integer NOT NULL, input_power_w numeric, input_power_low_w numeric,
+      air_velocity_ms numeric, air_velocity_low_ms numeric,
+      air_volume_cmh numeric, air_volume_cfm numeric, air_volume_low_cmh numeric, air_volume_low_cfm numeric,
+      noise_db numeric, noise_low_db numeric, net_weight_kg numeric, gross_weight_kg numeric,
+      unit_size text, carton_size text, mounting_height_min numeric, mounting_height_max numeric,
+      remarks text, display_order integer NOT NULL DEFAULT 0,
+      brand text NOT NULL DEFAULT 'KINAIR', motor_type text NOT NULL DEFAULT 'AC',
+      brand_id uuid REFERENCES public.air_curtain_brands(id) ON DELETE SET NULL,
+      series_id uuid REFERENCES public.air_curtain_series(id) ON DELETE SET NULL,
+      drawing_url text, slot_width_mm numeric DEFAULT 50,
+      noise_63 numeric, noise_125 numeric, noise_250 numeric, noise_500 numeric,
+      noise_1k numeric, noise_2k numeric, noise_4k numeric, noise_8k numeric,
+      voltage text, frequency_hz numeric,
+      created_at timestamptz NOT NULL DEFAULT now(),
+      updated_at timestamptz NOT NULL DEFAULT now()
+    )` },
+
+    { name: 'air_curtain_dimensions', sql: `CREATE TABLE IF NOT EXISTS public.air_curtain_dimensions (
+      id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+      tenant_id uuid NOT NULL REFERENCES public.tenants(id) ON DELETE CASCADE,
+      series_id uuid NOT NULL REFERENCES public.air_curtain_series(id) ON DELETE CASCADE,
+      model_id uuid REFERENCES public.air_curtain_models(id) ON DELETE CASCADE,
+      label text NOT NULL, values jsonb NOT NULL DEFAULT '{}'::jsonb,
+      display_order integer NOT NULL DEFAULT 0,
+      created_at timestamptz NOT NULL DEFAULT now(),
+      updated_at timestamptz NOT NULL DEFAULT now()
+    )` },
+
+    { name: 'lpo_contacts', sql: `CREATE TABLE IF NOT EXISTS public.lpo_contacts (
+      id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+      tenant_id uuid NOT NULL REFERENCES public.tenants(id) ON DELETE CASCADE,
+      contact_type text NOT NULL CHECK (contact_type IN ('customer','supplier')),
+      name text NOT NULL, contact_person text, email text, phone text, address text, trn text,
+      payment_terms text, notes text, created_by uuid,
+      created_at timestamptz NOT NULL DEFAULT now(),
+      updated_at timestamptz NOT NULL DEFAULT now()
+    )` },
+
+    { name: 'lpo_orders', sql: `CREATE TABLE IF NOT EXISTS public.lpo_orders (
+      id uuid NOT NULL DEFAULT gen_random_uuid() PRIMARY KEY,
+      tenant_id uuid NOT NULL REFERENCES public.tenants(id) ON DELETE CASCADE,
+      user_id uuid NOT NULL, notify_email text, lpo_ref text NOT NULL, lpo_date date,
+      client_name text NOT NULL, client_contact text, client_email text, project_name text,
+      material_type text NOT NULL DEFAULT 'OTHER', description text, quantity integer NOT NULL DEFAULT 1,
+      order_value numeric, currency text NOT NULL DEFAULT 'AED',
+      quoted_lead_time_days integer, factory_lead_time_days integer,
+      lpo_received_date date, advance_payment_date date, manufacturing_clearance_date date,
+      supplier_name text, supplier_po_date date, supplier_advance_payment_date date,
+      committed_delivery_date date, expected_delivery_date date, actual_delivery_date date,
+      status text NOT NULL DEFAULT 'new', next_followup_date date, last_followup_date date, notes text,
+      material_types text[] NOT NULL DEFAULT '{}', cost_value numeric,
+      lead_time_weeks_min integer, lead_time_weeks_max integer,
+      revised_lpo_ref text, revised_lpo_date date, revised_lpo_received_date date, revised_order_value numeric,
+      revised_lead_time_weeks_min integer, revised_lead_time_weeks_max integer, revision_notes text,
+      suppliers jsonb NOT NULL DEFAULT '[]'::jsonb,
+      baseline_committed_date date, priority text NOT NULL DEFAULT 'normal', order_owner text,
+      delay_reason text, delay_owner text, production_start_date date, inspection_date date,
+      ready_date date, dispatch_date date, transport_mode text, shipment_ref text,
+      port_eta_date date, customs_clearance_date date, site_delivery_date date, installation_date date,
+      advance_percent numeric, balance_payment_date date, invoice_number text, invoice_date date,
+      warranty_start_date date, quotation_ref text, quotation_date date, pi_number text,
+      pi_sent_date date, order_ack_sent_date date, payment_terms text, supplier_payment_terms text,
+      warranty_terms text, warranty_months integer, warranty_end_date date,
+      vat_percent numeric, vat_amount numeric, delivery_terms text, delivery_location text,
+      retention_percent numeric, retention_release_date date,
+      advance_amount numeric, advance_received_amount numeric, balance_amount numeric, balance_received_amount numeric,
+      supplier_order_value numeric, supplier_advance_percent numeric, supplier_advance_amount numeric,
+      supplier_balance_amount numeric, supplier_balance_payment_date date,
+      commitment_matches_supplier boolean NOT NULL DEFAULT false, committed_delivery_date_min date,
+      order_ack_status text NOT NULL DEFAULT 'not_sent', pi_status text NOT NULL DEFAULT 'not_sent',
+      advance_payment_status text NOT NULL DEFAULT 'not_sent', revision_no integer NOT NULL DEFAULT 0,
+      last_updated_by_name text, is_draft boolean NOT NULL DEFAULT false,
+      created_at timestamptz NOT NULL DEFAULT now(),
+      updated_at timestamptz NOT NULL DEFAULT now()
+    )` },
+
+    { name: 'lpo_order_updates', sql: `CREATE TABLE IF NOT EXISTS public.lpo_order_updates (
+      id uuid NOT NULL DEFAULT gen_random_uuid() PRIMARY KEY,
+      order_id uuid NOT NULL REFERENCES public.lpo_orders(id) ON DELETE CASCADE,
+      tenant_id uuid NOT NULL REFERENCES public.tenants(id) ON DELETE CASCADE,
+      user_id uuid, author_name text, note text NOT NULL, status_at_time text,
+      created_at timestamptz NOT NULL DEFAULT now()
+    )` },
+
+    { name: 'lpo_alert_log', sql: `CREATE TABLE IF NOT EXISTS public.lpo_alert_log (
+      id uuid NOT NULL DEFAULT gen_random_uuid() PRIMARY KEY,
+      order_id uuid REFERENCES public.lpo_orders(id) ON DELETE CASCADE,
+      recipient_email text NOT NULL, alert_type text NOT NULL, alert_key text NOT NULL,
+      tenant_id uuid,
+      created_at timestamptz NOT NULL DEFAULT now()
+    )` },
+
+    { name: 'lpo_revisions', sql: `CREATE TABLE IF NOT EXISTS public.lpo_revisions (
+      id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+      order_id uuid NOT NULL REFERENCES public.lpo_orders(id) ON DELETE CASCADE,
+      tenant_id uuid NOT NULL REFERENCES public.tenants(id),
+      user_id uuid, author_name text, revision_no integer NOT NULL DEFAULT 1,
+      revised_lpo_ref text, revised_lpo_date date, revised_lpo_received_date date, revised_order_value numeric,
+      revised_lead_time_weeks_min integer, revised_lead_time_weeks_max integer,
+      revised_committed_date date, previous_committed_date date, reason text,
+      created_at timestamptz NOT NULL DEFAULT now()
+    )` },
+
+    { name: 'lpo_documents', sql: `CREATE TABLE IF NOT EXISTS public.lpo_documents (
+      id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+      order_id uuid NOT NULL REFERENCES public.lpo_orders(id) ON DELETE CASCADE,
+      tenant_id uuid NOT NULL REFERENCES public.tenants(id) ON DELETE CASCADE,
+      user_id uuid, uploaded_by_name text, doc_type text NOT NULL DEFAULT 'other', title text,
+      file_name text NOT NULL, storage_path text NOT NULL, file_size_bytes bigint, mime_type text,
+      created_at timestamptz NOT NULL DEFAULT now()
+    )` },
   ];
 }
 
 function getRLSStatements(): string[] {
-  const tables = ['tenants', 'profiles', 'user_roles', 'fan_series', 'fan_models', 
+  const tables = ['tenants', 'profiles', 'user_roles', 'fan_series', 'fan_models',
     'blade_configurations', 'performance_data', 'noise_data', 'fan_dimensions',
     'motor_brands', 'motor_specifications', 'casing_weights', 'impeller_weights',
     'unit_preferences', 'datasheet_config', 'documentation_sections', 'page_content',
     'accessory_descriptions', 'fire_rating_descriptions', 'atex_rating_descriptions',
-    'series_dimension_schema', 'series_dimension_values', 'projects', 'project_items'];
+    'series_dimension_schema', 'series_dimension_values', 'projects', 'project_items',
+    'software_releases', 'air_curtain_brands', 'air_curtain_series', 'air_curtain_models',
+    'air_curtain_dimensions', 'lpo_contacts', 'lpo_orders', 'lpo_order_updates',
+    'lpo_alert_log', 'lpo_revisions', 'lpo_documents'];
   
   const statements: string[] = [];
 
@@ -582,7 +737,7 @@ serve(async (req) => {
     let totalRecords = 0;
 
     console.log('=== STEP 2: Creating storage buckets ===');
-    const buckets = ['brand-assets', 'project-datasheets'];
+    const buckets = ['brand-assets', 'project-datasheets', 'software-releases', 'lpo-documents'];
     const storageResults: Record<string, { success: boolean; count: number; error?: string }> = {};
 
     for (const bucket of buckets) {

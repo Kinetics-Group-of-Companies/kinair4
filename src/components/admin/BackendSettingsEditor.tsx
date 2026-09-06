@@ -1420,7 +1420,19 @@ CREATE POLICY "Allow all on project_items" ON public.project_items FOR ALL USING
 
       if (response.error) {
         console.error('Migration error:', response.error);
-        toast.error(`Migration failed: ${response.error.message}`);
+        // supabase-js's FunctionsHttpError.message is always the hardcoded
+        // string "Edge Function returned a non-2xx status code" — the actual
+        // reason (missing admin role, bad DB password/pooler host, connection
+        // failure, etc.) is only in the raw response body on `error.context`.
+        let detail = response.error.message;
+        try {
+          const ctx = (response.error as { context?: Response }).context;
+          const body = await ctx?.clone().json();
+          if (body?.error) detail = body.error;
+        } catch {
+          // Body wasn't JSON or already consumed — fall back to the generic message.
+        }
+        toast.error(`Migration failed: ${detail}`);
         return;
       }
 
