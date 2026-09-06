@@ -20,7 +20,7 @@ const corsHeaders = {
 
 const ANTHROPIC_MODEL = "claude-opus-5";
 const OPENAI_MODEL = "gpt-5.6-sol";
-const GEMINI_MODEL = "gemini-2.5-flash";
+const GEMINI_MODEL = "gemini-3.6-flash";
 
 type Row = Record<string, any>;
 
