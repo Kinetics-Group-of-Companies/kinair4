@@ -92,7 +92,7 @@ Deno.serve(async (req) => {
 
     const { messages, aiMode = "standard" }: {
       messages: UIMessage[];
-      aiMode?: "standard" | "advanced";
+      aiMode?: "standard" | "advanced" | "openai" | "anthropic";
     } = await req.json();
 
     const listSeries = tool({
@@ -715,10 +715,14 @@ Deno.serve(async (req) => {
     let providerName: "Google Gemini" | "OpenAI" | "Anthropic";
     let modelName: string;
     let model;
-    if (aiMode === "advanced" && openaiApiKey) {
+    if ((aiMode === "advanced" || aiMode === "openai") && openaiApiKey) {
       providerName = "OpenAI";
       modelName = OPENAI_MODEL;
       model = createOpenAI({ apiKey: openaiApiKey })(modelName);
+    } else if (aiMode === "anthropic" && anthropicApiKey) {
+      providerName = "Anthropic";
+      modelName = ANTHROPIC_MODEL;
+      model = createAnthropic({ apiKey: anthropicApiKey })(modelName);
     } else if (geminiApiKey) {
       providerName = "Google Gemini";
       modelName = GEMINI_MODEL;
