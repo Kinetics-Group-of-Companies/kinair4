@@ -526,7 +526,8 @@ export function AssistantChat({
         );
 
 
-        const ranked = rankFanSelections(results, duty.optimize_for ?? 'balanced');
+        const optimizeFor = duty.optimize_for ?? 'balanced';
+        const ranked = optimizeFor === 'balanced' ? results : rankFanSelections(results, optimizeFor);
         setAutoSelections((prev) => ({ ...prev, [key]: { duty, results: ranked } }));
 
         // Only auto-download once the reply stream has fully finished — starting a
@@ -695,7 +696,7 @@ export function AssistantChat({
         });
 
         const optimizeFor: AcOptimizeFor = duty.optimize_for ?? 'balanced';
-        const ranked = rankAirCurtains(results, optimizeFor);
+        const ranked = optimizeFor === 'balanced' ? results : rankAirCurtains(results, optimizeFor);
         const auto: AcAutoSelection = {
           doorWidthMm,
           doorHeightM,
@@ -761,8 +762,7 @@ export function AssistantChat({
                 acSeries.find((s) => s.name.toLowerCase().includes(wanted))
               : undefined;
 
-            const results = rankAirCurtains(
-              selectAirCurtains(acModels, {
+            const coreResults = selectAirCurtains(acModels, {
                 doorWidthMm,
                 doorHeightM,
                 category: (item.mounting as any) ?? 'any',
@@ -778,9 +778,10 @@ export function AssistantChat({
                 minMatchPercent: AC_MIN_MATCH_PERCENT,
                 maxMatchPercent: AC_MAX_MATCH_PERCENT,
                 selectionBasis: 'door',
-              }),
-              acOptimize,
-            );
+              });
+            const results = acOptimize === 'balanced'
+              ? coreResults
+              : rankAirCurtains(coreResults, acOptimize);
             const best = results[0];
             if (!best) {
               return { tag, quantity, product: 'air_curtain', duty, label: 'No suitable model', detail: '' };
@@ -833,7 +834,7 @@ export function AssistantChat({
             },
             10,
           );
-          let ranked = rankFanSelections(found, fanOptimize);
+          let ranked = fanOptimize === 'balanced' ? found : rankFanSelections(found, fanOptimize);
           if (item.max_noise_db) {
             const quiet = ranked.filter(
               (r) => !r.noiseData?.overall || r.noiseData.overall <= (item.max_noise_db as number),
