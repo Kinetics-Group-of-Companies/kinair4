@@ -319,11 +319,70 @@ export function AssistantChat({
       new DefaultChatTransport({
         api: `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/ai-assistant`,
         fetch: async (input, init) => {
-          const response = await fetch(input, init);
-          const provider = response.headers.get('X-KINAIR-AI-Provider');
-          const model = response.headers.get('X-KINAIR-AI-Model');
-          if (provider) setActiveProvider(model ? `${provider} · ${model}` : provider);
-          return response;
+          const fallbackModes =
+            aiMode === 'openai'
+              ? (['openai', 'anthropic', 'standard'] as const)
+              : aiMode === 'anthropic'
+                ? (['anthropic', 'openai', 'standard'] as const)
+                : (['auto', 'openai', 'anthropic'] as const);
+          const expectedProvider: Partial<Record<(typeof fallbackModes)[number], string>> = {
+            openai: 'OpenAI',
+            anthropic: 'Anthropic',
+          };
+          const originalBody =
+            typeof init?.body === 'string' ? JSON.parse(init.body) : {};
+          let lastFailure = '';
+
+          for (const mode of fallbackModes) {
+            try {
+              const response = await fetch(input, {
+                ...init,
+                body: JSON.stringify({ ...originalBody, aiMode: mode }),
+              });
+              const provider = response.headers.get('X-KINAIR-AI-Provider');
+              const model = response.headers.get('X-KINAIR-AI-Model');
+              const body = await response.text();
+              const streamFailed =
+                !response.ok ||
+                /"type"\s*:\s*"error"/i.test(body) ||
+                /failed after \d+ attempts|quota exceeded|rate.?limit|resource_exhausted/i.test(body);
+              const providerMismatch =
+                expectedProvider[mode] != null && provider !== expectedProvider[mode];
+
+              if (!streamFailed && !providerMismatch) {
+                if (provider) setActiveProvider(model ? `${provider} · ${model}` : provider);
+                return new Response(body, {
+                  status: response.status,
+                  statusText: response.statusText,
+                  headers: response.headers,
+                });
+              }
+
+              lastFailure = body;
+              console.warn('KINAIR AI provider failed; trying fallback', {
+                requestedMode: mode,
+                actualProvider: provider,
+                providerMismatch,
+              });
+            } catch (error) {
+              lastFailure = error instanceof Error ? error.message : String(error);
+              console.warn('KINAIR AI connection failed; trying fallback', {
+                requestedMode: mode,
+                error: lastFailure,
+              });
+            }
+          }
+
+          console.error('All KINAIR AI providers failed', lastFailure);
+          return new Response(
+            JSON.stringify({
+              error: 'The AI providers are temporarily busy. Please retry in a moment.',
+            }),
+            {
+              status: 503,
+              headers: { 'Content-Type': 'application/json' },
+            },
+          );
         },
         body: { aiMode },
         headers: async () => {
