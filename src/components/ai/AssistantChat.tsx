@@ -319,15 +319,47 @@ export function AssistantChat({
       new DefaultChatTransport({
         api: `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/ai-assistant`,
         fetch: async (input, init) => {
+          // Automatic mode spends from free -> cheap -> balanced -> premium.
+          // A manual provider choice keeps that provider first, then crosses over.
+          const economyLadder = [
+            'gemini',
+            'openai_luna',
+            'anthropic_haiku',
+            'openai_terra',
+            'anthropic_sonnet',
+            'openai_sol',
+            'anthropic_opus',
+          ] as const;
           const fallbackModes =
             aiMode === 'openai'
-              ? (['openai', 'anthropic', 'standard'] as const)
+              ? ([
+                  'openai_luna',
+                  'openai_terra',
+                  'openai_sol',
+                  'anthropic_haiku',
+                  'anthropic_sonnet',
+                  'anthropic_opus',
+                  'gemini',
+                ] as const)
               : aiMode === 'anthropic'
-                ? (['anthropic', 'openai', 'standard'] as const)
-                : (['auto', 'openai', 'anthropic'] as const);
-          const expectedProvider: Partial<Record<(typeof fallbackModes)[number], string>> = {
-            openai: 'OpenAI',
-            anthropic: 'Anthropic',
+                ? ([
+                    'anthropic_haiku',
+                    'anthropic_sonnet',
+                    'anthropic_opus',
+                    'openai_luna',
+                    'openai_terra',
+                    'openai_sol',
+                    'gemini',
+                  ] as const)
+                : economyLadder;
+          const expectedProvider: Record<string, string> = {
+            gemini: 'Google Gemini',
+            openai_luna: 'OpenAI',
+            openai_terra: 'OpenAI',
+            openai_sol: 'OpenAI',
+            anthropic_haiku: 'Anthropic',
+            anthropic_sonnet: 'Anthropic',
+            anthropic_opus: 'Anthropic',
           };
           const originalBody =
             typeof init?.body === 'string' ? JSON.parse(init.body) : {};
