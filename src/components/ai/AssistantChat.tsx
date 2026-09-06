@@ -294,12 +294,21 @@ export function AssistantChat({
   const navigate = useNavigate();
   const [input, setInput] = useState('');
   const scrollRef = useRef<HTMLDivElement>(null);
-  const [aiMode, setAiMode] = useState<'standard' | 'openai' | 'anthropic'>('standard');
+  const [aiMode, setAiMode] = useState<'auto' | 'standard' | 'openai' | 'anthropic'>('auto');
+
+  const [activeProvider, setActiveProvider] = useState('Automatic routing');
 
   const transport = useMemo(
     () =>
       new DefaultChatTransport({
         api: `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/ai-assistant`,
+        fetch: async (input, init) => {
+          const response = await fetch(input, init);
+          const provider = response.headers.get('X-KINAIR-AI-Provider');
+          const model = response.headers.get('X-KINAIR-AI-Model');
+          if (provider) setActiveProvider(model ? `${provider} · ${model}` : provider);
+          return response;
+        },
         body: { aiMode },
         headers: async () => {
           const { data } = await supabase.auth.getSession();
@@ -952,15 +961,16 @@ export function AssistantChat({
           <div className="flex items-center justify-between gap-3 border-b border-border px-4 py-2 bg-muted/20">
             <div className="flex items-center gap-2 text-xs text-muted-foreground">
               <Sparkles className="w-3.5 h-3.5 text-primary" />
-              <span>AI provider</span>
+              <span>{activeProvider}</span>
             </div>
             <select
               value={aiMode}
-              onChange={(e) => setAiMode(e.target.value as 'standard' | 'openai' | 'anthropic')}
+              onChange={(e) => setAiMode(e.target.value as 'auto' | 'standard' | 'openai' | 'anthropic')}
               disabled={busy}
               aria-label="Choose AI provider"
               className="h-8 rounded-md border border-border bg-background px-2 text-xs font-medium text-foreground"
             >
+              <option value="auto">Auto · Based on request</option>
               <option value="standard">Gemini 2.5 Flash · Free/Standard</option>
               <option value="openai">OpenAI GPT-5.6 · Advanced</option>
               <option value="anthropic">Claude Opus · Advanced</option>
