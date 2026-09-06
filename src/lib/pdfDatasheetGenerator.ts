@@ -273,6 +273,65 @@ const ANGLE_COLORS: Record<number, [number, number, number]> = {
   50: [140, 64, 191],   // hsl(270, 70%, 50%) - purple
 };
 
+// Smooth a polyline with monotone cubic Hermite interpolation. The curve
+// passes through every measured catalogue point and avoids spline overshoot.
+function smoothMonotonePoints(
+  points: { x: number; y: number }[],
+  samplesPerSegment = 12,
+): { x: number; y: number }[] {
+  if (points.length < 3) return points;
+  const n = points.length;
+  const slopes = Array.from({ length: n - 1 }, (_, i) => {
+    const dx = points[i + 1].x - points[i].x;
+    return dx === 0 ? 0 : (points[i + 1].y - points[i].y) / dx;
+  });
+  const tangents = new Array<number>(n);
+  tangents[0] = slopes[0];
+  tangents[n - 1] = slopes[n - 2];
+  for (let i = 1; i < n - 1; i++) {
+    tangents[i] = slopes[i - 1] * slopes[i] <= 0
+      ? 0
+      : (slopes[i - 1] + slopes[i]) / 2;
+  }
+  // Fritsch-Carlson limiting prevents overshoot between measured values.
+  for (let i = 0; i < n - 1; i++) {
+    if (slopes[i] === 0) {
+      tangents[i] = 0;
+      tangents[i + 1] = 0;
+      continue;
+    }
+    const a = tangents[i] / slopes[i];
+    const b = tangents[i + 1] / slopes[i];
+    const magnitude = Math.hypot(a, b);
+    if (magnitude > 3) {
+      const scale = 3 / magnitude;
+      tangents[i] = scale * a * slopes[i];
+      tangents[i + 1] = scale * b * slopes[i];
+    }
+  }
+  const output: { x: number; y: number }[] = [];
+  for (let i = 0; i < n - 1; i++) {
+    const p0 = points[i];
+    const p1 = points[i + 1];
+    const dx = p1.x - p0.x;
+    for (let step = 0; step < samplesPerSegment; step++) {
+      const t = step / samplesPerSegment;
+      const t2 = t * t;
+      const t3 = t2 * t;
+      output.push({
+        x: p0.x + dx * t,
+        y:
+          (2 * t3 - 3 * t2 + 1) * p0.y +
+          (t3 - 2 * t2 + t) * dx * tangents[i] +
+          (-2 * t3 + 3 * t2) * p1.y +
+          (t3 - t2) * dx * tangents[i + 1],
+      });
+    }
+  }
+  output.push(points[n - 1]);
+  return output;
+}
+
 // Draw performance curve matching web Recharts style exactly - IMPROVED READABILITY
 function drawPerformanceCurve(
   doc: jsPDF,
@@ -555,8 +614,9 @@ function drawPerformanceCurve(
     doc.setLineCap('round');
     doc.setLineJoin('round');
     
-    for (let i = 0; i < baseChartPoints.length - 1; i++) {
-      doc.line(baseChartPoints[i].x, baseChartPoints[i].y, baseChartPoints[i + 1].x, baseChartPoints[i + 1].y);
+    const smoothBasePoints = smoothMonotonePoints(baseChartPoints);
+    for (let i = 0; i < smoothBasePoints.length - 1; i++) {
+      doc.line(smoothBasePoints[i].x, smoothBasePoints[i].y, smoothBasePoints[i + 1].x, smoothBasePoints[i + 1].y);
     }
     doc.setLineDashPattern([], 0);
     
@@ -577,14 +637,15 @@ function drawPerformanceCurve(
     doc.text(options.baseCurve.label, lastBasePoint.x + 2, lastBasePoint.y - 1);
   }
 
-  // Draw LINEAR curve line - thinner for cleaner look (VFD/adjusted curve - solid)
+  // Draw a smooth monotone curve through the exact catalogue points.
   doc.setDrawColor(...options.lineColor);
   doc.setLineWidth(0.5);
   doc.setLineCap('round');
   doc.setLineJoin('round');
   
-  for (let i = 0; i < chartPoints.length - 1; i++) {
-    doc.line(chartPoints[i].x, chartPoints[i].y, chartPoints[i + 1].x, chartPoints[i + 1].y);
+  const smoothMainPoints = smoothMonotonePoints(chartPoints);
+  for (let i = 0; i < smoothMainPoints.length - 1; i++) {
+    doc.line(smoothMainPoints[i].x, smoothMainPoints[i].y, smoothMainPoints[i + 1].x, smoothMainPoints[i + 1].y);
   }
   
   // Add adjusted curve label at end of curve (when VFD/voltage is active)
