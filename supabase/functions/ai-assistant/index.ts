@@ -8,7 +8,7 @@ import { convertToModelMessages, streamText, tool, stepCountIs, type UIMessage }
 // specification version 'v2'".
 import { createAnthropic } from "npm:@ai-sdk/anthropic@2.0.101";
 import { createOpenAI } from "npm:@ai-sdk/openai@2.0.101";
-import { createGoogleGenerativeAI } from "npm:@ai-sdk/google@2.0.0";
+import { createGoogleGenerativeAI } from "npm:@ai-sdk/google@2.0.96";
 import { z } from "npm:zod@3";
 import { createClient } from "npm:@supabase/supabase-js@2";
 
@@ -367,7 +367,7 @@ Deno.serve(async (req) => {
         door_width_unit: z.enum(["mm", "cm", "m", "in"]).describe("Unit of the door width"),
         door_height: z.number().nullable().describe("Door / opening height (also mounting height)"),
         door_height_unit: z.enum(["mm", "cm", "m", "in"]).describe("Unit of the door height"),
-        mounting: z.enum(["surface", "recessed", "any"]).describe("Mounting type, 'any' if unspecified"),
+        mounting: z.enum(["surface", "recessed", "any"]).describe("Hard mounting category: ceiling mounted, ceiling recessed, recess mounted, concealed or flush mounted always means 'recessed'; wall mounted, surface mounted or exposed always means 'surface'. Use 'any' only when the user gave no mounting clue."),
         speed: z.enum(["high", "medium", "low"]).describe("Fan speed to select on, default 'high'"),
         motor_type: z.enum(["AC", "EC", "any"]).describe("Motor type, 'any' if unspecified"),
         brand: z.string().nullable().describe("Brand the user asked for, else null"),
@@ -400,30 +400,41 @@ Deno.serve(async (req) => {
         title: z.string().nullable().describe("Short name for the schedule, e.g. 'Car park fan schedule'"),
         items: z
           .array(
-            z.object({
-              tag: z.string().nullable().describe("Row tag / reference from the schedule, e.g. 'EF-01'"),
-              product: z.enum(["fan", "air_curtain"]).describe("What this row is"),
-              quantity: z.number().nullable().describe("Quantity for this row, default 1"),
-              airflow: z.number().nullable().describe("Fan airflow exactly as given"),
-              airflow_unit: z.enum(["CMH", "LPS", "CFM", "CMS"]).describe("Unit of the airflow"),
-              static_pressure: z.number().nullable().describe("Fan static pressure as given"),
-              pressure_unit: z.enum(["Pa", "inwg", "mmwg"]).describe("Unit of the pressure"),
-              series_name: z.string().nullable(),
-              fan_type: z
-                .enum(["inline_ducted", "wall_mounted", "axial"])
-                .nullable()
-                .describe("Fan installation type for the row: KVF-P/KVF-M are inline ducted, KIN-E is wall mounted. Never put a KVF series on a wall mounted row."),
-              material: z.string().nullable().describe("Casing material for the row, e.g. 'plastic' or 'metal', else null"),
-              motor_poles: z.number().nullable(),
-              max_noise_db: z.number().nullable().describe("Noise limit for the row, if the schedule gives one"),
-              door_width: z.number().nullable().describe("Air curtain door width as given"),
-              door_width_unit: z.enum(["mm", "cm", "m", "in"]).describe("Unit of the door width"),
-              door_height: z.number().nullable().describe("Air curtain door height as given"),
-              door_height_unit: z.enum(["mm", "cm", "m", "in"]).describe("Unit of the door height"),
-              mounting: z.enum(["surface", "recessed", "any"]),
-              motor_type: z.enum(["AC", "EC", "any"]),
-              brand: z.string().nullable(),
-            }),
+            z.discriminatedUnion("product", [
+              z.object({
+                product: z.literal("fan"),
+                tag: z.string().nullish().describe("Row tag/reference, e.g. EF-01"),
+                quantity: z.number().nullish().describe("Quantity, default 1"),
+                airflow: z.number().nullable().describe("Fan airflow exactly as given; null only if unreadable"),
+                airflow_unit: z.enum(["CMH", "LPS", "CFM", "CMS"]).optional().describe("Default CMH only when the schedule omits the unit"),
+                static_pressure: z.number().nullable().describe("Fan static pressure exactly as given; null only if unreadable"),
+                pressure_unit: z.enum(["Pa", "inwg", "mmwg"]).optional().describe("Default Pa only when the schedule omits the unit"),
+                series_name: z.string().nullish(),
+                fan_type: z
+                  .enum(["inline_ducted", "wall_mounted", "axial"])
+                  .nullish()
+                  .describe("KVF-P/KVF-M inline, KIN-E wall mounted, KTAF axial"),
+                material: z.string().nullish(),
+                motor_poles: z.number().nullish(),
+                max_noise_db: z.number().nullish(),
+              }),
+              z.object({
+                product: z.literal("air_curtain"),
+                tag: z.string().nullish().describe("Row tag/reference, e.g. AC-01"),
+                quantity: z.number().nullish().describe("Quantity, default 1"),
+                door_width: z.number().nullable().describe("Door/opening width exactly as given; null only if unreadable"),
+                door_width_unit: z.enum(["mm", "cm", "m", "in"]).optional().describe("Default mm only when omitted"),
+                door_height: z.number().nullable().describe("Door/mounting height exactly as given; null only if unreadable"),
+                door_height_unit: z.enum(["mm", "cm", "m", "in"]).optional().describe("Default m only when omitted"),
+                mounting: z
+                  .enum(["surface", "recessed", "any"])
+                  .optional()
+                  .describe("Ceiling/recessed/concealed/flush = recessed; wall/surface/exposed = surface; any only if omitted"),
+                motor_type: z.enum(["AC", "EC", "any"]).optional(),
+                brand: z.string().nullish(),
+                series_name: z.string().nullish(),
+              }),
+            ]),
           )
           .max(60)
           .describe("One entry per schedule row, in schedule order"),
@@ -729,18 +740,81 @@ Deno.serve(async (req) => {
     // schedules/attachments to OpenAI, and uses Claude for complex engineering
     // reasoning. Users can still override the provider from the chat header.
     const latestRequest = JSON.stringify(messages.at(-1) ?? "").toLowerCase();
-    // Gemini 3.6 requires thought_signature continuity across function-call
-    // turns. The pinned AI SDK 5 Google adapter cannot preserve it, so all
-    // requests that may invoke catalogue tools are routed to OpenAI.
-    const needsTools = /fan|air curtain|select|selection|datasheet|drawing|noise data|catalogue|catalog|iom|model|airflow|static pressure|\bl\/s\b|\blps\b|\bpa\b|\bcfm\b|\bcmh\b|schedule|spreadsheet|excel|csv|attachment|uploaded|combined pdf|\bqty\b|\bquantity\b/.test(latestRequest);
-    const needsOpenAI = needsTools || /multiple (fan|unit)/.test(latestRequest);
-    const needsClaude = /calculate|calculation|analyse|analyze|compare|why|troubleshoot|diagnos|compliance|standard|specification|engineering|duct loss|pressure loss|noise calculation|system design/.test(latestRequest);
-    const routedMode =
-      aiMode === "auto"
-        ? (needsOpenAI ? "openai" : needsClaude ? "anthropic" : "standard")
-        : aiMode === "standard" && needsTools
-          ? "openai"
-          : aiMode;
+    const conversationHistory = JSON.stringify(messages).toLowerCase();
+    // Gemini thinking models require thought_signature continuity across
+    // function-call turns. AI SDK 5's pinned Google adapter does not preserve
+    // that signature in UIMessage history. Keep any tool-bearing conversation
+    // on OpenAI, including short follow-ups whose latest message has no keywords.
+    const hasToolHistory =
+      /tool-call|tool-result|toolcallid|prepare_datasheet|prepare_air_curtain_datasheet|prepare_schedule_selection|find_fans|find_air_curtains|estimate_duty/.test(
+        conversationHistory,
+      );
+    const isScheduleRequest =
+      /schedule|spreadsheet|excel|xlsx|xls|csv|pdf|image|photo|screenshot|attachment|uploaded|combined pdf|multiple (fan|unit)|\bqty\b|\bquantity\b/.test(
+        latestRequest,
+      );
+    const needsTools = /fan|air curtain|select|selection|datasheet|drawing|noise data|catalogue|catalog|iom|model|airflow|static pressure|\bl\/s\b|\blps\b|\bpa\b|\bcfm\b|\bcmh\b|schedule|spreadsheet|excel|xlsx|xls|csv|pdf|image|photo|screenshot|attachment|uploaded|combined pdf|\bqty\b|\bquantity\b/.test(latestRequest);
+    const needsOpenAI = needsTools || hasToolHistory || isScheduleRequest;
+    // Claude is reserved for clearly technical engineering reasoning.
+    // Generic words such as "why", "compare" or "calculate" must not pull
+    // ordinary conversation away from the Gemini free tier.
+    const needsClaude =
+      /engineering (analysis|review)|technical (analysis|comparison)|troubleshoot|diagnos|compliance|technical standard|specification review|duct (loss|sizing|design)|pressure loss|noise calculation|system design|ventilation calculation|psychrometric|fan law/.test(
+        latestRequest,
+      );
+    // Auto always starts with Gemini (including selection tools). Manual
+    // provider choices remain respected. Availability checks below implement
+    // the automatic Gemini -> OpenAI -> Claude fallback chain.
+    const routedMode = aiMode === "auto" ? "standard" : aiMode;
+
+    // Provider availability checks happen before streaming so failover can
+    // switch cleanly without losing tool-call state.
+    let geminiAvailable = Boolean(geminiApiKey);
+    if ((routedMode === "standard" || routedMode === "gemini") && geminiApiKey) {
+      try {
+        const health = await fetch(
+          `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}?key=${encodeURIComponent(geminiApiKey)}`,
+          { signal: AbortSignal.timeout(4000) },
+        );
+        if (!health.ok) {
+          geminiAvailable = false;
+          console.warn("Gemini preflight failed; switching to OpenAI", {
+            status: health.status,
+          });
+        }
+      } catch (error) {
+        geminiAvailable = false;
+        console.warn("Gemini connection failed; switching to OpenAI", {
+          error: String(error),
+        });
+      }
+    }
+
+    const shouldTryOpenAI =
+      routedMode === "openai" ||
+      routedMode === "advanced" ||
+      routedMode.startsWith("openai_") ||
+      (routedMode === "standard" && !geminiAvailable);
+    let openaiAvailable = Boolean(openaiApiKey);
+    if (shouldTryOpenAI && openaiApiKey) {
+      try {
+        const health = await fetch("https://api.openai.com/v1/models", {
+          headers: { Authorization: `Bearer ${openaiApiKey}` },
+          signal: AbortSignal.timeout(4000),
+        });
+        if (!health.ok) {
+          openaiAvailable = false;
+          console.warn("OpenAI preflight failed; switching to Anthropic", {
+            status: health.status,
+          });
+        }
+      } catch (error) {
+        openaiAvailable = false;
+        console.warn("OpenAI connection failed; switching to Anthropic", {
+          error: String(error),
+        });
+      }
+    }
 
     let providerName: "Google Gemini" | "OpenAI" | "Anthropic";
     let modelName: string;
@@ -760,7 +834,7 @@ Deno.serve(async (req) => {
       anthropic_opus: ANTHROPIC_PREMIUM_MODEL,
     };
 
-    if (openaiModelByMode[routedMode] && openaiApiKey) {
+    if (openaiModelByMode[routedMode] && openaiAvailable && openaiApiKey) {
       providerName = "OpenAI";
       modelName = openaiModelByMode[routedMode];
       model = createOpenAI({ apiKey: openaiApiKey })(modelName);
@@ -768,22 +842,27 @@ Deno.serve(async (req) => {
       providerName = "Anthropic";
       modelName = anthropicModelByMode[routedMode];
       model = createAnthropic({ apiKey: anthropicApiKey })(modelName);
-    } else if ((routedMode === "gemini" || routedMode === "standard") && geminiApiKey) {
+    } else if ((routedMode === "gemini" || routedMode === "standard") && geminiAvailable && geminiApiKey) {
       providerName = "Google Gemini";
       modelName = GEMINI_MODEL;
       model = createGoogleGenerativeAI({ apiKey: geminiApiKey })(modelName);
+    } else if (openaiAvailable && openaiApiKey) {
+      providerName = "OpenAI";
+      modelName = OPENAI_CHEAP_MODEL;
+      model = createOpenAI({ apiKey: openaiApiKey })(modelName);
+    } else if (anthropicApiKey) {
+      providerName = "Anthropic";
+      modelName = ANTHROPIC_CHEAP_MODEL;
+      model = createAnthropic({ apiKey: anthropicApiKey })(modelName);
     } else if (geminiApiKey) {
       providerName = "Google Gemini";
       modelName = GEMINI_MODEL;
       model = createGoogleGenerativeAI({ apiKey: geminiApiKey })(modelName);
-    } else if (openaiApiKey) {
-      providerName = "OpenAI";
-      modelName = OPENAI_CHEAP_MODEL;
-      model = createOpenAI({ apiKey: openaiApiKey })(modelName);
     } else {
-      providerName = "Anthropic";
-      modelName = ANTHROPIC_CHEAP_MODEL;
-      model = createAnthropic({ apiKey: anthropicApiKey! })(modelName);
+      return new Response(JSON.stringify({ error: "No available AI provider." }), {
+        status: 503,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
     }
 
     const result = streamText({
@@ -814,11 +893,23 @@ Deno.serve(async (req) => {
         "- CFM → m3/h: 1 CFM = 1.699 m3/h. in.wg → Pa: 1 in.wg = 249 Pa. mmWG = 9.807 Pa. Show both units when the user used imperial.",
         "- If the user describes an application with no numbers, assume a sensible duty from standard practice, say plainly what you assumed, search with it and invite a correction.",
         "- Say WHY: pressure margin, absorbed power, efficiency, noise, size.",
+        "",
+        "Selection decision order (never change this order):",
+        "- 1. Preserve every hard requirement: product family, fan installation type, casing material, air-curtain mounting category, named series/brand, motor type, motor poles, fire/ATEX requirement and quantity.",
+        "- 2. Check whether the KINAIR catalogue can meet the requested duty or opening within the official selector limits.",
+        "- 3. Only among valid candidates, apply the user's optimisation goal. Optimisation must never relax or replace a hard requirement.",
+        "- 4. Return the optimum valid selection first. Offer different valid selections only when the user asks for alternatives or a different priority.",
+        "- Fan optimisation mapping: default/optimum/best overall -> balanced; quiet/silent/low dB -> low_noise; efficient/best efficiency -> high_efficiency; energy saving/lowest kW/low consumption -> low_power; compact/smallest -> smallest_size; more airflow -> max_airflow; more pressure -> max_pressure.",
+        "- Air-curtain optimisation mapping: default/optimum/best overall -> balanced; quiet/silent -> low_noise; energy saving/lowest watts -> low_power; more air -> max_airflow; stronger throw/floor velocity/tall door -> max_velocity; minimum quantity/single unit/fewest units -> fewest_units.",
+        "- A request for another/different/better option means run the preparation tool again with the SAME duty and hard filters but the newly requested optimize_for. Never invent a different model in prose.",
+        "- If no compliant KINAIR product meets the requirement, state clearly: 'This duty is outside the available KINAIR product range.' Identify which hard requirement or capacity is unavailable. Do not claim a datasheet is ready, do not silently cross product families, materials or mounting categories, and do not weaken the duty. You may mention a clearly labelled closest alternative only after saying it is outside range.",
+
         "- If nothing fits, say so straight and suggest what to change (bigger diameter, faster speed, two units in parallel, less system resistance).",
         "- Do not call find_fans as well as prepare_datasheet for the same request unless you truly need a number to explain the pick.",
         "- Datasheet in chat: the moment the user gives an airflow AND a static pressure (any units, series optional, e.g. '25 lps @ 50 Pa KVF-P'), call prepare_datasheet with those exact numbers and units. The app then runs the real KINAIR selection engine and downloads the datasheet PDF in the chat — the user does NOT need to open the Fan Selector. Call find_fans too if you need numbers to explain the pick.",
         "- After calling prepare_datasheet, keep it short: say which duty you selected on and that the datasheet PDF is downloading below, and mention they can pick another option from the buttons under your answer.",
         "- Air curtain datasheet in chat: the moment the user asks for an air curtain for a door/entrance (e.g. '3 m high, 2 m wide shop entrance'), call prepare_air_curtain_datasheet with the door size and units they gave. The app runs the real air curtain selection engine and downloads the datasheet PDF in the chat — the user does NOT need to open the Air Curtain Selector. If only the height is given, still call it and say what width you assumed.",
+        "- Air curtain mounting is a HARD constraint and always overrides optimisation, motor type, brand and series. 'Ceiling mounted', 'ceiling recessed', 'recess/recessed mounted', 'concealed' and 'flush mounted' must pass mounting='recessed' and may return ONLY recessed-category series/models. 'Wall mounted', 'surface mounted' and 'exposed' must pass mounting='surface' and may return ONLY surface-category series/models. Never silently substitute the other mounting category. If an explicitly named series conflicts with mounting, keep the mounting category and report that the named series is incompatible.",
         "- Catalogues and IOM manuals: when the user asks for a catalogue, brochure, IOM, installation or maintenance manual, call get_documents and reply with the download links as markdown links. If nothing is uploaded for that series, say so plainly.",
         "- Technical specifications: when the user asks about construction, certifications (AMCA/CE/ISO/UL/ATEX), fire rating, available sizes, diameters or motor poles, call get_specifications and answer from it. Never guess a certification.",
         "- Part documents: if the user wants only the dimensional drawing, or only the noise/sound data (fan or air curtain), call the same prepare tool again with output='drawing' or output='noise' and the same duty. Default is output='full'.",
@@ -828,6 +919,12 @@ Deno.serve(async (req) => {
         "",
         "Schedules and attachments:",
         "- The user can attach a fan or air curtain schedule as a PDF, a photo/screenshot or a spreadsheet (spreadsheets arrive as a text table in the message). Read every row carefully: tag/reference, quantity, airflow, static pressure, door width/height, series, noise limit.",
+        "- Supported multi-selection inputs are: multiple duties typed in chat, PDF schedules, Excel XLS/XLSX files, CSV files, images, phone photos and screenshots. A single upload may contain fans, air curtains or both mixed together.",
+        "- Classify each schedule row independently as fan or air_curtain. Never apply one row's type, mounting, material, units or optimisation to another row.",
+        "- For every row preserve the tag/reference, quantity and original units. For fan rows capture airflow, static pressure, series/type/material/poles/noise. For air-curtain rows capture door width, door height, mounting, motor type, series/brand and airflow/velocity requirement.",
+        "- Use prepare_schedule_selection exactly once for the whole mixed schedule. Include all readable rows in their original order, up to the tool limit. Never create separate tool calls merely because the schedule mixes fans and air curtains.",
+        "- If a row is outside the KINAIR range, keep that row in the output and mark it No suitable KINAIR selection; continue selecting all other valid rows.",
+
         "- Whenever there is MORE THAN ONE duty (attached schedule or several duties typed in one message), call prepare_schedule_selection ONCE with every row as an item — never call prepare_datasheet row by row.",
         "- Keep the schedule's own row order, tags and units. Never invent a row, never skip a row. If a row is unreadable or missing data, still include it with what you have and say in one line which rows need confirming.",
         "- A single duty stays with prepare_datasheet / prepare_air_curtain_datasheet as before.",
@@ -847,6 +944,8 @@ Deno.serve(async (req) => {
         "- After the schedule tool runs, reply in two or three short lines: how many rows you selected, anything you assumed, and that the table with datasheets is below.",
       ].join("\n"),
       messages: await convertToModelMessages(messages),
+      // Google adapter 2.0.96 preserves Gemini thought signatures, so the
+      // complete KINAIR tool set is safe for Gemini, OpenAI and Claude.
       tools: {
         list_fan_series: listSeries,
         find_fans: findFans,
