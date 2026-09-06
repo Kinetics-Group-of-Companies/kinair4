@@ -279,7 +279,8 @@ export default function FanSelectorPage() {
                 pressureUnit={pressureUnit} 
                 airDensity={searchCriteria.airDensity} 
                 temperature={searchCriteria.temperature} 
-                altitude={searchCriteria.altitude} 
+                altitude={searchCriteria.altitude}
+                autoDownload={searchParams.get('download') === '1'}
               />
             ) : (
               <div className="kinair-card p-6 md:p-8 text-center">
