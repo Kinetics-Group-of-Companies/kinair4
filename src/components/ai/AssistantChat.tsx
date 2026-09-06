@@ -71,7 +71,7 @@ function fanSelectorDefaults(db: any, series?: any) {
 
 /** Exact defaults used by AirCurtainSelectorPage. */
 const AC_MIN_MATCH_PERCENT = 95;
-const AC_MAX_MATCH_PERCENT = 110;
+const AC_MAX_MATCH_PERCENT = 200;
 const BACKGROUND_SCHEDULE_MARKER = '<<<KINAIR_BACKGROUND_SCHEDULE_DATA>>>';
 import {
   spreadsheetToText,
