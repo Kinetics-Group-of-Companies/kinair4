@@ -92,7 +92,7 @@ Deno.serve(async (req) => {
 
     const { messages, aiMode = "standard" }: {
       messages: UIMessage[];
-      aiMode?: "standard" | "advanced" | "openai" | "anthropic";
+      aiMode?: "auto" | "standard" | "advanced" | "openai" | "anthropic";
     } = await req.json();
 
     const listSeries = tool({
@@ -709,17 +709,25 @@ Deno.serve(async (req) => {
       },
     });
 
-    // Standard mode uses Gemini's economical/free-tier model. Advanced mode
-    // uses OpenAI credits. If the requested provider is not configured, keep
-    // the assistant available through the next configured provider.
+    // Auto routing keeps routine catalogue work on Gemini, sends large
+    // schedules/attachments to OpenAI, and uses Claude for complex engineering
+    // reasoning. Users can still override the provider from the chat header.
+    const latestRequest = JSON.stringify(messages.at(-1) ?? "").toLowerCase();
+    const needsOpenAI = /schedule|spreadsheet|excel|csv|attachment|uploaded|multiple (fan|unit)|combined pdf|\bqty\b|\bquantity\b/.test(latestRequest);
+    const needsClaude = /calculate|calculation|analyse|analyze|compare|why|troubleshoot|diagnos|compliance|standard|specification|engineering|duct loss|pressure loss|noise calculation|system design/.test(latestRequest);
+    const routedMode =
+      aiMode === "auto"
+        ? (needsOpenAI ? "openai" : needsClaude ? "anthropic" : "standard")
+        : aiMode;
+
     let providerName: "Google Gemini" | "OpenAI" | "Anthropic";
     let modelName: string;
     let model;
-    if ((aiMode === "advanced" || aiMode === "openai") && openaiApiKey) {
+    if ((routedMode === "advanced" || routedMode === "openai") && openaiApiKey) {
       providerName = "OpenAI";
       modelName = OPENAI_MODEL;
       model = createOpenAI({ apiKey: openaiApiKey })(modelName);
-    } else if (aiMode === "anthropic" && anthropicApiKey) {
+    } else if (routedMode === "anthropic" && anthropicApiKey) {
       providerName = "Anthropic";
       modelName = ANTHROPIC_MODEL;
       model = createAnthropic({ apiKey: anthropicApiKey })(modelName);
