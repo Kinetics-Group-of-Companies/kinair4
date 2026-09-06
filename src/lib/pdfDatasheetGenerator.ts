@@ -1161,9 +1161,6 @@ export async function generateEnhancedDatasheet(options: DatasheetOptions): Prom
     amcaLogoUrl,
     fireRatingLogoUrl,
     datasheetDescription,
-    chartImage,
-    powerChartImage,
-    efficiencyChartImage,
     // Speed control settings
     vfdEnabled = false,
     vfdFrequency,
@@ -1953,13 +1950,8 @@ export async function generateEnhancedDatasheet(options: DatasheetOptions): Prom
         chartType: 'pressure',
       });
       chartY += familyChartHeight + 2;
-    } else if (chartImage) {
-      // Use the exact chart rendered by the core selector. This keeps the
-      // datasheet axes, interpolation, system curve and duty marker identical.
-      doc.addImage(chartImage, 'PNG', rightColX, chartY, chartWidth, chartHeight);
-      chartY += chartHeight - 2;
     } else {
-      // Fallback for non-browser callers where chart capture is unavailable.
+      // Single curve with optional base curve for VFD comparison
       drawPerformanceCurve(doc, pressureData, rightColX, chartY, chartWidth, chartHeight, {
         yLabel: PRESSURE_UNITS[pressureUnit].label,
         xLabel: `Airflow (${AIRFLOW_UNITS[airflowUnit].label})`,
@@ -2011,9 +2003,6 @@ export async function generateEnhancedDatasheet(options: DatasheetOptions): Prom
         chartType: 'power',
       });
       chartY += familyChartHeight + 2;
-    } else if (powerChartImage) {
-      doc.addImage(powerChartImage, 'PNG', rightColX, chartY, chartWidth, chartHeight);
-      chartY += chartHeight - 2;
     } else {
       drawPerformanceCurve(doc, powerData, rightColX, chartY, chartWidth, chartHeight, {
         yLabel: 'kW',
@@ -2059,9 +2048,6 @@ export async function generateEnhancedDatasheet(options: DatasheetOptions): Prom
         chartType: 'efficiency',
       });
       chartY += familyChartHeight + 2;
-    } else if (efficiencyChartImage) {
-      doc.addImage(efficiencyChartImage, 'PNG', rightColX, chartY, chartWidth, chartHeight);
-      chartY += chartHeight - 2;
     } else {
       drawPerformanceCurve(doc, efficiencyData, rightColX, chartY, chartWidth, chartHeight, {
         yLabel: '%',
