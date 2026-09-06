@@ -154,26 +154,13 @@ export default function AirCurtainSelectorPage() {
       (m) => m.model.toLowerCase() === modelParam.toLowerCase(),
     ) ?? models.find((m) => m.model.toLowerCase().includes(modelParam.toLowerCase()));
     if (!target) return;
-    const requestedHeight = Number(searchParams.get('height'));
-    const requestedWidth = Number(searchParams.get('width'));
-    const requestedFloorVelocity = Number(searchParams.get('floorVelocity'));
     const heightM =
-      Number.isFinite(requestedHeight) && requestedHeight > 0
-        ? requestedHeight
-        : target.mountingHeightMax != null && target.mountingHeightMax > 0
-          ? target.mountingHeightMax
-          : 3;
-    const widthMm =
-      Number.isFinite(requestedWidth) && requestedWidth > 0
-        ? requestedWidth
-        : target.lengthMm && target.lengthMm > 0
-          ? target.lengthMm
-          : 1200;
+      target.mountingHeightMax != null && target.mountingHeightMax > 0
+        ? target.mountingHeightMax
+        : 3;
+    const widthMm = target.lengthMm && target.lengthMm > 0 ? target.lengthMm : 1200;
     setDoorWidth(String(widthMm));
     setDoorHeight(String(heightM));
-    if (Number.isFinite(requestedFloorVelocity) && requestedFloorVelocity >= 0) {
-      setMinFloorVelocity(String(requestedFloorVelocity));
-    }
     const found = selectAirCurtains(models, {
       doorWidthMm: widthMm,
       doorHeightM: heightM,
@@ -263,18 +250,6 @@ export default function AirCurtainSelectorPage() {
       setDownloading(false);
     }
   };
-
-  const autoDownloadRef = useRef<string | null>(null);
-  useEffect(() => {
-    if (searchParams.get('download') !== '1' || !selected) return;
-    const key = `${selected.model.id}:${doorWidthMm}:${doorHeightM}`;
-    if (autoDownloadRef.current === key) return;
-    autoDownloadRef.current = key;
-    const timer = window.setTimeout(() => void handleDatasheet(), 300);
-    return () => window.clearTimeout(timer);
-    // handleDatasheet intentionally reads the fully populated manual selector.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selected?.model.id, doorWidthMm, doorHeightM, searchParams]);
 
   const streamSpeeds = useMemo<StreamSpeed[]>(() => {
     if (!selected) return [];
