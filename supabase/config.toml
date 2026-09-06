@@ -1,0 +1,11 @@
+project_id = "lufjsnmkwnqqrymbodsj"
+
+[functions]
+  [functions.auth-email-hook]
+    verify_jwt = false
+  [functions.migrate-database]
+    verify_jwt = false
+  [functions.preview-transactional-email]
+    verify_jwt = false
+  [functions.lpo-alerts]
+    verify_jwt = false

@@ -1,0 +1,324 @@
+import { createClient } from 'npm:@supabase/supabase-js@2'
+import { corsHeaders } from 'npm:@supabase/supabase-js@2/cors'
+import { sendTemplateEmail } from '../_shared/transactional-email-templates/send-email.ts'
+
+const DAY = 86400000
+const RISK_WINDOW_DAYS = 7
+
+const STATUS_LABELS: Record<string, string> = {
+  new: 'New Order',
+  awaiting_advance: 'Awaiting Advance',
+  awaiting_clearance: 'Awaiting Mfg. Clearance',
+  in_production: 'In Production',
+  ready: 'Ready for Dispatch',
+  shipped: 'Shipped',
+  delivered: 'Delivered',
+  on_hold: 'On Hold',
+  cancelled: 'Cancelled',
+}
+
+interface Order {
+  id: string
+  user_id: string
+  tenant_id: string
+  notify_email: string | null
+  lpo_ref: string
+  lpo_date: string | null
+  client_name: string
+  project_name: string | null
+  material_type: string
+  quoted_lead_time_days: number | null
+  lead_time_weeks_min: number | null
+  lead_time_weeks_max: number | null
+  revised_lead_time_weeks_min: number | null
+  revised_lead_time_weeks_max: number | null
+  revised_lpo_date: string | null
+  revised_lpo_received_date: string | null
+  suppliers: { name: string; expected_delivery_date?: string | null }[] | null
+  factory_lead_time_days: number | null
+  lpo_received_date: string | null
+  advance_payment_date: string | null
+  manufacturing_clearance_date: string | null
+  supplier_po_date: string | null
+  committed_delivery_date: string | null
+  expected_delivery_date: string | null
+  actual_delivery_date: string | null
+  site_delivery_date: string | null
+  port_eta_date: string | null
+  customs_clearance_date: string | null
+  next_followup_date: string | null
+  priority: string | null
+  status: string
+}
+
+function addDays(iso: string, days: number): string {
+  const d = new Date(`${iso}T00:00:00Z`)
+  d.setUTCDate(d.getUTCDate() + days)
+  return d.toISOString().slice(0, 10)
+}
+
+function diffDays(a: string, b: string): number {
+  return Math.round((Date.parse(`${a}T00:00:00Z`) - Date.parse(`${b}T00:00:00Z`)) / DAY)
+}
+
+function latest(...dates: (string | null | undefined)[]): string | null {
+  const valid = dates.filter((d): d is string => !!d)
+  return valid.length ? valid.reduce((a, b) => (a > b ? a : b)) : null
+}
+
+function promisedDate(o: Order): string | null {
+  if (o.committed_delivery_date) return o.committed_delivery_date
+  const basis = latest(
+    o.revised_lpo_received_date ?? o.lpo_received_date ?? o.revised_lpo_date ?? o.lpo_date,
+    o.advance_payment_date,
+    o.manufacturing_clearance_date,
+  )
+  const weeks = o.revised_lead_time_weeks_max ?? o.lead_time_weeks_max ??
+    o.revised_lead_time_weeks_min ?? o.lead_time_weeks_min ?? null
+  if (basis && weeks != null) return addDays(basis, weeks * 7)
+  const start = o.lpo_received_date ?? o.lpo_date ?? null
+  if (start && o.quoted_lead_time_days != null) return addDays(start, o.quoted_lead_time_days)
+  return null
+}
+
+function forecastDate(o: Order): string | null {
+  if (o.actual_delivery_date || o.site_delivery_date) return o.actual_delivery_date ?? o.site_delivery_date
+  const fromSuppliers = latest(
+    ...(o.suppliers ?? []).map((s) => s.expected_delivery_date ?? null),
+    o.expected_delivery_date,
+    o.port_eta_date,
+    o.customs_clearance_date,
+  )
+  if (fromSuppliers) return fromSuppliers
+  const start =
+    o.manufacturing_clearance_date ??
+    o.supplier_po_date ??
+    o.advance_payment_date ??
+    o.lpo_received_date ??
+    null
+  if (start && o.factory_lead_time_days != null) return addDays(start, o.factory_lead_time_days)
+  return null
+}
+
+type Level = 'overdue' | 'at_risk' | 'on_track' | 'no_dates'
+
+function health(o: Order, today: string): {
+  level: Level
+  label: string
+  detail: string
+  promised: string | null
+  forecast: string | null
+  variance: number | null
+} {
+  const promised = promisedDate(o)
+  const forecast = forecastDate(o)
+  if (!promised) {
+    return { level: 'no_dates', label: 'Dates missing', detail: 'No committed delivery date or quoted lead time recorded.', promised, forecast, variance: null }
+  }
+  const daysRemaining = diffDays(promised, today)
+  const variance = forecast ? diffDays(forecast, promised) : null
+  if (daysRemaining < 0) {
+    return {
+      level: 'overdue',
+      label: `Overdue ${Math.abs(daysRemaining)}d`,
+      detail: `The committed date passed ${Math.abs(daysRemaining)} day(s) ago and the order is not delivered.`,
+      promised,
+      forecast,
+      variance: variance ?? Math.abs(daysRemaining),
+    }
+  }
+  if (variance != null && variance > 0) {
+    return {
+      level: 'at_risk',
+      label: `At risk +${variance}d`,
+      detail: `The factory forecast is ${variance} day(s) later than the date committed to the client.`,
+      promised,
+      forecast,
+      variance,
+    }
+  }
+  if (daysRemaining <= RISK_WINDOW_DAYS && !forecast) {
+    return {
+      level: 'at_risk',
+      label: 'Confirm delivery',
+      detail: `Due in ${daysRemaining} day(s) with no factory forecast recorded.`,
+      promised,
+      forecast,
+      variance: null,
+    }
+  }
+  return { level: 'on_track', label: 'On track', detail: `Due in ${daysRemaining} day(s).`, promised, forecast, variance }
+}
+
+function fmt(value: string | null): string {
+  if (!value) return '—'
+  return new Date(`${value}T00:00:00Z`).toLocaleDateString('en-GB', {
+    day: '2-digit',
+    month: 'short',
+    year: 'numeric',
+    timeZone: 'UTC',
+  })
+}
+
+Deno.serve(async (req) => {
+  if (req.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders })
+
+  const json = (body: unknown, status = 200) =>
+    new Response(JSON.stringify(body), {
+      status,
+      headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+    })
+
+  try {
+    let mode = 'delay'
+    try {
+      const body = await req.json()
+      if (body && typeof body.mode === 'string') mode = body.mode
+    } catch {
+      // no body — default mode
+    }
+    if (mode !== 'delay' && mode !== 'weekly') {
+      return json({ error: "mode must be 'delay' or 'weekly'" }, 400)
+    }
+
+    const supabase = createClient(
+      Deno.env.get('SUPABASE_URL')!,
+      Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!,
+      { auth: { persistSession: false } },
+    )
+
+    const today = new Date().toISOString().slice(0, 10)
+
+    const { data: orders, error } = await supabase
+      .from('lpo_orders')
+      .select('*')
+      .is('actual_delivery_date', null)
+      .is('site_delivery_date', null)
+      .not('status', 'in', '("delivered","cancelled")')
+
+    if (error) throw error
+
+    const open = (orders ?? []) as Order[]
+    if (open.length === 0) return json({ mode, sent: 0, orders: 0 })
+
+    // Resolve recipient emails (order override, else the owner's account email).
+    const userIds = [...new Set(open.map((o) => o.user_id).filter(Boolean))]
+    const { data: profiles } = await supabase
+      .from('profiles')
+      .select('user_id,email')
+      .in('user_id', userIds)
+    const emailByUser = new Map<string, string>()
+    for (const p of profiles ?? []) {
+      if (p.email) emailByUser.set(p.user_id, p.email)
+    }
+    const recipientFor = (o: Order) => o.notify_email || emailByUser.get(o.user_id) || null
+
+    let sent = 0
+    let skipped = 0
+
+    if (mode === 'delay') {
+      for (const o of open) {
+        const h = health(o, today)
+        if (h.level !== 'overdue' && h.level !== 'at_risk') continue
+        const to = recipientFor(o)
+        if (!to) continue
+
+        // One alert per order, per level, per day.
+        const alertKey = `${o.id}:${h.level}:${today}`
+        const { data: existing } = await supabase
+          .from('lpo_alert_log')
+          .select('id')
+          .eq('alert_key', alertKey)
+          .maybeSingle()
+        if (existing) {
+          skipped++
+          continue
+        }
+
+        const result = await sendTemplateEmail('lpo-delay-alert', to, {
+          idempotencyKey: `lpo-delay-alert-${alertKey}`,
+          templateData: {
+            lpoRef: o.lpo_ref,
+            clientName: o.client_name,
+            projectName: o.project_name,
+            materialType: o.material_type,
+            status: STATUS_LABELS[o.status] ?? o.status,
+            severity: h.level === 'overdue' ? 'Overdue' : 'At risk',
+            headline:
+              h.level === 'overdue'
+                ? 'Order is past its committed delivery date'
+                : 'Potential delay on this order',
+            detail: h.detail,
+            committedDate: fmt(h.promised),
+            forecastDate: fmt(h.forecast),
+            varianceDays: h.variance,
+          },
+        })
+
+        await supabase.from('lpo_alert_log').insert({
+          order_id: o.id,
+          tenant_id: o.tenant_id,
+          recipient_email: to,
+          alert_type: h.level,
+          alert_key: alertKey,
+        })
+
+        if (result.sent) sent++
+        else skipped++
+      }
+
+      return json({ mode, orders: open.length, sent, skipped })
+    }
+
+    // Weekly summary — one digest per recipient.
+    const byRecipient = new Map<string, Order[]>()
+    for (const o of open) {
+      const to = recipientFor(o)
+      if (!to) continue
+      const list = byRecipient.get(to) ?? []
+      list.push(o)
+      byRecipient.set(to, list)
+    }
+
+    for (const [to, list] of byRecipient) {
+      const rows = list.map((o) => ({ o, h: health(o, today) }))
+      rows.sort((a, b) => (a.h.promised ?? '9999').localeCompare(b.h.promised ?? '9999'))
+
+      const result = await sendTemplateEmail('lpo-weekly-summary', to, {
+        idempotencyKey: `lpo-weekly-summary-${to}-${today}`,
+        templateData: {
+          weekOf: fmt(today),
+          total: rows.length,
+          overdue: rows.filter((r) => r.h.level === 'overdue').length,
+          atRisk: rows.filter((r) => r.h.level === 'at_risk').length,
+          onTrack: rows.filter((r) => r.h.level === 'on_track').length,
+          orders: rows.map(({ o, h }) => ({
+            lpoRef: o.lpo_ref,
+            clientName: o.client_name,
+            materialType: o.material_type,
+            status: STATUS_LABELS[o.status] ?? o.status,
+            committedDate: fmt(h.promised),
+            forecastDate: fmt(h.forecast),
+            health: h.label,
+          })),
+        },
+      })
+
+      await supabase.from('lpo_alert_log').insert({
+        order_id: null,
+        tenant_id: list[0]?.tenant_id ?? null,
+        recipient_email: to,
+        alert_type: 'weekly',
+        alert_key: `weekly:${to}:${today}`,
+      })
+
+      if (result.sent) sent++
+      else skipped++
+    }
+
+    return json({ mode, orders: open.length, recipients: byRecipient.size, sent, skipped })
+  } catch (err) {
+    console.error('lpo-alerts error', err)
+    return json({ error: err instanceof Error ? err.message : String(err) }, 500)
+  }
+})

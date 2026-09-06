@@ -1,0 +1,1 @@
+ALTER TABLE public.lpo_orders ADD COLUMN IF NOT EXISTS last_updated_by_name text;

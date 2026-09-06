@@ -1,0 +1,3 @@
+ALTER TABLE public.air_curtain_models
+  ADD COLUMN IF NOT EXISTS brand text NOT NULL DEFAULT 'KINAIR',
+  ADD COLUMN IF NOT EXISTS motor_type text NOT NULL DEFAULT 'AC';

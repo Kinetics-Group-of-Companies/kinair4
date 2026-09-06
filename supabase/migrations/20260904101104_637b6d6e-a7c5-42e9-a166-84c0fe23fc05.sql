@@ -1,0 +1,1 @@
+ALTER TABLE public.lpo_orders ADD COLUMN IF NOT EXISTS commitment_matches_supplier boolean NOT NULL DEFAULT false;

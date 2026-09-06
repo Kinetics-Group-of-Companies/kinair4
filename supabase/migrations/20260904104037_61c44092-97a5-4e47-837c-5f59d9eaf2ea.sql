@@ -1,0 +1,1 @@
+ALTER TABLE public.lpo_orders ADD COLUMN revision_no integer NOT NULL DEFAULT 0;

@@ -1,0 +1,1 @@
+ALTER TABLE public.lpo_orders ADD COLUMN IF NOT EXISTS is_draft boolean NOT NULL DEFAULT false;
