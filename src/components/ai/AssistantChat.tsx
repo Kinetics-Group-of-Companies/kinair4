@@ -497,7 +497,7 @@ export function AssistantChat({
             ? resolveFanSeries(database, null, null, 'wall_mounted')
             : install === 'axial'
               ? resolveFanSeries(database, 'KTAF', null, 'axial')
-              : lowNoise
+              : lowNoise && !effectiveSeriesName && !effectiveMaterial
                 ? resolveFanSeries(database, 'KVF-P', null, 'inline_ducted')
                 : resolveFanSeries(database, effectiveSeriesName, effectiveMaterial, install);
 
