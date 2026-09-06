@@ -92,7 +92,7 @@ export default function AirCurtainSelectorPage() {
   const [supplyFrequency, setSupplyFrequency] = useState('50');
   const [downloading, setDownloading] = useState(false);
   const [minMatch, setMinMatch] = useState(95);
-  const [maxMatch, setMaxMatch] = useState(110);
+  const [maxMatch, setMaxMatch] = useState(200);
   const [widthUnit, setWidthUnit] = useState<LengthUnit>('mm');
   const [heightUnit, setHeightUnit] = useState<LengthUnit>('m');
   const [airflowUnit, setAirflowUnit] = useState<AirflowUnit>('cmh');
@@ -175,7 +175,7 @@ export default function AirCurtainSelectorPage() {
       minFloorVelocity: 2,
       supplyFrequencyHz: 50,
       minMatchPercent: 0,
-      maxMatchPercent: 400,
+      maxMatchPercent: 200,
       selectionBasis: 'door',
     });
     const match =
