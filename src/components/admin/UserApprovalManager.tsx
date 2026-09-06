@@ -101,13 +101,16 @@ export function UserApprovalManager() {
       const roleMap = new Map(roles?.map(r => [r.user_id, r.role]) || []);
 
       // Transform to flatten tenant and use email from profile (synced from auth.users)
-      const transformedProfiles = (profiles || []).map(p => ({
-        ...p,
-        tenant: Array.isArray(p.tenant) ? p.tenant[0] : p.tenant,
-        // Use profile email (synced from auth.users) first, fallback to tenant email
-        user_email: (p as any).email || (Array.isArray(p.tenant) ? p.tenant[0]?.email : (p.tenant as any)?.email),
-        role: roleMap.get(p.user_id) as 'admin' | 'user' | undefined
-      }));
+      const transformedProfiles = (profiles || [])
+        .map(p => ({
+          ...p,
+          tenant: Array.isArray(p.tenant) ? p.tenant[0] : p.tenant,
+          // Use profile email (synced from auth.users) first, fallback to tenant email
+          user_email: (p as any).email || (Array.isArray(p.tenant) ? p.tenant[0]?.email : (p.tenant as any)?.email),
+          role: roleMap.get(p.user_id) as 'admin' | 'user' | undefined
+        }))
+        // Super-admin accounts control this screen and must not be managed as subscribers.
+        .filter(profile => !SUPER_ADMIN_EMAILS.includes((profile.user_email || '').toLowerCase()));
 
       setUsers(transformedProfiles);
     } catch (error) {
