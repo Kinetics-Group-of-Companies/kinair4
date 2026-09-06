@@ -423,18 +423,32 @@ export function AssistantChat({
   const fanDownloadedRef = useRef<Set<string>>(new Set());
 
   const downloadDatasheet = useCallback(
-    (_key: string, selection: FanSelection, output: DocOutput = 'full') => {
-      const params = new URLSearchParams({
-        airflow: String(selection.requiredAirflow),
-        pressure: String(selection.requiredPressure),
-        model: selection.nomenclature,
-        document: output,
-      });
-      // A hard navigation closes the global assistant drawer and loads the
-      // genuine manual selector. No chat-side document generator is involved.
-      window.location.assign(`/selector?${params.toString()}`);
+    async (key: string, selection: FanSelection, output: DocOutput = 'full') => {
+      setDownloadingKey(key);
+      try {
+        if (output === 'drawing') {
+          await downloadFanDrawing(selection, database, dimensionsMap as any);
+          toast.success(`${selection.nomenclature} drawing downloaded`);
+        } else if (output === 'noise') {
+          await downloadFanNoiseData(selection, database);
+          toast.success(`${selection.nomenclature} sound data downloaded`);
+        } else {
+          const duty = autoSelections[key]?.duty;
+          await generateDatasheetForSelection(
+            selection,
+            database,
+            { airflowUnit: duty?.airflow_unit, pressureUnit: duty?.pressure_unit },
+            dimensionsMap as any,
+          );
+          toast.success(`${selection.nomenclature} datasheet downloaded`);
+        }
+      } catch {
+        toast.error('Could not build that document. Please try again.');
+      } finally {
+        setDownloadingKey(null);
+      }
     },
-    [],
+    [database, dimensionsMap, autoSelections],
   );
 
   useEffect(() => {
@@ -594,22 +608,39 @@ export function AssistantChat({
 
 
   const downloadAcDatasheet = useCallback(
-    (
-      _key: string,
+    async (
+      key: string,
       selection: AirCurtainSelection,
       auto: AcAutoSelection,
       output: DocOutput = 'full',
     ) => {
-      const params = new URLSearchParams({
-        model: selection.model.model,
-        width: String(auto.doorWidthMm),
-        height: String(auto.doorHeightM),
-        floorVelocity: String(auto.minFloorVelocity),
-        document: output,
-      });
-      window.location.assign(`/air-curtain?${params.toString()}`);
+      setAcDownloadingKey(key);
+      try {
+        if (output === 'drawing') {
+          await downloadAirCurtainDrawing(selection);
+          toast.success(`${selection.model.model} drawing downloaded`);
+        } else if (output === 'noise') {
+          await downloadAirCurtainNoiseData(selection);
+          toast.success(`${selection.model.model} sound data downloaded`);
+        } else {
+          await generateAirCurtainDatasheetForSelection(
+            selection,
+            {
+              doorWidthMm: auto.doorWidthMm,
+              doorHeightM: auto.doorHeightM,
+              minFloorVelocity: auto.minFloorVelocity,
+            },
+            { brands: acBrands, series: acSeries, dimensions: acDimensions, tenant },
+          );
+          toast.success(`${selection.model.model} datasheet downloaded`);
+        }
+      } catch {
+        toast.error('Could not build that document. Please try again.');
+      } finally {
+        setAcDownloadingKey(null);
+      }
     },
-    [],
+    [acBrands, acSeries, acDimensions, tenant],
   );
 
   useEffect(() => {
@@ -843,16 +874,22 @@ export function AssistantChat({
       setScheduleBusyKey(key);
       try {
         if (row.selection.kind === 'fan') {
-          const fan = row.selection.selection;
-          window.location.assign(
-            `/selector?airflow=${fan.requiredAirflow}&pressure=${fan.requiredPressure}&model=${encodeURIComponent(fan.nomenclature)}`,
-          );
+          await generateDatasheetForSelection(row.selection.selection, database, {
+            airflowUnit: row.selection.airflowUnit,
+            pressureUnit: row.selection.pressureUnit,
+          });
         } else {
-          const ac = row.selection;
-          window.location.assign(
-            `/air-curtain?model=${encodeURIComponent(ac.selection.model.model)}&width=${ac.doorWidthMm}&height=${ac.doorHeightM}&floorVelocity=${ac.minFloorVelocity}`,
+          await generateAirCurtainDatasheetForSelection(
+            row.selection.selection,
+            {
+              doorWidthMm: row.selection.doorWidthMm,
+              doorHeightM: row.selection.doorHeightM,
+              minFloorVelocity: row.selection.minFloorVelocity,
+            },
+            { brands: acBrands, series: acSeries, dimensions: acDimensions, tenant },
           );
         }
+        toast.success(`${row.tag} datasheet downloaded`);
       } catch {
         toast.error(`Could not build the datasheet for ${row.tag}.`);
       } finally {
