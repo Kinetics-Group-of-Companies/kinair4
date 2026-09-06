@@ -713,12 +713,18 @@ Deno.serve(async (req) => {
     // schedules/attachments to OpenAI, and uses Claude for complex engineering
     // reasoning. Users can still override the provider from the chat header.
     const latestRequest = JSON.stringify(messages.at(-1) ?? "").toLowerCase();
-    const needsOpenAI = /schedule|spreadsheet|excel|csv|attachment|uploaded|multiple (fan|unit)|combined pdf|\bqty\b|\bquantity\b/.test(latestRequest);
+    // Gemini 3.6 requires thought_signature continuity across function-call
+    // turns. The pinned AI SDK 5 Google adapter cannot preserve it, so all
+    // requests that may invoke catalogue tools are routed to OpenAI.
+    const needsTools = /fan|air curtain|select|selection|datasheet|drawing|noise data|catalogue|catalog|iom|model|airflow|static pressure|\bl\/s\b|\blps\b|\bpa\b|\bcfm\b|\bcmh\b|schedule|spreadsheet|excel|csv|attachment|uploaded|combined pdf|\bqty\b|\bquantity\b/.test(latestRequest);
+    const needsOpenAI = needsTools || /multiple (fan|unit)/.test(latestRequest);
     const needsClaude = /calculate|calculation|analyse|analyze|compare|why|troubleshoot|diagnos|compliance|standard|specification|engineering|duct loss|pressure loss|noise calculation|system design/.test(latestRequest);
     const routedMode =
       aiMode === "auto"
         ? (needsOpenAI ? "openai" : needsClaude ? "anthropic" : "standard")
-        : aiMode;
+        : aiMode === "standard" && needsTools
+          ? "openai"
+          : aiMode;
 
     let providerName: "Google Gemini" | "OpenAI" | "Anthropic";
     let modelName: string;
