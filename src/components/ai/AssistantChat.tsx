@@ -781,16 +781,23 @@ export function AssistantChat({
             const brandMatch = item.brand
               ? acBrands.find((b) => b.name.toLowerCase() === String(item.brand).toLowerCase())?.name
               : undefined;
+            const category: AirCurtainCategory | 'any' = (item.mounting as any) ?? 'any';
             const wanted = (item.series_name || '').trim().toLowerCase();
-            const series = wanted
+            const seriesMatch = wanted
               ? acSeries.find((s) => s.name.toLowerCase() === wanted) ||
                 acSeries.find((s) => s.name.toLowerCase().includes(wanted))
               : undefined;
+            // Mounting remains the hard filter even if schedule extraction
+            // supplied a conflicting wall/recessed series name.
+            const series =
+              seriesMatch && (category === 'any' || seriesMatch.category === category)
+                ? seriesMatch
+                : undefined;
 
             const coreResults = selectAirCurtains(acModels, {
                 doorWidthMm,
                 doorHeightM,
-                category: (item.mounting as any) ?? 'any',
+                category,
                 speed: 'high',
                 minNozzleVelocity: 0,
                 minAirflowCmh: 0,
@@ -829,7 +836,7 @@ export function AssistantChat({
           const pressureUnit = ((PRESSURE_UNITS as any)[item.pressure_unit ?? 'Pa'] ? item.pressure_unit : 'Pa') as
             keyof typeof PRESSURE_UNITS;
           const duty = `${item.airflow ?? '—'} ${airflowUnit} @ ${item.static_pressure ?? '—'} ${pressureUnit}`;
-          if (!item.airflow || !item.static_pressure) {
+          if (!item.airflow || item.static_pressure == null) {
             return { tag, quantity, product: 'fan', duty, label: 'Duty incomplete', detail: '' };
           }
           const rowLowNoise = (item as any).optimize === 'low_noise';
