@@ -110,6 +110,14 @@ export const AIR_CURTAIN_SUGGESTIONS = [
 
 export type AssistantContext = 'general' | 'fan' | 'air_curtain';
 
+type RegisteredAiModel = {
+  provider: 'google' | 'openai' | 'anthropic';
+  model_id: string;
+  display_name: string;
+  tier: 'free' | 'cheap' | 'balanced' | 'premium';
+  cost_rank: number;
+};
+
 type AiMode =
   | 'auto'
   | 'standard'
@@ -326,6 +334,41 @@ export function AssistantChat({
   const [aiMode, setAiMode] = useState<AiMode>('auto');
 
   const [activeProvider, setActiveProvider] = useState('Automatic routing');
+  const [availableModels, setAvailableModels] = useState<RegisteredAiModel[]>([]);
+
+  useEffect(() => {
+    if (!isAuthenticated) return;
+    let cancelled = false;
+    void supabase.functions.invoke('ai-model-registry').then(({ data, error }) => {
+      if (cancelled || error || !Array.isArray(data?.models)) return;
+      setAvailableModels(data.models);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [isAuthenticated]);
+
+  const dynamicModelOptions = useMemo(() => {
+    const modeFor = (model: RegisteredAiModel): AiMode | null => {
+      if (model.provider === 'google' && model.tier === 'free') return 'gemini';
+      if (model.provider === 'openai' && model.tier === 'cheap') return 'openai_luna';
+      if (model.provider === 'openai' && model.tier === 'balanced') return 'openai_terra';
+      if (model.provider === 'openai' && model.tier === 'premium') return 'openai_sol';
+      if (model.provider === 'anthropic' && model.tier === 'cheap') return 'anthropic_haiku';
+      if (model.provider === 'anthropic' && model.tier === 'balanced') return 'anthropic_sonnet';
+      if (model.provider === 'anthropic' && model.tier === 'premium') return 'anthropic_opus';
+      return null;
+    };
+    const seen = new Set<string>();
+    return [...availableModels]
+      .sort((a, b) => a.cost_rank - b.cost_rank || b.model_id.localeCompare(a.model_id))
+      .flatMap((model) => {
+        const mode = modeFor(model);
+        if (!mode || seen.has(mode)) return [];
+        seen.add(mode);
+        return [{ mode, label: `${model.display_name} · ${model.tier}` }];
+      });
+  }, [availableModels]);
 
   const transport = useMemo(
     () =>
@@ -1133,21 +1176,23 @@ export function AssistantChat({
               className="h-8 max-w-[58vw] rounded-md border border-border bg-background px-2 text-xs font-medium text-foreground sm:max-w-none"
             >
               <option value="auto">Automatic · Free → Premium</option>
-              <optgroup label="Free">
-                <option value="gemini">Gemini 3.6 Flash · Free</option>
-              </optgroup>
-              <optgroup label="Cheapest">
-                <option value="openai_luna">OpenAI GPT-5.6 Luna</option>
-                <option value="anthropic_haiku">Claude Haiku 4.5</option>
-              </optgroup>
-              <optgroup label="Balanced">
-                <option value="openai_terra">OpenAI GPT-5.6 Terra</option>
-                <option value="anthropic_sonnet">Claude Sonnet 5</option>
-              </optgroup>
-              <optgroup label="Advanced">
-                <option value="openai_sol">OpenAI GPT-5.6 Sol</option>
-                <option value="anthropic_opus">Claude Opus 5</option>
-              </optgroup>
+              {dynamicModelOptions.length > 0 ? (
+                dynamicModelOptions.map((model) => (
+                  <option key={model.mode} value={model.mode}>
+                    {model.label}
+                  </option>
+                ))
+              ) : (
+                <>
+                  <option value="gemini">Gemini 3.6 Flash · free</option>
+                  <option value="openai_luna">OpenAI GPT-5.6 Luna · cheap</option>
+                  <option value="anthropic_haiku">Claude Haiku 4.5 · cheap</option>
+                  <option value="openai_terra">OpenAI GPT-5.6 Terra · balanced</option>
+                  <option value="anthropic_sonnet">Claude Sonnet 5 · balanced</option>
+                  <option value="openai_sol">OpenAI GPT-5.6 Sol · premium</option>
+                  <option value="anthropic_opus">Claude Opus 5 · premium</option>
+                </>
+              )}
             </select>
           </div>
           <div ref={scrollRef} className="flex-1 overflow-y-auto p-4 space-y-4">
