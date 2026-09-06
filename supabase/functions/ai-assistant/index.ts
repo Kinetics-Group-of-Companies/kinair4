@@ -1,5 +1,12 @@
 import { convertToModelMessages, streamText, tool, stepCountIs, type UIMessage } from "npm:ai@5";
-import { createAnthropic } from "npm:@ai-sdk/anthropic@4";
+// Pinned exact: @ai-sdk/anthropic majors drifted their internal provider
+// "specificationVersion" (v1 -> v2 -> v3 -> v4) without a coordinated ai@5
+// major bump. ai@5 only accepts v2, and only the 2.0.x line implements it
+// (2.1.0-beta+ already moved to v3, 3.x is v3, 4.x is v4) - so @4 here was
+// never compatible with ai@5 and failed every request with "Unsupported
+// model version v4 ... AI SDK 5 only supports models that implement
+// specification version 'v2'".
+import { createAnthropic } from "npm:@ai-sdk/anthropic@2.0.101";
 import { z } from "npm:zod@3";
 import { createClient } from "npm:@supabase/supabase-js@2";
 
