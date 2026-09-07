@@ -1,48 +1,61 @@
 import * as React from 'npm:react@18.3.1'
 import { renderAsync } from 'npm:@react-email/components@0.0.22'
-import { EmailAPIError, sendLovableEmail } from 'npm:@lovable.dev/email-js@0.1.0'
 import { TEMPLATES } from './registry.ts'
 
-// Server-only: reads LOVABLE_API_KEY. Import from edge functions only — never
-// expose sending to the browser.
-
-// Configuration baked in at scaffold time
-const SITE_NAME = "KINAIR"
-// SENDER_DOMAIN is the verified sender subdomain FQDN (e.g., "notify.example.com").
-// It MUST match the subdomain delegated to Lovable's nameservers. NEVER use the root domain.
-const SENDER_DOMAIN = "notify.kinair.ae"
-// FROM_DOMAIN is the domain shown in the From: header (e.g., "example.com").
-// Can be the root domain when display_from_root is enabled — this is cosmetic only.
-const FROM_DOMAIN = "kinair.ae"
+const AGENTMAIL_API_BASE = 'https://api.agentmail.to/v0'
+let resolvedInbox: Promise<string> | null = null
 
 export type SendTemplateEmailResult =
-  | { sent: true }
+  | { sent: true; messageId?: string; threadId?: string }
   | { sent: false; reason: 'recipient_suppressed' }
 
 export interface SendTemplateEmailOptions {
   templateData?: Record<string, any>
-  /** Dedupes retries of the same logical send; defaults to a random UUID (no dedupe). */
+  /** Prevents duplicate emails when a scheduled request is retried within 24 hours. */
   idempotencyKey?: string
   replyTo?: string
 }
 
-/**
- * Renders a registered template and sends it through Lovable's managed email
- * API. Suppression, retries, and rate limits are enforced by Lovable
- * server-side. A suppressed recipient is an expected outcome
- * ({ sent: false }); any other failure throws — EmailAPIError exposes
- * .code and .status for branching.
- */
+function requireAgentMailKey(): string {
+  const apiKey = Deno.env.get('AGENTMAIL_API_KEY')
+  if (!apiKey) throw new Error('AGENTMAIL_API_KEY is not configured')
+  return apiKey
+}
+
+async function resolveInboxId(apiKey: string): Promise<string> {
+  const configured = Deno.env.get('AGENTMAIL_INBOX_ID')?.trim()
+  if (configured) return configured
+
+  resolvedInbox ??= (async () => {
+    const response = await fetch(`${AGENTMAIL_API_BASE}/inboxes?limit=1`, {
+      headers: { Authorization: `Bearer ${apiKey}` },
+    })
+    const raw = await response.text()
+    if (!response.ok) {
+      throw new Error(`AgentMail inbox lookup failed (${response.status}): ${raw.slice(0, 500)}`)
+    }
+    const data = JSON.parse(raw)
+    const inboxId = data?.inboxes?.[0]?.inbox_id
+    if (!inboxId) {
+      throw new Error('No AgentMail inbox exists. Create a free @agentmail.to inbox first.')
+    }
+    return String(inboxId)
+  })()
+
+  return resolvedInbox
+}
+
+function validIdempotencyKey(value: string): string {
+  const sanitized = value.replace(/[^A-Za-z0-9._~-]/g, '-').slice(0, 256)
+  return sanitized || crypto.randomUUID()
+}
+
 export async function sendTemplateEmail(
   templateName: string,
   to: string,
   options: SendTemplateEmailOptions = {}
 ): Promise<SendTemplateEmailResult> {
-  const apiKey = Deno.env.get('LOVABLE_API_KEY')
-  if (!apiKey) {
-    throw new Error('LOVABLE_API_KEY is not configured')
-  }
-
+  const apiKey = requireAgentMailKey()
   const template = TEMPLATES[templateName]
   if (!template) {
     throw new Error(
@@ -50,8 +63,6 @@ export async function sendTemplateEmail(
     )
   }
 
-  // Template-level `to` takes precedence — notification templates always
-  // send to their fixed address.
   const recipient = template.to || to
   if (!recipient) {
     throw new Error('Recipient is required (the template defines no fixed recipient)')
@@ -66,28 +77,30 @@ export async function sendTemplateEmail(
       ? template.subject(templateData)
       : template.subject
 
-  try {
-    await sendLovableEmail(
-      {
-        to: recipient,
-        from: `${SITE_NAME} <noreply@${FROM_DOMAIN}>`,
-        sender_domain: SENDER_DOMAIN,
+  const inboxId = await resolveInboxId(apiKey)
+  const response = await fetch(
+    `${AGENTMAIL_API_BASE}/inboxes/${encodeURIComponent(inboxId)}/messages/send`,
+    {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        'Content-Type': 'application/json',
+        'Idempotency-Key': validIdempotencyKey(options.idempotencyKey || crypto.randomUUID()),
+      },
+      body: JSON.stringify({
+        to: [recipient],
         subject,
         html,
         text,
-        purpose: 'transactional',
-        label: templateName,
-        idempotency_key: options.idempotencyKey || crypto.randomUUID(),
-        reply_to: options.replyTo,
-      },
-      { apiKey, sendUrl: Deno.env.get('LOVABLE_SEND_URL') }
-    )
-  } catch (error) {
-    if (error instanceof EmailAPIError && error.code === 'recipient_suppressed') {
-      return { sent: false, reason: 'recipient_suppressed' }
-    }
-    throw error
-  }
+        ...(options.replyTo ? { reply_to: options.replyTo } : {}),
+      }),
+    },
+  )
 
-  return { sent: true }
+  const raw = await response.text()
+  if (!response.ok) {
+    throw new Error(`AgentMail send failed (${response.status}): ${raw.slice(0, 500)}`)
+  }
+  const result = raw ? JSON.parse(raw) : {}
+  return { sent: true, messageId: result.message_id, threadId: result.thread_id }
 }

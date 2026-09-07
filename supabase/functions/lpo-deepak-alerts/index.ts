@@ -1,6 +1,5 @@
 import { createClient } from 'npm:@supabase/supabase-js@2'
 import { corsHeaders } from 'npm:@supabase/supabase-js@2/cors'
-import { sendLovableEmail } from 'npm:@lovable.dev/email-js@0.1.0'
 
 const RECIPIENT = 'deepak@kineticsgroup.ae'
 const CRON_SECRET_SHA256 = '9a0145f42701522a765dd224dc6712f1f934bec2aad7be109d0bd75a221c980c'
@@ -90,6 +89,45 @@ function escapeHtml(value: unknown): string {
     .replaceAll("'", '&#039;')
 }
 
+const AGENTMAIL_API_BASE = 'https://api.agentmail.to/v0'
+
+async function resolveAgentMailInbox(apiKey: string): Promise<string> {
+  const configured = Deno.env.get('AGENTMAIL_INBOX_ID')?.trim()
+  if (configured) return configured
+  const response = await fetch(`${AGENTMAIL_API_BASE}/inboxes?limit=1`, {
+    headers: { Authorization: `Bearer ${apiKey}` },
+  })
+  const raw = await response.text()
+  if (!response.ok) {
+    throw new Error(`AgentMail inbox lookup failed (${response.status}): ${raw.slice(0, 500)}`)
+  }
+  const data = JSON.parse(raw)
+  const inboxId = data?.inboxes?.[0]?.inbox_id
+  if (!inboxId) throw new Error('No AgentMail inbox exists. Create a free @agentmail.to inbox first.')
+  return String(inboxId)
+}
+
+async function sendAgentMail(subject: string, html: string, text: string, idempotencyKey: string) {
+  const apiKey = Deno.env.get('AGENTMAIL_API_KEY')
+  if (!apiKey) throw new Error('AGENTMAIL_API_KEY is not configured')
+  const inboxId = await resolveAgentMailInbox(apiKey)
+  const response = await fetch(
+    `${AGENTMAIL_API_BASE}/inboxes/${encodeURIComponent(inboxId)}/messages/send`,
+    {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        'Content-Type': 'application/json',
+        'Idempotency-Key': idempotencyKey.replace(/[^A-Za-z0-9._~-]/g, '-').slice(0, 256),
+      },
+      body: JSON.stringify({ to: [RECIPIENT], subject, html, text }),
+    },
+  )
+  const raw = await response.text()
+  if (!response.ok) throw new Error(`AgentMail send failed (${response.status}): ${raw.slice(0, 500)}`)
+  return raw ? JSON.parse(raw) : {}
+}
+
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders })
   const respond = (body: unknown, status = 200) => new Response(JSON.stringify(body), {
@@ -146,21 +184,12 @@ Deno.serve(async (req) => {
       ),
     ].join('\n')
 
-    const apiKey = Deno.env.get('LOVABLE_API_KEY')
-    if (!apiKey) throw new Error('LOVABLE_API_KEY is not configured')
-    await sendLovableEmail({
-      to: RECIPIENT,
-      from: 'KINAIR <noreply@kinair.ae>',
-      sender_domain: 'notify.kinair.ae',
+    const delivery = await sendAgentMail(
       subject,
       html,
       text,
-      purpose: 'transactional',
-      label: 'lpo-daily-deepak-summary',
-      idempotency_key: test
-        ? `lpo-daily-deepak-test-${today}`
-        : `lpo-daily-deepak-${today}`,
-    }, { apiKey, sendUrl: Deno.env.get('LOVABLE_SEND_URL') })
+      test ? `lpo-daily-deepak-test-${today}` : `lpo-daily-deepak-${today}`,
+    )
 
     return respond({
       sent: true,
@@ -170,6 +199,8 @@ Deno.serve(async (req) => {
       overdue,
       at_risk: atRisk,
       on_track: onTrack,
+      message_id: delivery.message_id,
+      thread_id: delivery.thread_id,
     })
   } catch (error) {
     console.error('lpo-deepak-alerts error', error)
