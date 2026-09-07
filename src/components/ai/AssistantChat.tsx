@@ -741,23 +741,39 @@ export function AssistantChat({
               const providerMismatch =
                 expectedProvider[mode] != null && provider !== expectedProvider[mode];
 
-              // A provider is healthy only when it starts producing the response,
-              // not merely when it returns HTTP headers. Wait for the first stream
-              // chunk within the provider deadline, then put that chunk back so the
-              // AI SDK receives the complete untouched stream.
+              // A provider is healthy only when it produces a meaningful AI SDK
+              // event. Gemini can emit a stream-start frame immediately and then
+              // stall, so a raw first-byte check is not enough.
               if (response.ok && !providerMismatch) {
                 if (!response.body) {
                   throw new Error('AI provider returned an empty response stream.');
                 }
                 const reader = response.body.getReader();
-                const firstChunk = await reader.read();
+                const bufferedChunks: Uint8Array[] = [];
+                const decoder = new TextDecoder();
+                let protocolPrelude = '';
+                let streamEnded = false;
+                const meaningfulEvent =
+                  /"type":"(?:text-delta|tool-input-start|tool-input-delta|tool-call|error)"/;
+
+                while (!streamEnded && !meaningfulEvent.test(protocolPrelude)) {
+                  const nextChunk = await reader.read();
+                  streamEnded = nextChunk.done;
+                  if (nextChunk.value) {
+                    bufferedChunks.push(nextChunk.value);
+                    protocolPrelude += decoder.decode(nextChunk.value, { stream: true });
+                  }
+                }
+
                 const resumedBody = new ReadableStream<Uint8Array>({
                   start(streamController) {
-                    if (firstChunk.done) {
+                    for (const bufferedChunk of bufferedChunks) {
+                      streamController.enqueue(bufferedChunk);
+                    }
+                    if (streamEnded) {
                       streamController.close();
                       return;
                     }
-                    streamController.enqueue(firstChunk.value);
                     const pump = (): void => {
                       void reader.read().then(
                         ({ done, value: nextValue }) => {
