@@ -101,7 +101,13 @@ export default function ComparePage() {
   // Get blade configurations for selected model
   const selectedFanModel = seriesFans.find(f => f.id === selectedModel);
   const bladeConfigs = selectedFanModel?.bladeConfigurations || [];
-  const hasBladeConfigs = bladeConfigs.length > 0 && bladeConfigs.some(bc => bc.bladeAngles && bc.bladeAngles.length > 0);
+  // Inline and wall fans use an internal 0-blade/0° record to store their
+  // fixed performance curve. Keep it for calculations, but never show it as
+  // a user-selectable blade configuration.
+  const selectableBladeConfigs = bladeConfigs.filter(
+    bc => bc.bladeCount > 0 && bc.bladeAngles && bc.bladeAngles.length > 0,
+  );
+  const hasBladeConfigs = selectableBladeConfigs.length > 0;
   const availableMotorPoles = selectedFanModel?.motorPoles || [];
 
   const handleAddFan = () => {
@@ -117,6 +123,11 @@ export default function ComparePage() {
       const [bc, ba] = selectedBladeConfig.split('-').map(Number);
       bladeCount = bc;
       bladeAngle = ba;
+    } else if (!hasBladeConfigs && bladeConfigs.length > 0) {
+      // Preserve the hidden fixed-curve key so performance and noise data
+      // remain available in the comparison output.
+      bladeCount = bladeConfigs[0].bladeCount;
+      bladeAngle = bladeConfigs[0].bladeAngles?.[0] ?? null;
     }
     
     const series = seriesList.find(s => s.id === selectedSeries);
@@ -359,7 +370,7 @@ export default function ComparePage() {
                       <SelectValue placeholder="Blades / Angle" />
                     </SelectTrigger>
                     <SelectContent>
-                      {bladeConfigs.map(bc => 
+                      {selectableBladeConfigs.map(bc => 
                         bc.bladeAngles?.map(angle => (
                           <SelectItem key={`${bc.bladeCount}-${angle}`} value={`${bc.bladeCount}-${angle}`}>
                             {bc.bladeCount} blades @ {angle}°

@@ -18,6 +18,7 @@ interface SoftwareRelease {
   file_size_bytes: number | null;
   is_latest: boolean;
   published_at: string;
+  available?: boolean;
 }
 
 function formatSize(bytes: number | null) {
@@ -40,7 +41,17 @@ export default function DownloadsPage() {
         .select('*')
         .order('published_at', { ascending: false });
       if (error) throw error;
-      return (data || []) as SoftwareRelease[];
+
+      // Validate each Storage object before presenting an active download.
+      // This updates automatically as soon as a missing installer is uploaded.
+      return Promise.all(
+        ((data || []) as SoftwareRelease[]).map(async (release) => {
+          const { data: signed, error: signedError } = await supabase.storage
+            .from('software-releases')
+            .createSignedUrl(release.storage_path, 60);
+          return { ...release, available: !signedError && Boolean(signed?.signedUrl) };
+        }),
+      );
     },
   });
 
@@ -82,6 +93,7 @@ export default function DownloadsPage() {
           <CardTitle className="text-lg md:text-xl">{release.title}</CardTitle>
           <Badge>{release.version}</Badge>
           <Badge variant="outline">Latest</Badge>
+          {release.available === false && <Badge variant="destructive">Temporarily unavailable</Badge>}
         </div>
         <CardDescription>{release.notes}</CardDescription>
       </CardHeader>
@@ -100,7 +112,7 @@ export default function DownloadsPage() {
           size="lg"
           className="w-full sm:w-auto"
           onClick={() => handleDownload(release)}
-          disabled={busy === release.id}
+          disabled={busy === release.id || release.available === false}
         >
           {busy === release.id ? (
             <Loader2 className="w-4 h-4 animate-spin" />
@@ -109,7 +121,11 @@ export default function DownloadsPage() {
           )}
           Download {release.version}
         </Button>
-        <p className="text-xs text-muted-foreground">{hint}</p>
+        <p className="text-xs text-muted-foreground">
+          {release.available === false
+            ? 'The installer file is being restored. Please check again shortly.'
+            : hint}
+        </p>
       </CardContent>
     </Card>
   );
@@ -172,14 +188,14 @@ export default function DownloadsPage() {
                           variant="outline"
                           size="sm"
                           onClick={() => handleDownload(r)}
-                          disabled={busy === r.id}
+                          disabled={busy === r.id || r.available === false}
                         >
                           {busy === r.id ? (
                             <Loader2 className="w-4 h-4 animate-spin" />
                           ) : (
                             <Download className="w-4 h-4" />
                           )}
-                          Download
+                          {r.available === false ? 'Unavailable' : 'Download'}
                         </Button>
                       </CardContent>
                     </Card>
