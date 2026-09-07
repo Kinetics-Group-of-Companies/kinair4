@@ -4,6 +4,22 @@ import { sendTemplateEmail } from '../_shared/transactional-email-templates/send
 
 const DAY = 86400000
 const RISK_WINDOW_DAYS = 7
+const CRON_SECRET_SHA256 = '9a0145f42701522a765dd224dc6712f1f934bec2aad7be109d0bd75a221c980c'
+
+async function hasValidCronSecret(req: Request): Promise<boolean> {
+  const supplied = req.headers.get('x-kinair-cron-secret') ?? ''
+  if (!supplied) return false
+  const bytes = new Uint8Array(
+    await crypto.subtle.digest('SHA-256', new TextEncoder().encode(supplied)),
+  )
+  const actual = Array.from(bytes, (byte) => byte.toString(16).padStart(2, '0')).join('')
+  if (actual.length !== CRON_SECRET_SHA256.length) return false
+  let mismatch = 0
+  for (let i = 0; i < actual.length; i++) {
+    mismatch |= actual.charCodeAt(i) ^ CRON_SECRET_SHA256.charCodeAt(i)
+  }
+  return mismatch === 0
+}
 
 const STATUS_LABELS: Record<string, string> = {
   new: 'New Order',
@@ -169,11 +185,17 @@ Deno.serve(async (req) => {
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
     })
 
+  if (!(await hasValidCronSecret(req))) {
+    return json({ error: 'Unauthorized' }, 401)
+  }
+
   try {
     let mode = 'delay'
+    let dryRun = false
     try {
       const body = await req.json()
       if (body && typeof body.mode === 'string') mode = body.mode
+      dryRun = body?.dry_run === true
     } catch {
       // no body — default mode
     }
@@ -215,6 +237,7 @@ Deno.serve(async (req) => {
 
     let sent = 0
     let skipped = 0
+    let wouldSend = 0
 
     if (mode === 'delay') {
       for (const o of open) {
@@ -222,6 +245,8 @@ Deno.serve(async (req) => {
         if (h.level !== 'overdue' && h.level !== 'at_risk') continue
         const to = recipientFor(o)
         if (!to) continue
+        wouldSend++
+        if (dryRun) continue
 
         // One alert per order, per level, per day.
         const alertKey = `${o.id}:${h.level}:${today}`
@@ -267,7 +292,7 @@ Deno.serve(async (req) => {
         else skipped++
       }
 
-      return json({ mode, orders: open.length, sent, skipped })
+      return json({ mode, dry_run: dryRun, orders: open.length, would_send: wouldSend, sent, skipped })
     }
 
     // Weekly summary — one digest per recipient.
@@ -281,7 +306,9 @@ Deno.serve(async (req) => {
     }
 
     for (const [to, list] of byRecipient) {
+      wouldSend++
       const rows = list.map((o) => ({ o, h: health(o, today) }))
+      if (dryRun) continue
       rows.sort((a, b) => (a.h.promised ?? '9999').localeCompare(b.h.promised ?? '9999'))
 
       const result = await sendTemplateEmail('lpo-weekly-summary', to, {
@@ -316,7 +343,7 @@ Deno.serve(async (req) => {
       else skipped++
     }
 
-    return json({ mode, orders: open.length, recipients: byRecipient.size, sent, skipped })
+    return json({ mode, dry_run: dryRun, orders: open.length, recipients: byRecipient.size, would_send: wouldSend, sent, skipped })
   } catch (err) {
     console.error('lpo-alerts error', err)
     return json({ error: err instanceof Error ? err.message : String(err) }, 500)
