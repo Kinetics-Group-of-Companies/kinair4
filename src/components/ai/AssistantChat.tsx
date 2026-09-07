@@ -147,51 +147,93 @@ function promoteSelectedFm35ToFm45(
   return rebuilt ?? selection;
 }
 
-function isFm4518XdUnavailableRequest(userText: string): boolean {
-  const compact = userText.toUpperCase().replace(/[\s–—-]+/g, '');
-  const namesFm4518Xd = compact.includes('FM4518XD');
-  const asksForSubstitution =
-    /\b(?:not|out\s+of)\s+stock\b/i.test(userText) ||
-    /\bunavailable\b/i.test(userText) ||
-    /\b(replace|switch|substitute|promote|change)\b/i.test(userText);
-  return namesFm4518Xd && asksForSubstitution;
+function normalizeAirCurtainModelToken(value: string): string | null {
+  const compact = value.toUpperCase().replace(/[^A-Z0-9]/g, '');
+  return compact.match(/FM(?:12|35|45|55)(?:09|10|12|15|18|20)(?:XD)?/)?.[0] ?? null;
 }
 
-function replaceSelectedFm4518XdWithFm4520Xd(
+/**
+ * Extract only models the customer explicitly marks unavailable. Replacement
+ * models mentioned after "with/to" are not treated as unavailable.
+ */
+function explicitlyUnavailableAirCurtainModels(userText: string): Set<string> {
+  const unavailable = new Set<string>();
+  const modelPattern = /FM[\s-]?(?:12|35|45|55)[\s-]?(?:09|10|12|15|18|20)(?:\s*XD)?/gi;
+  for (const match of userText.matchAll(modelPattern)) {
+    const raw = match[0];
+    const index = match.index ?? 0;
+    const before = userText.slice(Math.max(0, index - 45), index);
+    const after = userText.slice(index + raw.length, index + raw.length + 45);
+    const unavailableAfter =
+      /^[^.;,]{0,20}\b(?:is|if|as)?\s*(?:(?:not|out\s+of)\s+stock|unavailable)\b/i.test(after);
+    const unavailableBefore =
+      /\b(?:do(?:n't|\s+not)\s+have(?:\s+in)?\s+stock|no\s+stock\s+(?:for|of)?|out\s+of\s+stock|unavailable)\s*[:=-]?\s*$/i.test(before);
+    if (unavailableAfter || unavailableBefore) {
+      const token = normalizeAirCurtainModelToken(raw);
+      if (token) unavailable.add(token);
+    }
+  }
+  return unavailable;
+}
+
+function hasExplicitUnavailableAirCurtainModelRequest(userText: string): boolean {
+  return explicitlyUnavailableAirCurtainModels(userText).size > 0;
+}
+
+/**
+ * Replace each explicitly unavailable selected model with the next longer
+ * available catalogue model in the same series and mounting-height class.
+ */
+function promoteExplicitlyUnavailableSelectedModels(
   selection: AirCurtainSelection,
   models: AirCurtainModel[],
-  seriesRecords: Array<{ id: string; name: string }>,
   criteria: {
     doorWidthMm: number;
     doorHeightM: number;
     minFloorVelocity: number;
   },
+  userText: string,
 ): AirCurtainSelection {
+  const unavailable = explicitlyUnavailableAirCurtainModels(userText);
+  if (!unavailable.size) return selection;
+
   let changed = false;
   const replacementUnits = selection.units.map((unit) => {
-    const seriesName =
-      seriesRecords.find((series) => series.id === unit.model.seriesId)?.name ?? '';
-    if (
-      !/^XD-Centrifugal Flow$/i.test(seriesName) ||
-      !/^FM-?4518XD/i.test(String(unit.model.model))
-    ) {
-      return unit;
-    }
-    const replacement = models.find(
-      (model) =>
-        model.seriesId === unit.model.seriesId &&
-        /^FM-?4520XD/i.test(String(model.model)),
-    );
+    const selectedToken = normalizeAirCurtainModelToken(String(unit.model.model));
+    if (!selectedToken || !unavailable.has(selectedToken)) return unit;
+
+    const sameHeightClass = (model: AirCurtainModel) =>
+      Math.abs((model.mountingHeightMin ?? 0) - (unit.model.mountingHeightMin ?? 0)) < 0.001 &&
+      Math.abs((model.mountingHeightMax ?? 0) - (unit.model.mountingHeightMax ?? 0)) < 0.001;
+    const replacement = models
+      .filter(
+        (model) =>
+          model.seriesId === unit.model.seriesId &&
+          model.motorType === unit.model.motorType &&
+          sameHeightClass(model) &&
+          model.lengthMm > unit.model.lengthMm &&
+          !unavailable.has(normalizeAirCurtainModelToken(String(model.model)) ?? ''),
+      )
+      .sort((a, b) => a.lengthMm - b.lengthMm)[0];
+
     if (!replacement) return unit;
     changed = true;
     return { model: replacement, qty: unit.qty };
   });
 
   if (!changed) return selection;
+  const finalLength = replacementUnits.reduce(
+    (total, unit) => total + unit.model.lengthMm * unit.qty,
+    0,
+  );
+  if (criteria.doorWidthMm > 0 && (finalLength / criteria.doorWidthMm) * 100 > AC_MAX_MATCH_PERCENT) {
+    return selection;
+  }
+
   const rebuilt = rebuildAirCurtainSelection(replacementUnits, {
     doorWidthMm: criteria.doorWidthMm,
     doorHeightM: criteria.doorHeightM,
-    category: 'recessed',
+    category: selection.model.category,
     speed: 'high',
     minNozzleVelocity: 0,
     minAirflowCmh: 0,
@@ -222,9 +264,12 @@ function applyRequestedAirCurtainPromotions(
   const afterFm35 = isFm35ToFm45PromotionRequest(userText)
     ? promoteSelectedFm35ToFm45(selection, models, seriesRecords, criteria)
     : selection;
-  return isFm4518XdUnavailableRequest(userText)
-    ? replaceSelectedFm4518XdWithFm4520Xd(afterFm35, models, seriesRecords, criteria)
-    : afterFm35;
+  return promoteExplicitlyUnavailableSelectedModels(
+    afterFm35,
+    models,
+    criteria,
+    userText,
+  );
 }
 
 function seriesFromExistingAirCurtainSelection(
@@ -1069,7 +1114,7 @@ export function AssistantChat({
           optimizeFor === 'balanced' ? results : rankAirCurtains(results, optimizeFor);
         const hasRequestedPromotion =
           isFm35ToFm45PromotionRequest(userText) ||
-          isFm4518XdUnavailableRequest(userText);
+          hasExplicitUnavailableAirCurtainModelRequest(userText);
         const ranked =
           rankedBeforePromotion.length > 0 && hasRequestedPromotion
             ? [
@@ -1141,7 +1186,7 @@ export function AssistantChat({
             .join(' ') ?? '';
         const promoteFm35 = isFm35ToFm45PromotionRequest(scheduleUserText);
         const hasSchedulePromotion =
-          promoteFm35 || isFm4518XdUnavailableRequest(scheduleUserText);
+          promoteFm35 || hasExplicitUnavailableAirCurtainModelRequest(scheduleUserText);
 
         const rows: ScheduleRow[] = items.map((item, i) => {
           const tag = (item.tag || '').trim() || `Item ${i + 1}`;
