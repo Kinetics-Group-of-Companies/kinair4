@@ -641,35 +641,38 @@ export function AssistantChat({
           let lastFailure = '';
 
           for (const mode of fallbackModes) {
+            const controller = new AbortController();
+            const connectTimeoutMs = mode === 'gemini' ? 5_000 : 8_000;
+            const timeoutId = window.setTimeout(() => controller.abort(), connectTimeoutMs);
+            const forwardAbort = () => controller.abort();
+            if (init?.signal?.aborted) forwardAbort();
+            else init?.signal?.addEventListener('abort', forwardAbort, { once: true });
+
             try {
               const response = await fetch(input, {
                 ...init,
+                signal: controller.signal,
                 body: JSON.stringify({ ...originalBody, aiMode: mode }),
               });
               const provider = response.headers.get('X-KINAIR-AI-Provider');
               const model = response.headers.get('X-KINAIR-AI-Model');
-              const body = await response.text();
-              const streamFailed =
-                !response.ok ||
-                /"type"\s*:\s*"error"/i.test(body) ||
-                /failed after \d+ attempts|quota exceeded|rate.?limit|resource_exhausted/i.test(body);
               const providerMismatch =
                 expectedProvider[mode] != null && provider !== expectedProvider[mode];
 
-              if (!streamFailed && !providerMismatch) {
+              // Return the untouched body stream immediately. Reading response.text()
+              // here buffered the entire tool run and made a healthy 40-second
+              // selection look frozen until the final byte arrived.
+              if (response.ok && !providerMismatch) {
                 if (provider) setActiveProvider(model ? `${provider} · ${model}` : provider);
-                return new Response(body, {
-                  status: response.status,
-                  statusText: response.statusText,
-                  headers: response.headers,
-                });
+                return response;
               }
 
-              lastFailure = body;
+              lastFailure = await response.text();
               console.warn('KINAIR AI provider failed; trying fallback', {
                 requestedMode: mode,
                 actualProvider: provider,
                 providerMismatch,
+                status: response.status,
               });
             } catch (error) {
               lastFailure = error instanceof Error ? error.message : String(error);
@@ -677,6 +680,9 @@ export function AssistantChat({
                 requestedMode: mode,
                 error: lastFailure,
               });
+            } finally {
+              window.clearTimeout(timeoutId);
+              init?.signal?.removeEventListener('abort', forwardAbort);
             }
           }
 
