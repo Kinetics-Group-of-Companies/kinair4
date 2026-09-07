@@ -147,6 +147,86 @@ function promoteSelectedFm35ToFm45(
   return rebuilt ?? selection;
 }
 
+function isFm4518XdUnavailableRequest(userText: string): boolean {
+  const compact = userText.toUpperCase().replace(/[\s–—-]+/g, '');
+  const namesFm4518Xd = compact.includes('FM4518XD');
+  const asksForSubstitution =
+    /\b(?:not|out\s+of)\s+stock\b/i.test(userText) ||
+    /\bunavailable\b/i.test(userText) ||
+    /\b(replace|switch|substitute|promote|change)\b/i.test(userText);
+  return namesFm4518Xd && asksForSubstitution;
+}
+
+function replaceSelectedFm4518XdWithFm4520Xd(
+  selection: AirCurtainSelection,
+  models: AirCurtainModel[],
+  seriesRecords: Array<{ id: string; name: string }>,
+  criteria: {
+    doorWidthMm: number;
+    doorHeightM: number;
+    minFloorVelocity: number;
+  },
+): AirCurtainSelection {
+  let changed = false;
+  const replacementUnits = selection.units.map((unit) => {
+    const seriesName =
+      seriesRecords.find((series) => series.id === unit.model.seriesId)?.name ?? '';
+    if (
+      !/^XD-Centrifugal Flow$/i.test(seriesName) ||
+      !/^FM-?4518XD/i.test(String(unit.model.model))
+    ) {
+      return unit;
+    }
+    const replacement = models.find(
+      (model) =>
+        model.seriesId === unit.model.seriesId &&
+        /^FM-?4520XD/i.test(String(model.model)),
+    );
+    if (!replacement) return unit;
+    changed = true;
+    return { model: replacement, qty: unit.qty };
+  });
+
+  if (!changed) return selection;
+  const rebuilt = rebuildAirCurtainSelection(replacementUnits, {
+    doorWidthMm: criteria.doorWidthMm,
+    doorHeightM: criteria.doorHeightM,
+    category: 'recessed',
+    speed: 'high',
+    minNozzleVelocity: 0,
+    minAirflowCmh: 0,
+    motorType: selection.model.motorType,
+    brand: selection.model.brand,
+    seriesId: selection.model.seriesId ?? 'any',
+    allowCombinations: true,
+    minFloorVelocity: criteria.minFloorVelocity,
+    supplyFrequencyHz: 50,
+    minMatchPercent: AC_MIN_MATCH_PERCENT,
+    maxMatchPercent: AC_MAX_MATCH_PERCENT,
+    selectionBasis: 'door',
+  });
+  return rebuilt ?? selection;
+}
+
+function applyRequestedAirCurtainPromotions(
+  selection: AirCurtainSelection,
+  models: AirCurtainModel[],
+  seriesRecords: Array<{ id: string; name: string }>,
+  criteria: {
+    doorWidthMm: number;
+    doorHeightM: number;
+    minFloorVelocity: number;
+  },
+  userText: string,
+): AirCurtainSelection {
+  const afterFm35 = isFm35ToFm45PromotionRequest(userText)
+    ? promoteSelectedFm35ToFm45(selection, models, seriesRecords, criteria)
+    : selection;
+  return isFm4518XdUnavailableRequest(userText)
+    ? replaceSelectedFm4518XdWithFm4520Xd(afterFm35, models, seriesRecords, criteria)
+    : afterFm35;
+}
+
 function seriesFromExistingAirCurtainSelection(
   existingSelection: string | null | undefined,
   seriesRecords: Array<{ id: string; name: string; category: AirCurtainCategory }>,
@@ -987,14 +1067,18 @@ export function AssistantChat({
         const optimizeFor: AcOptimizeFor = duty.optimize_for ?? 'balanced';
         const rankedBeforePromotion =
           optimizeFor === 'balanced' ? results : rankAirCurtains(results, optimizeFor);
+        const hasRequestedPromotion =
+          isFm35ToFm45PromotionRequest(userText) ||
+          isFm4518XdUnavailableRequest(userText);
         const ranked =
-          rankedBeforePromotion.length > 0 && isFm35ToFm45PromotionRequest(userText)
+          rankedBeforePromotion.length > 0 && hasRequestedPromotion
             ? [
-                promoteSelectedFm35ToFm45(
+                applyRequestedAirCurtainPromotions(
                   rankedBeforePromotion[0],
                   acModels,
                   acSeries,
                   { doorWidthMm, doorHeightM, minFloorVelocity },
+                  userText,
                 ),
                 ...rankedBeforePromotion.slice(1),
               ]
@@ -1056,6 +1140,8 @@ export function AssistantChat({
             .map((part) => String(part.text ?? ''))
             .join(' ') ?? '';
         const promoteFm35 = isFm35ToFm45PromotionRequest(scheduleUserText);
+        const hasSchedulePromotion =
+          promoteFm35 || isFm4518XdUnavailableRequest(scheduleUserText);
 
         const rows: ScheduleRow[] = items.map((item, i) => {
           const tag = (item.tag || '').trim() || `Item ${i + 1}`;
@@ -1074,7 +1160,7 @@ export function AssistantChat({
             // On a revision request, an exact existing schedule selection is the
             // authority for series/mounting. This prevents an FM35 promotion
             // instruction from converting N-Cross Flow rows into N-Centrifugal.
-            const existingSeries = promoteFm35
+            const existingSeries = hasSchedulePromotion
               ? seriesFromExistingAirCurtainSelection(item.existing_selection, acSeries)
               : undefined;
             const category: AirCurtainCategory | 'any' =
@@ -1118,12 +1204,13 @@ export function AssistantChat({
             }
             // Promotion is deliberately after optimum selection. If the optimum
             // is N-Cross Flow or anything other than eligible FM35, it is unchanged.
-            const best = promoteFm35
-              ? promoteSelectedFm35ToFm45(
+            const best = hasSchedulePromotion
+              ? applyRequestedAirCurtainPromotions(
                   optimum,
                   acModels,
                   acSeries,
                   { doorWidthMm, doorHeightM, minFloorVelocity: 2 },
+                  scheduleUserText,
                 )
               : optimum;
             return {
