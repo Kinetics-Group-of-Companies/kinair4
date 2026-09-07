@@ -138,13 +138,13 @@ Deno.serve(async (req) => {
   if (!(await authorized(req))) return respond({ error: 'Unauthorized' }, 401)
 
   try {
-    let test = false
+    let requestBody: Record<string, unknown> = {}
     try {
-      const body = await req.json()
-      test = body?.test === true
+      requestBody = await req.json()
     } catch {
       // Scheduled calls may omit a body.
     }
+    const test = requestBody?.test === true
 
     const supabase = createClient(
       Deno.env.get('SUPABASE_URL')!,
@@ -188,7 +188,9 @@ Deno.serve(async (req) => {
       subject,
       html,
       text,
-      test ? `lpo-daily-deepak-test-${today}` : `lpo-daily-deepak-${today}`,
+      test
+        ? `lpo-daily-deepak-test-${today}-${crypto.randomUUID()}`
+        : `lpo-daily-deepak-${today}`,
     )
 
     return respond({
