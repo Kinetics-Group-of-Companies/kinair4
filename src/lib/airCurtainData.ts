@@ -421,6 +421,23 @@ function buildSelection(
   };
 }
 
+/**
+ * Recalculate one exact, already-chosen arrangement from catalogue models.
+ * Used for customer-requested model promotions after optimum selection, so
+ * quantities and width suffixes remain unchanged while performance is updated.
+ */
+export function rebuildAirCurtainSelection(
+  units: AirCurtainUnit[],
+  criteria: AirCurtainCriteria,
+): AirCurtainSelection | null {
+  if (!units.length) return null;
+  const candidates: Candidate[] = units.map(({ model }) => ({
+    model,
+    vals: speedValues(model, criteria.speed, criteria.supplyFrequencyHz),
+  }));
+  return buildSelection(units, candidates, criteria);
+}
+
 export function selectAirCurtains(
   models: AirCurtainModel[],
   criteria: AirCurtainCriteria,

@@ -458,7 +458,7 @@ Deno.serve(async (req) => {
     // image / spreadsheet). The app runs the real selection engine on every line.
     const prepareScheduleSelection = tool({
       description:
-        "Select MULTIPLE items in one go from a schedule. Use this whenever the user gives more than one duty / door in a single message, or attaches a fan or air curtain schedule as a PDF, image or spreadsheet. Read every row of the schedule, convert it into one item per row (keep the user's units and the row tag/reference) and pass them all here in one call. The app then runs the official KINAIR selection engine on each row and shows a results table with datasheets. Never invent rows and never drop a row.",
+        "Select MULTIPLE items in one go from a schedule. Use this whenever the user gives more than one duty / door in a single message, or attaches a fan or air curtain schedule as a PDF, image or spreadsheet. Read every row of the schedule, convert it into one item per row (keep the user's units and the row tag/reference) and pass them all here in one call. If the source already contains an air-curtain selected model/arrangement, copy it verbatim into existing_selection. The app runs the official KINAIR engine on every row. An FM35-to-FM45 promotion happens only after optimum selection and only for selected FM35 units in N-Centrifugal or XD-Centrifugal; N-Cross Flow must remain unchanged. Never invent or drop a row.",
       inputSchema: z.object({
         title: z.string().nullable().describe("Short name for the schedule, e.g. 'Car park fan schedule'"),
         items: z
@@ -496,6 +496,10 @@ Deno.serve(async (req) => {
                 motor_type: z.enum(["AC", "EC", "any"]).optional(),
                 brand: z.string().nullish(),
                 series_name: z.string().nullish(),
+                existing_selection: z
+                  .string()
+                  .nullish()
+                  .describe("Exact air-curtain model or arrangement already printed in the uploaded schedule, if present. Copy it verbatim; never infer or replace it."),
               }),
             ]),
           )
@@ -969,6 +973,8 @@ Deno.serve(async (req) => {
         "- Datasheet in chat: the moment the user gives an airflow AND a static pressure (any units, series optional, e.g. '25 lps @ 50 Pa KVF-P'), call prepare_datasheet with those exact numbers and units. The app then runs the real KINAIR selection engine and downloads the datasheet PDF in the chat — the user does NOT need to open the Fan Selector. Call find_fans too if you need numbers to explain the pick.",
         "- After calling prepare_datasheet, keep it short: say which duty you selected on and that the datasheet PDF is downloading below, and mention they can pick another option from the buttons under your answer.",
         "- Air curtain datasheet in chat: the moment the user asks for an air curtain for a door/entrance (e.g. '3 m high, 2 m wide shop entrance'), call prepare_air_curtain_datasheet with the door size and units they gave. The app runs the real air curtain selection engine and downloads the datasheet PDF in the chat — the user does NOT need to open the Air Curtain Selector. If only the height is given, still call it and say what width you assumed.",
+        "- CUSTOMER-REQUESTED FM35 -> FM45 PROMOTION: always run the normal optimum selection first. Only if that optimum result contains an FM35 model in N-Centrifugal Flow or XD-Centrifugal Flow, and the user explicitly asks to promote/change 3-3.5 m to 4-4.5 m (or FM35 to FM45), replace it after selection with the exact same-series, same-width FM45 model: 3509->4509, 3510->4510, 3512->4512, 3515->4515, 3518->4518, 3520->4520. Preserve unit quantity and arrangement. N-Cross Flow (FM-12xxN) is NEVER part of this promotion and must remain unchanged. Never set every schedule row to N-Centrifugal merely because the user requested FM35 promotion.",
+        "- For schedule revisions, copy each existing selected model/arrangement into existing_selection exactly when the source contains one. That existing model identifies its series and mounting; do not reinterpret an N-Cross Flow row as N-Centrifugal or XD.",
         "- Air curtain mounting is a HARD constraint and always overrides optimisation, motor type, brand and series. 'Ceiling mounted', 'ceiling recessed', 'recess/recessed mounted', 'concealed' and 'flush mounted' must pass mounting='recessed' and may return ONLY recessed-category series/models. 'Wall mounted', 'surface mounted' and 'exposed' must pass mounting='surface' and may return ONLY surface-category series/models. Never silently substitute the other mounting category. If an explicitly named series conflicts with mounting, keep the mounting category and report that the named series is incompatible.",
         "- Catalogues and IOM manuals: when the user asks for a catalogue, brochure, IOM, installation or maintenance manual, call get_documents and reply with the download links as markdown links. If nothing is uploaded for that series, say so plainly.",
         "- Technical specifications: when the user asks about construction, certifications (AMCA/CE/ISO/UL/ATEX), fire rating, available sizes, diameters or motor poles, call get_specifications and answer from it. Never guess a certification.",

@@ -45,7 +45,9 @@ import {
 import { useTenantData } from '@/hooks/useFanDatabase';
 import {
   selectAirCurtains,
+  rebuildAirCurtainSelection,
   type AirCurtainSelection,
+  type AirCurtainModel,
   type AirCurtainCategory,
   type AirCurtainSpeed,
   type AirCurtainMotorType,
@@ -75,38 +77,91 @@ const AC_MAX_MATCH_PERCENT = 200;
 const BACKGROUND_SCHEDULE_MARKER = '<<<KINAIR_BACKGROUND_SCHEDULE_DATA>>>';
 
 /**
- * FM35 remains a valid catalogue choice. Substitute it only when the user
- * explicitly asks for a change/replacement or says that FM35 is unavailable.
- * When a model suffix is named (09/10/12/15/18/20), preserve that width.
+ * Customer promotion is post-selection: the normal engine selects first.
+ * Only a selected FM35 model in N-Centrifugal or XD-Centrifugal can be
+ * promoted, and it must keep the same series, suffix, quantity and mounting.
  */
-function applyRequestedXdFm35Replacement(models: any[], userText: string): any[] {
-  const compact = userText.toUpperCase().replace(/[\s-]+/g, '');
-  const requested = compact.match(/FM35(09|10|12|15|18|20)?/);
-  const asksForChange =
-    /\b(change|replace|switch|substitute|alternative|upgrade|revise)\b/i.test(userText) ||
-    /\b(?:not|out\s+of)\s+stock\b/i.test(userText) ||
-    /\bunavailable\b/i.test(userText);
-  if (!requested || !asksForChange) return models;
+function isFm35ToFm45PromotionRequest(userText: string): boolean {
+  const compact = userText.toUpperCase().replace(/[\s–—-]+/g, '');
+  const hasModelInstruction = compact.includes('FM35') && compact.includes('FM45');
+  const hasHeightInstruction =
+    /3(?:\.0)?\s*(?:-|–|—|TO)\s*3\.5\s*M?/i.test(userText) &&
+    /4(?:\.0)?\s*(?:-|–|—|TO)\s*4\.5\s*M?/i.test(userText);
+  const asksForPromotion =
+    /\b(promote|upgrade|change|replace|switch|revise|convert)\b/i.test(userText);
+  return asksForPromotion && (hasModelInstruction || hasHeightInstruction);
+}
 
-  const suffix = requested[1] ?? null;
-  const targetFamily = /FM55(?:09|10|12|15|18|20)?/.test(compact)
-    ? '55'
-    : /FM45(?:09|10|12|15|18|20)?/.test(compact)
-      ? '45'
-      : null;
+function promoteSelectedFm35ToFm45(
+  selection: AirCurtainSelection,
+  models: AirCurtainModel[],
+  seriesRecords: Array<{ id: string; name: string }>,
+  criteria: {
+    doorWidthMm: number;
+    doorHeightM: number;
+    minFloorVelocity: number;
+  },
+): AirCurtainSelection {
+  let changed = false;
+  const promotedUnits = selection.units.map((unit) => {
+    const seriesName =
+      seriesRecords.find((series) => series.id === unit.model.seriesId)?.name ?? '';
+    const isN = /^N-Centrifugal flow$/i.test(seriesName);
+    const isXd = /^XD-Centrifugal Flow$/i.test(seriesName);
+    if (!isN && !isXd) return unit; // N-Cross Flow and every other series stay untouched.
 
-  const withoutFm35 = models.filter(
-    (model) => !/^FM-?35(?:09|10|12|15|18|20)XD/i.test(String(model?.model ?? '')),
-  );
-  const exactAlternatives = withoutFm35.filter((model) => {
-    const match = String(model?.model ?? '').match(/^FM-?(45|55)(09|10|12|15|18|20)XD/i);
-    if (!match) return false;
-    if (targetFamily && match[1] !== targetFamily) return false;
-    if (suffix && match[2] !== suffix) return false;
-    return true;
+    const suffix = isXd
+      ? String(unit.model.model).match(/^FM-?35(09|10|12|15|18|20)XD/i)?.[1]
+      : String(unit.model.model).match(/^FM-?35(09|10|12|15|18|20)-L/i)?.[1];
+    if (!suffix) return unit;
+
+    const replacement = models.find((model) => {
+      if (model.seriesId !== unit.model.seriesId) return false;
+      return isXd
+        ? new RegExp(`^FM-?45${suffix}XD`, 'i').test(model.model)
+        : new RegExp(`^FM-?45${suffix}-L`, 'i').test(model.model);
+    });
+    if (!replacement) return unit;
+    changed = true;
+    return { model: replacement, qty: unit.qty };
   });
 
-  return exactAlternatives.length ? exactAlternatives : withoutFm35;
+  if (!changed) return selection;
+  const rebuilt = rebuildAirCurtainSelection(promotedUnits, {
+    doorWidthMm: criteria.doorWidthMm,
+    doorHeightM: criteria.doorHeightM,
+    category: selection.model.category,
+    speed: 'high',
+    minNozzleVelocity: 0,
+    minAirflowCmh: 0,
+    motorType: selection.model.motorType,
+    brand: selection.model.brand,
+    seriesId: selection.model.seriesId ?? 'any',
+    allowCombinations: true,
+    minFloorVelocity: criteria.minFloorVelocity,
+    supplyFrequencyHz: 50,
+    minMatchPercent: AC_MIN_MATCH_PERCENT,
+    maxMatchPercent: AC_MAX_MATCH_PERCENT,
+    selectionBasis: 'door',
+  });
+  return rebuilt ?? selection;
+}
+
+function seriesFromExistingAirCurtainSelection(
+  existingSelection: string | null | undefined,
+  seriesRecords: Array<{ id: string; name: string; category: AirCurtainCategory }>,
+) {
+  const value = String(existingSelection ?? '');
+  if (/FM-?(?:35|45|55)(?:09|10|12|15|18|20)XD/i.test(value)) {
+    return seriesRecords.find((series) => /^XD-Centrifugal Flow$/i.test(series.name));
+  }
+  if (/FM-?12(?:09|10|12|15|18|20)N/i.test(value)) {
+    return seriesRecords.find((series) => /^N-Cross Flow$/i.test(series.name));
+  }
+  if (/FM-?(?:35|45|55)(?:09|10|12|15|18|20)-L/i.test(value)) {
+    return seriesRecords.find((series) => /^N-Centrifugal flow$/i.test(series.name));
+  }
+  return undefined;
 }
 import {
   spreadsheetToText,
@@ -328,6 +383,8 @@ type ScheduleItem = {
   mounting?: AirCurtainCategory | 'any';
   motor_type?: AirCurtainMotorType | 'any';
   brand?: string | null;
+  /** Exact model/arrangement already shown in an uploaded schedule; never inferred. */
+  existing_selection?: string | null;
 };
 
 type ScheduleSelection =
@@ -909,8 +966,7 @@ export function AssistantChat({
         const minAirflowCmh = duty.min_airflow ? duty.min_airflow * airflowFactor : 0;
         const minFloorVelocity = duty.min_floor_velocity ?? 2;
 
-        const selectableAcModels = applyRequestedXdFm35Replacement(acModels, userText);
-        const results = selectAirCurtains(selectableAcModels, {
+        const results = selectAirCurtains(acModels, {
           doorWidthMm,
           doorHeightM,
           category: effectiveMounting,
@@ -929,7 +985,20 @@ export function AssistantChat({
         });
 
         const optimizeFor: AcOptimizeFor = duty.optimize_for ?? 'balanced';
-        const ranked = optimizeFor === 'balanced' ? results : rankAirCurtains(results, optimizeFor);
+        const rankedBeforePromotion =
+          optimizeFor === 'balanced' ? results : rankAirCurtains(results, optimizeFor);
+        const ranked =
+          rankedBeforePromotion.length > 0 && isFm35ToFm45PromotionRequest(userText)
+            ? [
+                promoteSelectedFm35ToFm45(
+                  rankedBeforePromotion[0],
+                  acModels,
+                  acSeries,
+                  { doorWidthMm, doorHeightM, minFloorVelocity },
+                ),
+                ...rankedBeforePromotion.slice(1),
+              ]
+            : rankedBeforePromotion;
         const auto: AcAutoSelection = {
           doorWidthMm,
           doorHeightM,
@@ -976,6 +1045,17 @@ export function AssistantChat({
         const fanOptimize: FanOptimizeFor = (input?.optimize_for as FanOptimizeFor) ?? 'balanced';
         const acOptimize: AcOptimizeFor =
           fanOptimize === 'low_noise' ? 'low_noise' : fanOptimize === 'low_power' ? 'low_power' : 'balanced';
+        const messageIndex = messages.findIndex((message) => message.id === m.id);
+        const priorUser = messages
+          .slice(0, messageIndex)
+          .reverse()
+          .find((message) => message.role === 'user');
+        const scheduleUserText =
+          (priorUser?.parts as any[] | undefined)
+            ?.filter((part) => part?.type === 'text')
+            .map((part) => String(part.text ?? ''))
+            .join(' ') ?? '';
+        const promoteFm35 = isFm35ToFm45PromotionRequest(scheduleUserText);
 
         const rows: ScheduleRow[] = items.map((item, i) => {
           const tag = (item.tag || '').trim() || `Item ${i + 1}`;
@@ -990,14 +1070,23 @@ export function AssistantChat({
             const brandMatch = item.brand
               ? acBrands.find((b) => b.name.toLowerCase() === String(item.brand).toLowerCase())?.name
               : undefined;
-            const category: AirCurtainCategory | 'any' = (item.mounting as any) ?? 'any';
+            const requestedCategory: AirCurtainCategory | 'any' = (item.mounting as any) ?? 'any';
+            // On a revision request, an exact existing schedule selection is the
+            // authority for series/mounting. This prevents an FM35 promotion
+            // instruction from converting N-Cross Flow rows into N-Centrifugal.
+            const existingSeries = promoteFm35
+              ? seriesFromExistingAirCurtainSelection(item.existing_selection, acSeries)
+              : undefined;
+            const category: AirCurtainCategory | 'any' =
+              existingSeries?.category ?? requestedCategory;
             const wanted = (item.series_name || '').trim().toLowerCase();
-            const seriesMatch = wanted
+            const requestedSeries = wanted
               ? acSeries.find((s) => s.name.toLowerCase() === wanted) ||
                 acSeries.find((s) => s.name.toLowerCase().includes(wanted))
               : undefined;
-            // Mounting remains the hard filter even if schedule extraction
-            // supplied a conflicting wall/recessed series name.
+            const seriesMatch = existingSeries ?? requestedSeries;
+            // Mounting remains the hard filter even if extraction supplied a
+            // conflicting wall/recessed series name.
             const series =
               seriesMatch && (category === 'any' || seriesMatch.category === category)
                 ? seriesMatch
@@ -1023,10 +1112,20 @@ export function AssistantChat({
             const results = acOptimize === 'balanced'
               ? coreResults
               : rankAirCurtains(coreResults, acOptimize);
-            const best = results[0];
-            if (!best) {
+            const optimum = results[0];
+            if (!optimum) {
               return { tag, quantity, product: 'air_curtain', duty, label: 'No suitable model', detail: '' };
             }
+            // Promotion is deliberately after optimum selection. If the optimum
+            // is N-Cross Flow or anything other than eligible FM35, it is unchanged.
+            const best = promoteFm35
+              ? promoteSelectedFm35ToFm45(
+                  optimum,
+                  acModels,
+                  acSeries,
+                  { doorWidthMm, doorHeightM, minFloorVelocity: 2 },
+                )
+              : optimum;
             return {
               tag,
               quantity,
