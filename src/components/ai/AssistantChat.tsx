@@ -380,6 +380,88 @@ type DutyRequest = {
 };
 
 /**
+ * Clear single fan duties do not need an LLM to identify two numbers and a
+ * catalogue series. Route them straight to the same selector engine used by
+ * the manual page. Gemini remains available for conversation, estimates,
+ * attachments and schedules.
+ */
+function parseDirectFanDuty(userText: string): DutyRequest | null {
+  if (/\b(?:air\s*curtain|door|entrance|opening)\b/i.test(userText)) return null;
+
+  const airflowPattern =
+    /(\d+(?:\.\d+)?)\s*(m(?:³|3)?\s*\/\s*h|cmh|l\s*\/\s*s|lps|cfm|m(?:³|3)?\s*\/\s*s|cms)\b/gi;
+  const airflowMatches = [...userText.matchAll(airflowPattern)];
+  if (airflowMatches.length !== 1) return null;
+
+  const pressurePattern =
+    /(?:@|\bat\b)\s*(\d+(?:\.\d+)?)\s*(pa|in(?:\.|\s*)w(?:\.|\s*)g|inwg|mm(?:\.|\s*)w(?:\.|\s*)g|mmwg)\b/i;
+  const pressureMatch = userText.match(pressurePattern);
+  if (!pressureMatch) return null;
+
+  const airflowToken = airflowMatches[0][2].toLowerCase().replace(/\s/g, '');
+  const pressureToken = pressureMatch[2].toLowerCase().replace(/[.\s]/g, '');
+  const airflowUnit: keyof typeof AIRFLOW_UNITS =
+    airflowToken === 'cfm'
+      ? 'CFM'
+      : airflowToken === 'cms' || /m(?:³|3)\/s/.test(airflowToken)
+        ? 'CMS'
+        : airflowToken === 'lps' || /l\/s/.test(airflowToken)
+          ? 'LPS'
+          : 'CMH';
+  const pressureUnit: keyof typeof PRESSURE_UNITS =
+    pressureToken.startsWith('in') ? 'inwg' : pressureToken.startsWith('mm') ? 'mmwg' : 'Pa';
+
+  const seriesMatch = userText.match(/\b(KVF[\s-]?[PM]|KIN[\s-]?E|KTAF)\b/i);
+  const seriesName = seriesMatch
+    ? seriesMatch[1].toUpperCase().replace(/\s/g, '').replace(/^KVF([PM])$/, 'KVF-$1').replace(/^KIN-?E$/, 'KIN-E')
+    : null;
+  const mentionsPlastic = /\b(plastic|pvc|abs|polypropylene|polymer|pp)\b/i.test(userText);
+  const mentionsMetal = /\b(metal|metallic|steel|galvanized|galvanised|gi)\b/i.test(userText);
+  const fanType: FanInstallType | null =
+    /\b(ktaf|tube axial|axial fan|axial flow)\b/i.test(userText)
+      ? 'axial'
+      : /\b(kin[\s-]?e|wall[ -]?mounted|wall extract|wall fan)\b/i.test(userText)
+        ? 'wall_mounted'
+        : /\b(kvf[\s-]?[pm]|inline|ducted)\b/i.test(userText)
+          ? 'inline_ducted'
+          : null;
+
+  const output: DocOutput =
+    /\b(?:drawing|dimension)\b/i.test(userText)
+      ? 'drawing'
+      : /\b(?:noise|sound)\b/i.test(userText)
+        ? 'noise'
+        : 'full';
+  const optimizeFor: FanOptimizeFor =
+    /\b(?:quiet|quieter|silent|low\s*noise)\b/i.test(userText)
+      ? 'low_noise'
+      : /\b(?:efficient|efficiency)\b/i.test(userText)
+        ? 'high_efficiency'
+        : /\b(?:low(?:er|est)?\s*(?:power|kw)|energy saving|consumption)\b/i.test(userText)
+          ? 'low_power'
+          : /\b(?:compact|smallest)\b/i.test(userText)
+            ? 'smallest_size'
+            : /\b(?:more|max(?:imum)?)\s*airflow\b/i.test(userText)
+              ? 'max_airflow'
+              : /\b(?:more|max(?:imum)?)\s*(?:pressure|static)\b/i.test(userText)
+                ? 'max_pressure'
+                : 'balanced';
+
+  return {
+    airflow: Number(airflowMatches[0][1]),
+    airflow_unit: airflowUnit,
+    static_pressure: Number(pressureMatch[1]),
+    pressure_unit: pressureUnit,
+    series_name: seriesName,
+    material: mentionsPlastic ? 'plastic' : mentionsMetal ? 'metal' : null,
+    fan_type: fanType,
+    motor_poles: Number(userText.match(/\b([2468])\s*(?:pole|p)\b/i)?.[1]) || null,
+    output,
+    optimize_for: optimizeFor,
+  };
+}
+
+/**
  * Resolves the fan series to select from.
  *
  * Installation type is the hardest rule: KVF-P / KVF-M are INLINE DUCTED series,
@@ -709,7 +791,7 @@ export function AssistantChat({
     [aiMode],
   );
 
-  const { messages, sendMessage, status, error } = useChat({
+  const { messages, sendMessage, setMessages, status, error } = useChat({
     transport,
     onError: (e) => toast.error(e.message || 'The assistant could not respond. Please try again.'),
   });
@@ -740,6 +822,37 @@ export function AssistantChat({
     if (inputRef.current) inputRef.current.style.height = 'auto';
 
     if (files.length === 0) {
+      const directDuty = parseDirectFanDuty(value);
+      if (directDuty) {
+        const requestId = crypto.randomUUID();
+        const toolCallId = crypto.randomUUID();
+        setActiveProvider('KINAIR selection engine · instant');
+        setMessages((current) => [
+          ...current,
+          {
+            id: requestId,
+            role: 'user',
+            parts: [{ type: 'text', text: value }],
+          },
+          {
+            id: crypto.randomUUID(),
+            role: 'assistant',
+            parts: [
+              {
+                type: 'text',
+                text: `Running the official KINAIR selector for ${directDuty.airflow} ${directDuty.airflow_unit} @ ${directDuty.static_pressure} ${directDuty.pressure_unit}.`,
+              },
+              {
+                type: 'tool-prepare_datasheet',
+                toolCallId,
+                state: 'input-available',
+                input: directDuty,
+              },
+            ],
+          },
+        ] as any);
+        return;
+      }
       sendMessage({ text: value });
       return;
     }
