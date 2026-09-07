@@ -138,12 +138,61 @@ Deno.serve(async (req) => {
   if (!(await authorized(req))) return respond({ error: 'Unauthorized' }, 401)
 
   try {
-    let test = false
+    let requestBody: Record<string, unknown> = {}
     try {
-      const body = await req.json()
-      test = body?.test === true
+      requestBody = await req.json()
     } catch {
       // Scheduled calls may omit a body.
+    }
+    const test = requestBody?.test === true
+
+    if (requestBody?.diagnose === true) {
+      const apiKey = Deno.env.get('AGENTMAIL_API_KEY')
+      if (!apiKey) throw new Error('AGENTMAIL_API_KEY is not configured')
+      const inboxId = await resolveAgentMailInbox(apiKey)
+      const authHeaders = { Authorization: `Bearer ${apiKey}` }
+      const messageUrl = new URL(
+        `${AGENTMAIL_API_BASE}/inboxes/${encodeURIComponent(inboxId)}/messages`,
+      )
+      messageUrl.searchParams.set('limit', '20')
+      messageUrl.searchParams.append('to', RECIPIENT)
+      const [messagesResponse, eventsResponse] = await Promise.all([
+        fetch(messageUrl, { headers: authHeaders }),
+        fetch(
+          `${AGENTMAIL_API_BASE}/inboxes/${encodeURIComponent(inboxId)}/events?limit=100`,
+          { headers: authHeaders },
+        ),
+      ])
+      const messagesRaw = await messagesResponse.text()
+      const eventsRaw = await eventsResponse.text()
+      if (!messagesResponse.ok) {
+        throw new Error(`AgentMail message lookup failed (${messagesResponse.status}): ${messagesRaw.slice(0, 500)}`)
+      }
+      if (!eventsResponse.ok) {
+        throw new Error(`AgentMail event lookup failed (${eventsResponse.status}): ${eventsRaw.slice(0, 500)}`)
+      }
+      const messagesData = JSON.parse(messagesRaw)
+      const eventsData = JSON.parse(eventsRaw)
+      const messages = (messagesData?.messages ?? []).map((message: Record<string, unknown>) => ({
+        message_id: message.message_id,
+        thread_id: message.thread_id,
+        labels: message.labels,
+        timestamp: message.timestamp,
+        from: message.from,
+        to: message.to,
+        subject: message.subject,
+        updated_at: message.updated_at,
+      }))
+      const ids = new Set(messages.map((message: Record<string, unknown>) => message.message_id))
+      const events = (eventsData?.events ?? [])
+        .filter((event: Record<string, unknown>) => ids.has(event.message_id))
+        .map((event: Record<string, unknown>) => ({
+          event_type: event.event_type,
+          message_id: event.message_id,
+          label: event.label,
+          event_at: event.event_at,
+        }))
+      return respond({ inbox_id: inboxId, messages, events })
     }
 
     const supabase = createClient(
@@ -188,7 +237,9 @@ Deno.serve(async (req) => {
       subject,
       html,
       text,
-      test ? `lpo-daily-deepak-test-${today}` : `lpo-daily-deepak-${today}`,
+      test
+        ? `lpo-daily-deepak-test-${today}-${crypto.randomUUID()}`
+        : `lpo-daily-deepak-${today}`,
     )
 
     return respond({
