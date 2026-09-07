@@ -73,6 +73,41 @@ function fanSelectorDefaults(db: any, series?: any) {
 const AC_MIN_MATCH_PERCENT = 95;
 const AC_MAX_MATCH_PERCENT = 200;
 const BACKGROUND_SCHEDULE_MARKER = '<<<KINAIR_BACKGROUND_SCHEDULE_DATA>>>';
+
+/**
+ * FM35 remains a valid catalogue choice. Substitute it only when the user
+ * explicitly asks for a change/replacement or says that FM35 is unavailable.
+ * When a model suffix is named (09/10/12/15/18/20), preserve that width.
+ */
+function applyRequestedXdFm35Replacement(models: any[], userText: string): any[] {
+  const compact = userText.toUpperCase().replace(/[\s-]+/g, '');
+  const requested = compact.match(/FM35(09|10|12|15|18|20)?/);
+  const asksForChange =
+    /\b(change|replace|switch|substitute|alternative|upgrade|revise)\b/i.test(userText) ||
+    /\b(?:not|out\s+of)\s+stock\b/i.test(userText) ||
+    /\bunavailable\b/i.test(userText);
+  if (!requested || !asksForChange) return models;
+
+  const suffix = requested[1] ?? null;
+  const targetFamily = /FM55(?:09|10|12|15|18|20)?/.test(compact)
+    ? '55'
+    : /FM45(?:09|10|12|15|18|20)?/.test(compact)
+      ? '45'
+      : null;
+
+  const withoutFm35 = models.filter(
+    (model) => !/^FM-?35(?:09|10|12|15|18|20)XD/i.test(String(model?.model ?? '')),
+  );
+  const exactAlternatives = withoutFm35.filter((model) => {
+    const match = String(model?.model ?? '').match(/^FM-?(45|55)(09|10|12|15|18|20)XD/i);
+    if (!match) return false;
+    if (targetFamily && match[1] !== targetFamily) return false;
+    if (suffix && match[2] !== suffix) return false;
+    return true;
+  });
+
+  return exactAlternatives.length ? exactAlternatives : withoutFm35;
+}
 import {
   spreadsheetToText,
   isSpreadsheet,
@@ -874,7 +909,8 @@ export function AssistantChat({
         const minAirflowCmh = duty.min_airflow ? duty.min_airflow * airflowFactor : 0;
         const minFloorVelocity = duty.min_floor_velocity ?? 2;
 
-        const results = selectAirCurtains(acModels, {
+        const selectableAcModels = applyRequestedXdFm35Replacement(acModels, userText);
+        const results = selectAirCurtains(selectableAcModels, {
           doorWidthMm,
           doorHeightM,
           category: effectiveMounting,
