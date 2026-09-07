@@ -66,7 +66,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setIsAdmin(roleData?.role === 'admin' || superAdmin);
 
       // Fetch profile with tenant info
-      const { data: profileData } = await supabase
+      const { data: profileData, error: profileError } = await supabase
         .from('profiles')
         .select(`
           tenant_id,
@@ -76,24 +76,36 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         .eq('user_id', userId)
         .maybeSingle();
 
-      if (profileData) {
-        setTenantId(profileData.tenant_id);
-        setIsApproved(profileData.is_approved || superAdmin);
-        
-        const tenant = Array.isArray(profileData.tenant) 
-          ? profileData.tenant[0] 
-          : profileData.tenant;
-        
-        if (tenant?.subscription_end) {
-          setSubscriptionEnd(new Date(tenant.subscription_end));
-        } else {
-          setSubscriptionEnd(null); // unlimited
-        }
+      if (profileError) throw profileError;
+
+      let resolvedTenantId = profileData?.tenant_id ?? null;
+      let tenant = profileData
+        ? (Array.isArray(profileData.tenant) ? profileData.tenant[0] : profileData.tenant)
+        : null;
+
+      // Recognized super admins belong to the KINAIR workspace. This keeps the
+      // UI and database authorization aligned even if profile provisioning is
+      // briefly delayed after an account is created.
+      if (!resolvedTenantId && superAdmin) {
+        const { data: kinairTenant, error: tenantError } = await supabase
+          .from('tenants')
+          .select('id, subscription_end, is_active')
+          .eq('name', 'KINAIR')
+          .eq('is_active', true)
+          .maybeSingle();
+
+        if (tenantError) throw tenantError;
+        resolvedTenantId = kinairTenant?.id ?? null;
+        tenant = kinairTenant ?? null;
+      }
+
+      setTenantId(resolvedTenantId);
+      setIsApproved(Boolean(profileData?.is_approved) || superAdmin);
+
+      if (tenant?.subscription_end) {
+        setSubscriptionEnd(new Date(tenant.subscription_end));
       } else {
-        // No profile exists - super admins should still be approved
-        if (superAdmin) {
-          setIsApproved(true);
-        }
+        setSubscriptionEnd(null); // unlimited
       }
     } catch (error) {
       console.error('Error fetching user status:', error);
