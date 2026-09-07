@@ -741,12 +741,48 @@ export function AssistantChat({
               const providerMismatch =
                 expectedProvider[mode] != null && provider !== expectedProvider[mode];
 
-              // Return the untouched body stream immediately. Reading response.text()
-              // here buffered the entire tool run and made a healthy 40-second
-              // selection look frozen until the final byte arrived.
+              // A provider is healthy only when it starts producing the response,
+              // not merely when it returns HTTP headers. Wait for the first stream
+              // chunk within the provider deadline, then put that chunk back so the
+              // AI SDK receives the complete untouched stream.
               if (response.ok && !providerMismatch) {
+                if (!response.body) {
+                  throw new Error('AI provider returned an empty response stream.');
+                }
+                const reader = response.body.getReader();
+                const firstChunk = await reader.read();
+                const resumedBody = new ReadableStream<Uint8Array>({
+                  start(streamController) {
+                    if (firstChunk.done) {
+                      streamController.close();
+                      return;
+                    }
+                    streamController.enqueue(firstChunk.value);
+                    const pump = (): void => {
+                      void reader.read().then(
+                        ({ done, value: nextValue }) => {
+                          if (done) {
+                            streamController.close();
+                            return;
+                          }
+                          streamController.enqueue(nextValue);
+                          pump();
+                        },
+                        (streamError) => streamController.error(streamError),
+                      );
+                    };
+                    pump();
+                  },
+                  cancel(reason) {
+                    return reader.cancel(reason);
+                  },
+                });
                 if (provider) setActiveProvider(model ? `${provider} · ${model}` : provider);
-                return response;
+                return new Response(resumedBody, {
+                  status: response.status,
+                  statusText: response.statusText,
+                  headers: response.headers,
+                });
               }
 
               lastFailure = await response.text();
