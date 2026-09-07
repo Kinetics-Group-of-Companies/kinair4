@@ -5,6 +5,7 @@ import { sendTemplateEmail } from '../_shared/transactional-email-templates/send
 const DAY = 86400000
 const RISK_WINDOW_DAYS = 7
 const CRON_SECRET_SHA256 = '9a0145f42701522a765dd224dc6712f1f934bec2aad7be109d0bd75a221c980c'
+const DAILY_COPY_RECIPIENT = 'deepak@kineticsgroup.ae'
 
 async function hasValidCronSecret(req: Request): Promise<boolean> {
   const supplied = req.headers.get('x-kinair-cron-secret') ?? ''
@@ -192,10 +193,12 @@ Deno.serve(async (req) => {
   try {
     let mode = 'delay'
     let dryRun = false
+    let testDelivery = false
     try {
       const body = await req.json()
       if (body && typeof body.mode === 'string') mode = body.mode
       dryRun = body?.dry_run === true
+      testDelivery = body?.test === true
     } catch {
       // no body — default mode
     }
@@ -243,56 +246,82 @@ Deno.serve(async (req) => {
       for (const o of open) {
         const h = health(o, today)
         if (h.level !== 'overdue' && h.level !== 'at_risk') continue
-        const to = recipientFor(o)
-        if (!to) continue
-        wouldSend++
-        if (dryRun) continue
 
-        // One alert per order, per level, per day.
-        const alertKey = `${o.id}:${h.level}:${today}`
-        const { data: existing } = await supabase
-          .from('lpo_alert_log')
-          .select('id')
-          .eq('alert_key', alertKey)
-          .maybeSingle()
-        if (existing) {
-          skipped++
-          continue
+        const ownerRecipient = recipientFor(o)
+        const recipients = testDelivery
+          ? [DAILY_COPY_RECIPIENT]
+          : [...new Set([ownerRecipient, DAILY_COPY_RECIPIENT].filter((email): email is string => !!email))]
+
+        for (const to of recipients) {
+          wouldSend++
+          if (dryRun) continue
+
+          // Keep the owner's original daily key and give each monitoring copy
+          // its own key. This prevents one recipient from suppressing another.
+          const baseAlertKey = `${o.id}:${h.level}:${today}`
+          const alertKey = testDelivery
+            ? `${baseAlertKey}:test:${DAILY_COPY_RECIPIENT}`
+            : to === ownerRecipient
+              ? baseAlertKey
+              : `${baseAlertKey}:copy:${to.toLowerCase()}`
+
+          if (!testDelivery) {
+            const { data: existing } = await supabase
+              .from('lpo_alert_log')
+              .select('id')
+              .eq('alert_key', alertKey)
+              .maybeSingle()
+            if (existing) {
+              skipped++
+              continue
+            }
+          }
+
+          const result = await sendTemplateEmail('lpo-delay-alert', to, {
+            idempotencyKey: `lpo-delay-alert-${alertKey}`,
+            templateData: {
+              lpoRef: o.lpo_ref,
+              clientName: o.client_name,
+              projectName: o.project_name,
+              materialType: o.material_type,
+              status: STATUS_LABELS[o.status] ?? o.status,
+              severity: h.level === 'overdue' ? 'Overdue' : 'At risk',
+              headline:
+                h.level === 'overdue'
+                  ? 'Order is past its committed delivery date'
+                  : 'Potential delay on this order',
+              detail: h.detail,
+              committedDate: fmt(h.promised),
+              forecastDate: fmt(h.forecast),
+              varianceDays: h.variance,
+            },
+          })
+
+          if (!testDelivery) {
+            await supabase.from('lpo_alert_log').insert({
+              order_id: o.id,
+              tenant_id: o.tenant_id,
+              recipient_email: to,
+              alert_type: h.level,
+              alert_key: alertKey,
+            })
+          }
+
+          if (result.sent) sent++
+          else skipped++
         }
-
-        const result = await sendTemplateEmail('lpo-delay-alert', to, {
-          idempotencyKey: `lpo-delay-alert-${alertKey}`,
-          templateData: {
-            lpoRef: o.lpo_ref,
-            clientName: o.client_name,
-            projectName: o.project_name,
-            materialType: o.material_type,
-            status: STATUS_LABELS[o.status] ?? o.status,
-            severity: h.level === 'overdue' ? 'Overdue' : 'At risk',
-            headline:
-              h.level === 'overdue'
-                ? 'Order is past its committed delivery date'
-                : 'Potential delay on this order',
-            detail: h.detail,
-            committedDate: fmt(h.promised),
-            forecastDate: fmt(h.forecast),
-            varianceDays: h.variance,
-          },
-        })
-
-        await supabase.from('lpo_alert_log').insert({
-          order_id: o.id,
-          tenant_id: o.tenant_id,
-          recipient_email: to,
-          alert_type: h.level,
-          alert_key: alertKey,
-        })
-
-        if (result.sent) sent++
-        else skipped++
       }
 
-      return json({ mode, dry_run: dryRun, orders: open.length, would_send: wouldSend, sent, skipped })
+      return json({
+        mode,
+        dry_run: dryRun,
+        test: testDelivery,
+        daily_copy_recipient: DAILY_COPY_RECIPIENT,
+        orders: open.length,
+        would_send: wouldSend,
+        sent,
+        skipped,
+      })
     }
 
     // Weekly summary — one digest per recipient.
