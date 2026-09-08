@@ -1,7 +1,7 @@
 import { createClient } from 'npm:@supabase/supabase-js@2'
 import { corsHeaders } from 'npm:@supabase/supabase-js@2/cors'
 
-const RECIPIENT = 'deepak@kineticsgroup.ae'
+const SUPER_ADMIN_EMAILS = new Set(['chndeepak7@gmail.com', 'deepak@kineticsgroup.ae'])
 const CRON_SECRET_SHA256 = '9a0145f42701522a765dd224dc6712f1f934bec2aad7be109d0bd75a221c980c'
 const DAY = 86400000
 
@@ -99,7 +99,7 @@ function resendFrom(): string {
   return 'KINAIR <alerts@kinair.ae>'
 }
 
-async function sendResend(subject: string, html: string, text: string, idempotencyKey: string) {
+async function sendResend(to: string, subject: string, html: string, text: string, idempotencyKey: string) {
   const apiKey = Deno.env.get('RESEND_API_KEY')
   if (!apiKey) throw new Error('RESEND_API_KEY is not configured')
   const response = await fetch(RESEND_API_URL, {
@@ -111,7 +111,7 @@ async function sendResend(subject: string, html: string, text: string, idempoten
     },
     body: JSON.stringify({
       from: resendFrom(),
-      to: [RECIPIENT],
+      to: [to],
       subject,
       html,
       text,
@@ -140,7 +140,7 @@ async function resolveAgentMailInbox(apiKey: string): Promise<string> {
   return resolvedAgentMailInbox
 }
 
-async function sendAgentMail(subject: string, html: string, text: string, idempotencyKey: string) {
+async function sendAgentMail(to: string, subject: string, html: string, text: string, idempotencyKey: string) {
   const apiKey = Deno.env.get('AGENTMAIL_API_KEY')
   if (!apiKey) throw new Error('AGENTMAIL_API_KEY is not configured')
   const inboxId = await resolveAgentMailInbox(apiKey)
@@ -151,7 +151,7 @@ async function sendAgentMail(subject: string, html: string, text: string, idempo
       'Content-Type': 'application/json',
       'Idempotency-Key': idempotencyKey.replace(/[^A-Za-z0-9._~-]/g, '-').slice(0, 256),
     },
-    body: JSON.stringify({ to: [RECIPIENT], subject, html, text }),
+    body: JSON.stringify({ to: [to], subject, html, text }),
   })
   const raw = await response.text()
   if (!response.ok) throw new Error(`AgentMail send failed (${response.status}): ${raw.slice(0, 500)}`)
@@ -163,16 +163,16 @@ function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error)
 }
 
-async function sendWithFallback(subject: string, html: string, text: string, idempotencyKey: string) {
+async function sendWithFallback(to: string, subject: string, html: string, text: string, idempotencyKey: string) {
   let resendFailure = 'not attempted'
   try {
-    return await sendResend(subject, html, text, idempotencyKey)
+    return await sendResend(to, subject, html, text, idempotencyKey)
   } catch (error) {
     resendFailure = errorMessage(error)
     console.warn('Resend unavailable; using AgentMail fallback:', resendFailure)
   }
   try {
-    return await sendAgentMail(subject, html, text, idempotencyKey)
+    return await sendAgentMail(to, subject, html, text, idempotencyKey)
   } catch (agentMailError) {
     throw new Error(`All email providers failed. Resend: ${resendFailure}; AgentMail: ${errorMessage(agentMailError)}`)
   }
@@ -195,13 +195,59 @@ Deno.serve(async (req) => {
       // Scheduled calls may omit a body.
     }
     const test = requestBody?.test === true
+    const dryRun = requestBody?.dry_run === true
     const resendOnly = test && requestBody?.provider === 'resend'
+    const requestedRecipient =
+      typeof requestBody?.recipient === 'string' ? requestBody.recipient.trim().toLowerCase() : null
 
     const supabase = createClient(
       Deno.env.get('SUPABASE_URL')!,
       Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!,
       { auth: { persistSession: false } },
     )
+
+    const { data: permissionRows, error: permissionError } = await supabase
+      .from('user_lpo_permissions')
+      .select('user_id,notification_email')
+      .eq('receive_lpo_emails', true)
+    if (permissionError) throw permissionError
+
+    const userIds = (permissionRows ?? []).map((row) => row.user_id)
+    if (userIds.length === 0) {
+      return respond({ sent: 0, recipients: 0, reason: 'No enabled LPO email recipients' })
+    }
+
+    const { data: profiles, error: profileError } = await supabase
+      .from('profiles')
+      .select('user_id,email,tenant_id,is_approved')
+      .in('user_id', userIds)
+    if (profileError) throw profileError
+
+    const permissionByUser = new Map((permissionRows ?? []).map((row) => [row.user_id, row]))
+    const recipients = (profiles ?? [])
+      .filter((profile) => profile.is_approved)
+      .map((profile) => ({
+        userId: profile.user_id,
+        tenantId: profile.tenant_id,
+        loginEmail: String(profile.email ?? '').trim().toLowerCase(),
+        email: String(
+          permissionByUser.get(profile.user_id)?.notification_email ?? profile.email ?? '',
+        ).trim().toLowerCase(),
+      }))
+      .filter((recipient) => recipient.email)
+
+    const uniqueRecipients = [...new Map(recipients.map((recipient) => [recipient.email, recipient])).values()]
+    const selectedRecipients = requestedRecipient
+      ? uniqueRecipients.filter((recipient) => recipient.email === requestedRecipient)
+      : uniqueRecipients
+
+    if (test && !requestedRecipient) {
+      return respond({ error: 'A configured recipient is required for a test send' }, 400)
+    }
+    if (requestedRecipient && selectedRecipients.length === 0) {
+      return respond({ error: 'Recipient is not enabled in Admin LPO email permissions' }, 403)
+    }
+
     const { data, error } = await supabase
       .from('lpo_orders')
       .select('*')
@@ -211,51 +257,67 @@ Deno.serve(async (req) => {
     if (error) throw error
 
     const today = new Date().toISOString().slice(0, 10)
-    const orders = (data ?? []).map((order: Record<string, any>) => ({
-      order,
-      promised: promisedDate(order),
-      forecast: forecastDate(order),
-      health: health(order, today),
-    })).sort((a, b) => (a.promised ?? '9999').localeCompare(b.promised ?? '9999'))
+    const deliveries: Record<string, unknown>[] = []
 
-    const overdue = orders.filter((row) => row.health.level === 'overdue').length
-    const atRisk = orders.filter((row) => row.health.level === 'at_risk').length
-    const onTrack = orders.filter((row) => row.health.level === 'on_track').length
-    const rows = orders.map(({ order, promised, forecast, health: orderHealth }) =>
-      `<tr><td>${escapeHtml(order.lpo_ref)}</td><td>${escapeHtml(order.client_name)}</td><td>${escapeHtml(order.material_type)}</td><td>${escapeHtml(order.status)}</td><td>${escapeHtml(promised)}</td><td>${escapeHtml(forecast)}</td><td>${escapeHtml(orderHealth.label)}</td></tr>`
-    ).join('')
+    for (const recipient of selectedRecipients) {
+      const canSeeAll = SUPER_ADMIN_EMAILS.has(recipient.loginEmail)
+      const visibleOrders = (data ?? []).filter(
+        (order: Record<string, any>) => canSeeAll || order.tenant_id === recipient.tenantId,
+      )
+      const orders = visibleOrders.map((order: Record<string, any>) => ({
+        order,
+        promised: promisedDate(order),
+        forecast: forecastDate(order),
+        health: health(order, today),
+      })).sort((a, b) => (a.promised ?? '9999').localeCompare(b.promised ?? '9999'))
 
-    const subject = `${test ? '[TEST] ' : ''}KINAIR daily LPO summary — ${orders.length} open, ${overdue} overdue`
-    const html = `<!doctype html><html><body style="font-family:Arial,sans-serif;color:#222"><h2>KINAIR daily LPO summary</h2><p>Date: ${escapeHtml(today)}</p><p><strong>Open:</strong> ${orders.length} &nbsp; <strong>Overdue:</strong> ${overdue} &nbsp; <strong>At risk:</strong> ${atRisk} &nbsp; <strong>On track:</strong> ${onTrack}</p><table cellpadding="8" cellspacing="0" border="1" style="border-collapse:collapse;font-size:12px"><thead><tr><th>LPO</th><th>Client</th><th>Material</th><th>Status</th><th>Committed</th><th>Forecast</th><th>Health</th></tr></thead><tbody>${rows || '<tr><td colspan="7">No open orders.</td></tr>'}</tbody></table><p style="color:#777;font-size:12px">Open the KINAIR Delivery Tracker for full details and follow-up history.</p></body></html>`
-    const text = [
-      `KINAIR daily LPO summary — ${today}`,
-      `Open: ${orders.length}; Overdue: ${overdue}; At risk: ${atRisk}; On track: ${onTrack}`,
-      ...orders.map(({ order, promised, forecast, health: orderHealth }) =>
-        `${order.lpo_ref} | ${order.client_name} | ${order.material_type} | committed ${promised ?? '—'} | forecast ${forecast ?? '—'} | ${orderHealth.label}`
-      ),
-    ].join('\n')
+      const overdue = orders.filter((row) => row.health.level === 'overdue').length
+      const atRisk = orders.filter((row) => row.health.level === 'at_risk').length
+      const onTrack = orders.filter((row) => row.health.level === 'on_track').length
+      const rows = orders.map(({ order, promised, forecast, health: orderHealth }) =>
+        `<tr><td>${escapeHtml(order.lpo_ref)}</td><td>${escapeHtml(order.client_name)}</td><td>${escapeHtml(order.material_type)}</td><td>${escapeHtml(order.status)}</td><td>${escapeHtml(promised)}</td><td>${escapeHtml(forecast)}</td><td>${escapeHtml(orderHealth.label)}</td></tr>`
+      ).join('')
 
-    const delivery = await (resendOnly ? sendResend : sendWithFallback)(
-      subject,
-      html,
-      text,
-      test
-        ? `lpo-daily-deepak-test-${today}-${crypto.randomUUID()}`
-        : `lpo-daily-deepak-${today}`,
-    )
+      const subject = `${test ? '[TEST] ' : ''}KINAIR daily LPO summary — ${orders.length} open, ${overdue} overdue`
+      const html = `<!doctype html><html><body style="font-family:Arial,sans-serif;color:#222"><h2>KINAIR daily LPO summary</h2><p>Date: ${escapeHtml(today)}</p><p><strong>Open:</strong> ${orders.length} &nbsp; <strong>Overdue:</strong> ${overdue} &nbsp; <strong>At risk:</strong> ${atRisk} &nbsp; <strong>On track:</strong> ${onTrack}</p><table cellpadding="8" cellspacing="0" border="1" style="border-collapse:collapse;font-size:12px"><thead><tr><th>LPO</th><th>Client</th><th>Material</th><th>Status</th><th>Committed</th><th>Forecast</th><th>Health</th></tr></thead><tbody>${rows || '<tr><td colspan="7">No open orders.</td></tr>'}</tbody></table><p style="color:#777;font-size:12px">Open the KINAIR Delivery Tracker for full details and follow-up history.</p></body></html>`
+      const text = [
+        `KINAIR daily LPO summary — ${today}`,
+        `Open: ${orders.length}; Overdue: ${overdue}; At risk: ${atRisk}; On track: ${onTrack}`,
+        ...orders.map(({ order, promised, forecast, health: orderHealth }) =>
+          `${order.lpo_ref} | ${order.client_name} | ${order.material_type} | committed ${promised ?? '—'} | forecast ${forecast ?? '—'} | ${orderHealth.label}`
+        ),
+      ].join('\n')
+
+      if (dryRun) {
+        deliveries.push({ recipient: recipient.email, orders: orders.length, dry_run: true })
+        continue
+      }
+
+      const idempotencyKey = test
+        ? `lpo-daily-test-${today}-${recipient.email}-${crypto.randomUUID()}`
+        : `lpo-daily-${today}-${recipient.email}`
+      const delivery = await (resendOnly ? sendResend : sendWithFallback)(
+        recipient.email,
+        subject,
+        html,
+        text,
+        idempotencyKey,
+      )
+      deliveries.push({
+        recipient: recipient.email,
+        orders: orders.length,
+        provider: delivery.provider,
+        message_id: delivery.message_id,
+        thread_id: 'thread_id' in delivery ? delivery.thread_id : undefined,
+      })
+    }
 
     return respond({
-      sent: true,
+      sent: dryRun ? 0 : deliveries.length,
       test,
-      recipient: RECIPIENT,
-      orders: orders.length,
-      overdue,
-      at_risk: atRisk,
-      on_track: onTrack,
-      requested_provider: resendOnly ? 'resend' : 'auto',
-      provider: delivery.provider,
-      message_id: delivery.message_id,
-      thread_id: 'thread_id' in delivery ? delivery.thread_id : undefined,
+      dry_run: dryRun,
+      recipients: selectedRecipients.length,
+      deliveries,
     })
   } catch (error) {
     console.error('lpo-deepak-alerts error', error)
