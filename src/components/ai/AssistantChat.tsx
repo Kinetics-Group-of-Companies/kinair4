@@ -395,7 +395,7 @@ function parseDirectFanDuty(userText: string): DutyRequest | null {
   if (airflowMatches.length !== 1) return null;
 
   const pressurePattern =
-    /(?:@|\bat\b)\s*(\d+(?:\.\d+)?)\s*(pa|in(?:\.|\s*)w(?:\.|\s*)g|inwg|mm(?:\.|\s*)w(?:\.|\s*)g|mmwg)\b/i;
+    /(?:(?:@|\bat\b|static\s*pressure|esp|pressure)\s*)?(\d+(?:\.\d+)?)\s*(pa|in(?:\.|\s*)w(?:\.|\s*)g|inwg|mm(?:\.|\s*)w(?:\.|\s*)g|mmwg)\b/i;
   const pressureMatch = userText.match(pressurePattern);
 
   const airflowToken = airflowMatches[0][2].toLowerCase().replace(/\s/g, '');
@@ -642,6 +642,15 @@ function parseDirectAirCurtainDuty(userText: string): AcDutyRequest | null {
               ? 'max_airflow'
               : 'balanced';
 
+  const seriesName =
+    /\b(?:XD[ -]?Centrifugal|FM[ -]?(?:35|45|55)(?:09|10|12|15|18|20)XD)\b/i.test(userText)
+      ? 'XD-Centrifugal Flow'
+      : /\b(?:N[ -]?Cross|FM[ -]?12(?:09|10|12|15|18|20)N)\b/i.test(userText)
+        ? 'N-Cross Flow'
+        : /\b(?:N[ -]?Centrifugal|FM[ -]?(?:35|45|55)(?:09|10|12|15|18|20)-L)\b/i.test(userText)
+          ? 'N-Centrifugal flow'
+          : null;
+
   return {
     door_width: doorWidth,
     door_width_unit: doorWidthUnit,
@@ -650,6 +659,7 @@ function parseDirectAirCurtainDuty(userText: string): AcDutyRequest | null {
     mounting,
     speed: 'high',
     motor_type: /\bEC\b/i.test(userText) ? 'EC' : /\bAC\b/i.test(userText) ? 'AC' : 'any',
+    series_name: seriesName,
     output,
     optimize_for: optimizeFor,
   };
@@ -711,6 +721,114 @@ type ScheduleRow = {
 
 type ScheduleResult = { title: string; rows: ScheduleRow[] };
 
+
+
+type InstantFollowUp =
+  | { product: 'fan'; input: DutyRequest }
+  | { product: 'air_curtain'; input: AcDutyRequest };
+
+function findLatestInstantDuty(messages: any[]): InstantFollowUp | null {
+  for (const message of [...messages].reverse()) {
+    if (message?.role !== 'assistant') continue;
+    for (const part of [...(message.parts ?? [])].reverse()) {
+      if (part?.type === 'tool-prepare_datasheet' && part?.input) {
+        return { product: 'fan', input: part.input as DutyRequest };
+      }
+      if (part?.type === 'tool-prepare_air_curtain_datasheet' && part?.input) {
+        return { product: 'air_curtain', input: part.input as AcDutyRequest };
+      }
+    }
+  }
+  return null;
+}
+
+function parseInstantFollowUp(userText: string, messages: any[]): InstantFollowUp | null {
+  const isAction =
+    /\b(?:another|alternative|option|change|switch|revise|promote|upgrade|replace|quieter|quietest|silent|efficient|efficiency|lower|lowest|compact|smallest|more airflow|more pressure|stronger|throw|drawing|dimension|noise data|sound data|datasheet|data sheet|EC motor|AC motor|wall mounted|surface mounted|recessed|ceiling|concealed|not in stock|out of stock|unavailable)\b/i.test(userText);
+  if (!isAction) return null;
+
+  const previous = findLatestInstantDuty(messages);
+  if (!previous) return null;
+  if (previous.product === 'fan') {
+    const input: DutyRequest = { ...previous.input };
+    if (/\b(?:quiet|quieter|quietest|silent|low\s*noise)\b/i.test(userText)) input.optimize_for = 'low_noise';
+    else if (/\b(?:efficient|efficiency)\b/i.test(userText)) input.optimize_for = 'high_efficiency';
+    else if (/\b(?:lower|lowest|low)\s*(?:power|kw|consumption)|energy saving\b/i.test(userText)) input.optimize_for = 'low_power';
+    else if (/\b(?:compact|smallest)\b/i.test(userText)) input.optimize_for = 'smallest_size';
+    else if (/\b(?:more|max(?:imum)?)\s*airflow\b/i.test(userText)) input.optimize_for = 'max_airflow';
+    else if (/\b(?:more|max(?:imum)?)\s*(?:pressure|static)\b/i.test(userText)) input.optimize_for = 'max_pressure';
+
+    input.output = /\b(?:drawing|dimension)\b/i.test(userText)
+      ? 'drawing'
+      : /\b(?:noise|sound)\s*(?:data|sheet|only)?\b/i.test(userText)
+        ? 'noise'
+        : 'full';
+    const series = userText.match(/\b(KVF[\s-]?[PM]|KIN[\s-]?E|KTAF)\b/i)?.[1];
+    if (series) input.series_name = series.toUpperCase().replace(/\s/g, '').replace(/^KVF([PM])$/, 'KVF-$1').replace(/^KIN-?E$/, 'KIN-E');
+    if (/\b(?:plastic|pvc|abs|polypropylene|polymer|pp)\b/i.test(userText)) input.material = 'plastic';
+    if (/\b(?:metal|steel|galvanized|galvanised|gi)\b/i.test(userText)) input.material = 'metal';
+    if (/\b(?:wall mounted|wall fan|wall extract|KIN[ -]?E)\b/i.test(userText)) input.fan_type = 'wall_mounted';
+    if (/\b(?:inline|ducted|KVF[ -]?[PM])\b/i.test(userText)) input.fan_type = 'inline_ducted';
+    if (/\b(?:axial|KTAF)\b/i.test(userText)) input.fan_type = 'axial';
+    const poles = Number(userText.match(/\b([2468])\s*(?:pole|p)\b/i)?.[1]);
+    if (poles) input.motor_poles = poles;
+    return { product: 'fan', input };
+  }
+
+  const input: AcDutyRequest = { ...previous.input };
+  if (/\b(?:quiet|quieter|quietest|silent|low\s*noise)\b/i.test(userText)) input.optimize_for = 'low_noise';
+  else if (/\b(?:lower|lowest|low)\s*(?:power|watts?|consumption)|energy saving\b/i.test(userText)) input.optimize_for = 'low_power';
+  else if (/\b(?:stronger|throw|floor velocity|tall door)\b/i.test(userText)) input.optimize_for = 'max_velocity';
+  else if (/\b(?:single unit|minimum quantity|fewest units)\b/i.test(userText)) input.optimize_for = 'fewest_units';
+  else if (/\b(?:more|max(?:imum)?)\s*(?:air|airflow)\b/i.test(userText)) input.optimize_for = 'max_airflow';
+
+  input.output = /\b(?:drawing|dimension)\b/i.test(userText)
+    ? 'drawing'
+    : /\b(?:noise|sound)\s*(?:data|sheet|only)?\b/i.test(userText)
+      ? 'noise'
+      : 'full';
+  if (/\bEC(?:\s*motor)?\b/i.test(userText)) input.motor_type = 'EC';
+  if (/\bAC(?:\s*motor)?\b/i.test(userText)) input.motor_type = 'AC';
+  if (/\b(?:ceiling|recess(?:ed)?|concealed|flush mounted)\b/i.test(userText)) input.mounting = 'recessed';
+  if (/\b(?:wall mounted|surface mounted|exposed)\b/i.test(userText)) input.mounting = 'surface';
+  return { product: 'air_curtain', input };
+}
+
+function parseInstantTypedSchedule(userText: string): ScheduleItem[] | null {
+  const lines = userText
+    .split(/\n|;/)
+    .map((line) => line.trim())
+    .filter(Boolean);
+  if (lines.length < 2 || lines.length > 25) return null;
+
+  const items: ScheduleItem[] = [];
+  for (let index = 0; index < lines.length; index += 1) {
+    const line = lines[index].replace(/^\s*(?:\d+[.)-]?|[-*•])\s*/, '');
+    const tag = line.match(/^([A-Za-z][A-Za-z0-9 _/-]{0,24})\s*[:=-]\s*/)?.[1]?.trim() ?? `Item ${index + 1}`;
+    const fan = parseDirectFanDuty(line);
+    if (fan) {
+      items.push({ tag, product: 'fan', ...fan });
+      continue;
+    }
+    const airCurtain = parseDirectAirCurtainDuty(line);
+    if (airCurtain) {
+      items.push({
+        tag,
+        product: 'air_curtain',
+        door_width: airCurtain.door_width,
+        door_width_unit: airCurtain.door_width_unit,
+        door_height: airCurtain.door_height,
+        door_height_unit: airCurtain.door_height_unit,
+        mounting: airCurtain.mounting,
+        motor_type: airCurtain.motor_type,
+        series_name: airCurtain.series_name,
+      });
+      continue;
+    }
+    return null;
+  }
+  return items;
+}
 
 export function AssistantChat({
   suggestions,
@@ -986,6 +1104,28 @@ export function AssistantChat({
     if (inputRef.current) inputRef.current.style.height = 'auto';
 
     if (files.length === 0) {
+      const instantSchedule = parseInstantTypedSchedule(value);
+      if (instantSchedule) {
+        setActiveProvider('KINAIR selection engine · instant');
+        setMessages((current) => [
+          ...current,
+          { id: crypto.randomUUID(), role: 'user', parts: [{ type: 'text', text: value }] },
+          {
+            id: crypto.randomUUID(),
+            role: 'assistant',
+            parts: [
+              { type: 'text', text: `Running the official KINAIR selector for all ${instantSchedule.length} typed duties.` },
+              {
+                type: 'tool-prepare_schedule_selection',
+                toolCallId: crypto.randomUUID(),
+                state: 'input-available',
+                input: { title: 'KINAIR Instant Multi-Selection', items: instantSchedule },
+              },
+            ],
+          },
+        ] as any);
+        return;
+      }
       const directDuty = parseDirectFanDuty(value);
       if (directDuty) {
         const requestId = crypto.randomUUID();
@@ -1042,6 +1182,31 @@ export function AssistantChat({
                 toolCallId,
                 state: 'input-available',
                 input: directAirCurtainDuty,
+              },
+            ],
+          },
+        ] as any);
+        return;
+      }
+      const instantFollowUp = parseInstantFollowUp(value, messages);
+      if (instantFollowUp) {
+        setActiveProvider('KINAIR selection engine · instant');
+        const toolType = instantFollowUp.product === 'fan'
+          ? 'tool-prepare_datasheet'
+          : 'tool-prepare_air_curtain_datasheet';
+        setMessages((current) => [
+          ...current,
+          { id: crypto.randomUUID(), role: 'user', parts: [{ type: 'text', text: value }] },
+          {
+            id: crypto.randomUUID(),
+            role: 'assistant',
+            parts: [
+              { type: 'text', text: 'Re-running the official KINAIR selector with your requested change.' },
+              {
+                type: toolType,
+                toolCallId: crypto.randomUUID(),
+                state: 'input-available',
+                input: instantFollowUp.input,
               },
             ],
           },
