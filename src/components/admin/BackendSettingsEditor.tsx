@@ -1488,7 +1488,7 @@ CREATE POLICY "Allow all on project_items" ON public.project_items FOR ALL USING
                 Current Backend Configuration
               </CardTitle>
               <CardDescription>
-                Your application is currently connected to Lovable Cloud (powered by Supabase)
+                Your application is connected directly to Supabase
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
@@ -1575,15 +1575,15 @@ CREATE POLICY "Allow all on project_items" ON public.project_items FOR ALL USING
               </Alert>
 
               <div className="pt-4 border-t">
-                <h4 className="font-semibold text-sm mb-3">Revert to Lovable Cloud</h4>
+                <h4 className="font-semibold text-sm mb-3">Download Current Supabase Configuration</h4>
                 <p className="text-sm text-muted-foreground mb-3">
                   If you've migrated to your own Supabase and want to switch back, download this .env file for your hosting platform.
                 </p>
                 <Button 
                   variant="outline" 
                   onClick={() => {
-                    const envContent = `# Lovable Cloud Configuration
-# Use these values to revert to Lovable Cloud backend
+                    const envContent = `# KINAIR Supabase Configuration
+# Current Supabase connection values
 # Add these to your Vercel/Netlify environment variables
 
 VITE_SUPABASE_URL=${currentConfig.supabaseUrl}
@@ -1594,16 +1594,16 @@ VITE_SUPABASE_PROJECT_ID=${currentConfig.projectId}
                     const url = URL.createObjectURL(blob);
                     const a = document.createElement('a');
                     a.href = url;
-                    a.download = 'lovable-cloud-env.txt';
+                    a.download = 'kinair-supabase-env.txt';
                     document.body.appendChild(a);
                     a.click();
                     document.body.removeChild(a);
                     URL.revokeObjectURL(url);
-                    toast.success('Lovable Cloud configuration downloaded');
+                    toast.success('Supabase configuration downloaded');
                   }}
                 >
                   <Download className="w-4 h-4 mr-2" />
-                  Download Lovable Cloud .env
+                  Download Supabase .env
                 </Button>
               </div>
             </CardContent>
@@ -1692,11 +1692,11 @@ VITE_SUPABASE_PROJECT_ID=${currentConfig.projectId}
                   <AccordionTrigger>
                     <span className="flex items-center gap-2">
                       <span className="w-6 h-6 rounded-full bg-primary text-primary-foreground text-sm flex items-center justify-center">1</span>
-                      Export Code from Lovable
+                      Source Code and Deployment
                     </span>
                   </AccordionTrigger>
                   <AccordionContent className="space-y-2 text-muted-foreground">
-                    <p>1. Click the <strong>GitHub</strong> button in Lovable editor</p>
+                    <p>1. Commit approved changes to the KINAIR GitHub repository</p>
                     <p>2. Connect your GitHub account if not already connected</p>
                     <p>3. Create a new repository or connect to existing one</p>
                     <p>4. Clone the repository: <code className="bg-muted px-2 py-1 rounded">git clone your-repo-url</code></p>
@@ -2000,7 +2000,7 @@ VITE_SUPABASE_PROJECT_ID=your_project_id`}
                   <AlertDescription>
                     <ol className="list-decimal list-inside space-y-1 mt-2">
                       <li>Download the .env file using the button above</li>
-                      <li>Export your code to GitHub using the Lovable editor</li>
+                      <li>Keep the KINAIR source code in GitHub and deploy the main branch through Vercel</li>
                       <li>Deploy to Vercel, Netlify, or your preferred host with the new .env values</li>
                       <li>Your app will now run independently with your own Supabase!</li>
                     </ol>
