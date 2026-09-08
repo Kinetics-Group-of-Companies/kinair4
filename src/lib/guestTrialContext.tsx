@@ -10,6 +10,7 @@ interface GuestTrialContextValue {
   trialLoading: boolean;
   secondsRemaining: number;
   expiresAt: string | null;
+  trialMinutes: number;
   startTrial: () => Promise<StartResult>;
   endTrialForSignup: () => Promise<void>;
 }
@@ -51,12 +52,28 @@ export function GuestTrialProvider({ children }: { children: ReactNode }) {
   const [expiresAt, setExpiresAt] = useState<string | null>(null);
   const [secondsRemaining, setSecondsRemaining] = useState(0);
   const [trialLoading, setTrialLoading] = useState(false);
+  const [trialMinutes, setTrialMinutes] = useState(5);
   const endingRef = useRef(false);
   const startingRef = useRef(false);
 
   const clearTrial = useCallback(() => {
     setExpiresAt(null);
     setSecondsRemaining(0);
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    void supabase
+      .from('guest_trial_settings')
+      .select('duration_minutes')
+      .eq('id', true)
+      .single()
+      .then(({ data }) => {
+        if (!cancelled && data?.duration_minutes) setTrialMinutes(data.duration_minutes);
+      });
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   const finishExpiredTrial = useCallback(async () => {
@@ -83,6 +100,7 @@ export function GuestTrialProvider({ children }: { children: ReactNode }) {
       if (data?.active && data?.expires_at) {
         setExpiresAt(data.expires_at);
         setSecondsRemaining(Math.max(0, Number(data.seconds_remaining) || 0));
+        if (data.duration_minutes) setTrialMinutes(Number(data.duration_minutes));
       } else {
         await finishExpiredTrial();
       }
@@ -137,7 +155,8 @@ export function GuestTrialProvider({ children }: { children: ReactNode }) {
 
       sessionStorage.removeItem(EXPIRED_FLAG);
       setExpiresAt(data.expires_at);
-      setSecondsRemaining(Math.max(0, Number(data.seconds_remaining) || 300));
+      if (data.duration_minutes) setTrialMinutes(Number(data.duration_minutes));
+      setSecondsRemaining(Math.max(0, Number(data.seconds_remaining) || trialMinutes * 60));
       return { ok: true };
     } catch (error) {
       return { ok: false, reason: error instanceof Error ? error.message : 'Guest access is unavailable.' };
@@ -145,7 +164,7 @@ export function GuestTrialProvider({ children }: { children: ReactNode }) {
       startingRef.current = false;
       setTrialLoading(false);
     }
-  }, [user]);
+  }, [trialMinutes, user]);
 
   const endTrialForSignup = useCallback(async () => {
     clearTrial();
@@ -158,9 +177,10 @@ export function GuestTrialProvider({ children }: { children: ReactNode }) {
     trialLoading,
     secondsRemaining,
     expiresAt,
+    trialMinutes,
     startTrial,
     endTrialForSignup,
-  }), [endTrialForSignup, expiresAt, isGuest, secondsRemaining, startTrial, trialLoading]);
+  }), [endTrialForSignup, expiresAt, isGuest, secondsRemaining, startTrial, trialLoading, trialMinutes]);
 
   return <GuestTrialContext.Provider value={value}>{children}</GuestTrialContext.Provider>;
 }
