@@ -31,7 +31,7 @@ jobs:
         with:
           distribution: temurin
           java-version: 21
-      - run: npm ci
+      - run: npm install --no-audit --no-fund
       - run: npm run build
       - run: npx cap sync android
       - name: Build installable APK
@@ -57,7 +57,7 @@ jobs:
         with:
           node-version: 22
           cache: npm
-      - run: npm ci
+      - run: npm install --no-audit --no-fund
       - run: npm run build
       - name: Package Windows application
         shell: pwsh
