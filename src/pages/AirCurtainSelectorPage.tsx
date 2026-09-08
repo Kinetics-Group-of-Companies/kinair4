@@ -15,7 +15,7 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { useAuth } from '@/lib/authContext';
-import { useNavigate, useSearchParams } from 'react-router-dom';
+import { useSearchParams } from 'react-router-dom';
 import { GuestAccessPrompt } from '@/components/guest/GuestAccessPrompt';
 import { GuestTrialBanner } from '@/components/guest/GuestTrialBanner';
 import { useGuestTrial } from '@/lib/guestTrialContext';
@@ -72,7 +72,6 @@ const formatLengthM = (m: number, unit: LengthUnit): string =>
 
 export default function AirCurtainSelectorPage() {
   const { isAuthenticated, isApproved, isSuperAdmin, isLoading: authLoading } = useAuth();
-  const navigate = useNavigate();
   const { isGuest, trialActive, trialLoading } = useGuestTrial();
   const { data: models = [], isLoading } = useAirCurtainModels();
   const { data: brandRecords = [] } = useAirCurtainBrands();
