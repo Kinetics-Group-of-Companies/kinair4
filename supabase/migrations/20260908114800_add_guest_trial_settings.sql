@@ -27,13 +27,25 @@ on public.guest_trial_settings for update
 to authenticated
 using (
   coalesce((select (auth.jwt()->>'is_anonymous')::boolean), false) = false
-  and public.has_role((select auth.uid()), 'admin')
+  and (
+    public.has_role((select auth.uid()), 'admin')
+    or lower(coalesce((select auth.jwt()->>'email'), '')) in (
+      'chndeepak7@gmail.com',
+      'deepak@kineticsgroup.ae'
+    )
+  )
 )
 with check (
   id = true
   and duration_minutes between 1 and 60
   and coalesce((select (auth.jwt()->>'is_anonymous')::boolean), false) = false
-  and public.has_role((select auth.uid()), 'admin')
+  and (
+    public.has_role((select auth.uid()), 'admin')
+    or lower(coalesce((select auth.jwt()->>'email'), '')) in (
+      'chndeepak7@gmail.com',
+      'deepak@kineticsgroup.ae'
+    )
+  )
 );
 
 create index guest_trial_settings_updated_by_idx
