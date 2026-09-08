@@ -35,7 +35,7 @@ export const SignupEmail = ({
     <Preview>Confirm your email for {siteName}</Preview>
     <Body style={main}>
       <Container style={container}>
-        <Img src="https://kinvent.lovable.app/kinair-logo.png" alt="KINAIR" width="140" style={{ marginBottom: 24 }} />
+        <Img src="https://kinair.ae/kinair-logo.png" alt="KINAIR" width="140" style={{ marginBottom: 24 }} />
         <Heading style={h1}>Confirm your email</Heading>
         <Text style={text}>
           Thanks for signing up for{' '}
