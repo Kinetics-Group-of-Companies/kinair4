@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { Clock3, Loader2, Save } from 'lucide-react';
 import { toast } from 'sonner';
 import { supabase } from '@/integrations/backend/client';
+import { useAuth } from '@/lib/authContext';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
@@ -11,6 +12,7 @@ const MIN_TRIAL_MINUTES = 1;
 const MAX_TRIAL_MINUTES = 60;
 
 export function GuestTrialSettingsEditor() {
+  const { user } = useAuth();
   const [minutes, setMinutes] = useState(5);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -47,6 +49,7 @@ export function GuestTrialSettingsEditor() {
       .update({
         duration_minutes: minutes,
         updated_at: new Date().toISOString(),
+        updated_by: user?.id ?? null,
       })
       .eq('id', true)
       .select('duration_minutes')
