@@ -1,7 +1,6 @@
 import { createClient } from 'npm:@supabase/supabase-js@2'
 import { corsHeaders } from 'npm:@supabase/supabase-js@2/cors'
 
-const SUPER_ADMIN_EMAILS = new Set(['chndeepak7@gmail.com', 'deepak@kineticsgroup.ae'])
 const CRON_SECRET_SHA256 = '9a0145f42701522a765dd224dc6712f1f934bec2aad7be109d0bd75a221c980c'
 const DAY = 86400000
 
@@ -206,37 +205,25 @@ Deno.serve(async (req) => {
       { auth: { persistSession: false } },
     )
 
-    const { data: permissionRows, error: permissionError } = await supabase
-      .from('user_lpo_permissions')
-      .select('user_id,notification_email')
-      .eq('receive_lpo_emails', true)
-    if (permissionError) throw permissionError
+    const { data: recipientRows, error: recipientError } = await supabase
+      .from('lpo_email_recipients')
+      .select('email,tenant_id,all_tenants')
+      .eq('is_enabled', true)
+    if (recipientError) throw recipientError
 
-    const userIds = (permissionRows ?? []).map((row) => row.user_id)
-    if (userIds.length === 0) {
+    const uniqueRecipients = [...new Map((recipientRows ?? [])
+      .map((recipient) => ({
+        tenantId: recipient.tenant_id,
+        email: String(recipient.email ?? '').trim().toLowerCase(),
+        canSeeAll: Boolean(recipient.all_tenants),
+      }))
+      .filter((recipient) => recipient.email)
+      .map((recipient) => [recipient.email, recipient])).values()]
+
+    if (uniqueRecipients.length === 0) {
       return respond({ sent: 0, recipients: 0, reason: 'No enabled LPO email recipients' })
     }
 
-    const { data: profiles, error: profileError } = await supabase
-      .from('profiles')
-      .select('user_id,email,tenant_id,is_approved')
-      .in('user_id', userIds)
-    if (profileError) throw profileError
-
-    const permissionByUser = new Map((permissionRows ?? []).map((row) => [row.user_id, row]))
-    const recipients = (profiles ?? [])
-      .filter((profile) => profile.is_approved)
-      .map((profile) => ({
-        userId: profile.user_id,
-        tenantId: profile.tenant_id,
-        loginEmail: String(profile.email ?? '').trim().toLowerCase(),
-        email: String(
-          permissionByUser.get(profile.user_id)?.notification_email ?? profile.email ?? '',
-        ).trim().toLowerCase(),
-      }))
-      .filter((recipient) => recipient.email)
-
-    const uniqueRecipients = [...new Map(recipients.map((recipient) => [recipient.email, recipient])).values()]
     const selectedRecipients = requestedRecipient
       ? uniqueRecipients.filter((recipient) => recipient.email === requestedRecipient)
       : uniqueRecipients
@@ -245,7 +232,7 @@ Deno.serve(async (req) => {
       return respond({ error: 'A configured recipient is required for a test send' }, 400)
     }
     if (requestedRecipient && selectedRecipients.length === 0) {
-      return respond({ error: 'Recipient is not enabled in Admin LPO email permissions' }, 403)
+      return respond({ error: 'Recipient is not enabled in Admin LPO email recipients' }, 403)
     }
 
     const { data, error } = await supabase
@@ -260,9 +247,8 @@ Deno.serve(async (req) => {
     const deliveries: Record<string, unknown>[] = []
 
     for (const recipient of selectedRecipients) {
-      const canSeeAll = SUPER_ADMIN_EMAILS.has(recipient.loginEmail)
       const visibleOrders = (data ?? []).filter(
-        (order: Record<string, any>) => canSeeAll || order.tenant_id === recipient.tenantId,
+        (order: Record<string, any>) => recipient.canSeeAll || order.tenant_id === recipient.tenantId,
       )
       const orders = visibleOrders.map((order: Record<string, any>) => ({
         order,
