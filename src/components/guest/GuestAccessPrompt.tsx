@@ -6,7 +6,7 @@ import { useGuestTrial, wasGuestTrialUsedToday } from '@/lib/guestTrialContext';
 
 export function GuestAccessPrompt({ productName }: { productName: string }) {
   const navigate = useNavigate();
-  const { startTrial, trialLoading } = useGuestTrial();
+  const { startTrial, trialLoading, trialMinutes } = useGuestTrial();
   const [failure, setFailure] = useState<string | null>(() =>
     wasGuestTrialUsedToday()
       ? "Today's five-minute guest trial is complete. Sign up to continue, or return tomorrow."
@@ -26,7 +26,7 @@ export function GuestAccessPrompt({ productName }: { productName: string }) {
           {failure ? <UserPlus className="w-10 h-10 text-primary" /> : <Sparkles className="w-10 h-10 text-primary" />}
         </div>
         <h2 className="text-2xl font-bold mb-3">
-          {failure ? 'Continue with a free account' : 'Try KINAIR for 5 minutes'}
+          {failure ? 'Continue with a free account' : `Try KINAIR for ${trialMinutes} minute${trialMinutes === 1 ? '' : 's'}`}
         </h2>
         <p className="text-muted-foreground mb-6">
           {failure || `Use the ${productName} and AI Selection Assistant without logging in. One trial is available per network each day.`}
@@ -39,7 +39,7 @@ export function GuestAccessPrompt({ productName }: { productName: string }) {
           ) : (
             <Button onClick={start} size="lg" disabled={trialLoading}>
               <Clock3 className="w-4 h-4 mr-2" />
-              {trialLoading ? 'Starting…' : 'Start 5-Minute Trial'}
+              {trialLoading ? 'Starting…' : `Start ${trialMinutes}-Minute Trial`}
             </Button>
           )}
           <Button onClick={() => navigate('/login')} size="lg" variant="outline">
