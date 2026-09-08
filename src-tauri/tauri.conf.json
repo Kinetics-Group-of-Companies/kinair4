@@ -1,0 +1,26 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "KINAIR Selection Software",
+  "version": "16.0.0",
+  "identifier": "ae.kinair.selectionsoftware",
+  "build": {
+    "frontendDist": "../dist"
+  },
+  "app": {
+    "windows": [
+      {
+        "title": "KINAIR Selection Software",
+        "width": 1440,
+        "height": 900,
+        "maximized": true,
+        "url": "index.html?offline=1"
+      }
+    ],
+    "security": {
+      "csp": null
+    }
+  },
+  "bundle": {
+    "active": false
+  }
+}
