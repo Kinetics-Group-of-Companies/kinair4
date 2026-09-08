@@ -12,7 +12,7 @@ import { findOptimalSelections, FanSelection, AIRFLOW_UNITS, PRESSURE_UNITS, Fir
 import { toast } from 'sonner';
 import { useAuth } from '@/lib/authContext';
 import { Button } from '@/components/ui/button';
-import { useNavigate, useSearchParams } from 'react-router-dom';
+import { useSearchParams } from 'react-router-dom';
 import { GuestAccessPrompt } from '@/components/guest/GuestAccessPrompt';
 import { GuestTrialBanner } from '@/components/guest/GuestTrialBanner';
 import { useGuestTrial } from '@/lib/guestTrialContext';
@@ -20,7 +20,6 @@ import { useGuestTrial } from '@/lib/guestTrialContext';
 
 export default function FanSelectorPage() {
   const { isAuthenticated, isApproved, isLoading: authLoading, isSuperAdmin } = useAuth();
-  const navigate = useNavigate();
   const { isGuest, trialActive, trialLoading } = useGuestTrial();
   const [searchParams] = useSearchParams();
   const { database, isLoading } = useSupabaseFanDatabase();
