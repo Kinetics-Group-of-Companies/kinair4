@@ -2666,6 +2666,27 @@ export type Database = {
           },
         ]
       }
+      guest_trial_settings: {
+        Row: {
+          duration_minutes: number
+          id: boolean
+          updated_at: string
+          updated_by: string | null
+        }
+        Insert: {
+          duration_minutes?: number
+          id?: boolean
+          updated_at?: string
+          updated_by?: string | null
+        }
+        Update: {
+          duration_minutes?: number
+          id?: boolean
+          updated_at?: string
+          updated_by?: string | null
+        }
+        Relationships: []
+      }
       guest_trials: {
         Row: {
           created_at: string
