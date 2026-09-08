@@ -61,7 +61,7 @@ jobs:
       - run: npm run build
       - name: Package compact Windows application
         shell: pwsh
-        run: npx @tauri-apps/cli@2.8.5 build --no-bundle
+        run: npx @tauri-apps/cli@latest build --no-bundle
       - name: Create Windows ZIP
         shell: pwsh
         run: |
