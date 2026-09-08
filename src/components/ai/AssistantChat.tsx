@@ -761,11 +761,15 @@ function parseDirectAirCurtainDuty(userText: string): AcDutyRequest | null {
     new RegExp(String.raw`(?:door|opening)?\s*width\s*(?:of|=|:)?\s*(\d+(?:\.\d+)?)\s*${unit}\b`, 'i'),
   ) ?? userText.match(
     new RegExp(String.raw`(\d+(?:\.\d+)?)\s*${unit}\s*(?:door|opening)?\s*wide\b`, 'i'),
+  ) ?? userText.match(
+    new RegExp(String.raw`(\d+(?:\.\d+)?)\s*${unit}\s*(?:door|opening)\s*width\b`, 'i'),
   );
   const heightMatch = userText.match(
     new RegExp(String.raw`(?:door|opening)?\s*height\s*(?:of|=|:)?\s*(\d+(?:\.\d+)?)\s*${unit}\b`, 'i'),
   ) ?? userText.match(
     new RegExp(String.raw`(\d+(?:\.\d+)?)\s*${unit}\s*(?:door|opening)?\s*high\b`, 'i'),
+  ) ?? userText.match(
+    new RegExp(String.raw`(\d+(?:\.\d+)?)\s*${unit}\s*(?:door|opening)\s*height\b`, 'i'),
   );
   const dimensionsMatch = userText.match(
     new RegExp(String.raw`(\d+(?:\.\d+)?)\s*${unit}\s*[x×]\s*(\d+(?:\.\d+)?)\s*${unit}`, 'i'),
