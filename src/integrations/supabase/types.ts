@@ -2666,6 +2666,33 @@ export type Database = {
           },
         ]
       }
+      guest_trials: {
+        Row: {
+          created_at: string
+          expires_at: string
+          id: string
+          ip_hash: string
+          started_at: string
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          expires_at: string
+          id?: string
+          ip_hash: string
+          started_at?: string
+          user_id: string
+        }
+        Update: {
+          created_at?: string
+          expires_at?: string
+          id?: string
+          ip_hash?: string
+          started_at?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
       lpo_email_recipients: {
         Row: {
           all_tenants: boolean
