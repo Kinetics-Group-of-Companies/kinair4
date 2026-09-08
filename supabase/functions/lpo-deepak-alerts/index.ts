@@ -89,42 +89,32 @@ function escapeHtml(value: unknown): string {
     .replaceAll("'", '&#039;')
 }
 
-const AGENTMAIL_API_BASE = 'https://api.agentmail.to/v0'
+const RESEND_API_URL = 'https://api.resend.com/emails'
 
-async function resolveAgentMailInbox(apiKey: string): Promise<string> {
-  const configured = Deno.env.get('AGENTMAIL_INBOX_ID')?.trim()
-  if (configured) return configured
-  const response = await fetch(`${AGENTMAIL_API_BASE}/inboxes?limit=1`, {
-    headers: { Authorization: `Bearer ${apiKey}` },
-  })
-  const raw = await response.text()
-  if (!response.ok) {
-    throw new Error(`AgentMail inbox lookup failed (${response.status}): ${raw.slice(0, 500)}`)
-  }
-  const data = JSON.parse(raw)
-  const inboxId = data?.inboxes?.[0]?.inbox_id
-  if (!inboxId) throw new Error('No AgentMail inbox exists. Create a free @agentmail.to inbox first.')
-  return String(inboxId)
+function resendFrom(): string {
+  return Deno.env.get('RESEND_FROM_EMAIL')?.trim() || 'KINAIR <onboarding@resend.dev>'
 }
 
-async function sendAgentMail(subject: string, html: string, text: string, idempotencyKey: string) {
-  const apiKey = Deno.env.get('AGENTMAIL_API_KEY')
-  if (!apiKey) throw new Error('AGENTMAIL_API_KEY is not configured')
-  const inboxId = await resolveAgentMailInbox(apiKey)
-  const response = await fetch(
-    `${AGENTMAIL_API_BASE}/inboxes/${encodeURIComponent(inboxId)}/messages/send`,
-    {
-      method: 'POST',
-      headers: {
-        Authorization: `Bearer ${apiKey}`,
-        'Content-Type': 'application/json',
-        'Idempotency-Key': idempotencyKey.replace(/[^A-Za-z0-9._~-]/g, '-').slice(0, 256),
-      },
-      body: JSON.stringify({ to: [RECIPIENT], subject, html, text }),
+async function sendResend(subject: string, html: string, text: string, idempotencyKey: string) {
+  const apiKey = Deno.env.get('RESEND_API_KEY')
+  if (!apiKey) throw new Error('RESEND_API_KEY is not configured')
+  const response = await fetch(RESEND_API_URL, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${apiKey}`,
+      'Content-Type': 'application/json',
+      'Idempotency-Key': idempotencyKey.replace(/[^A-Za-z0-9._~-]/g, '-').slice(0, 256),
     },
-  )
+    body: JSON.stringify({
+      from: resendFrom(),
+      to: [RECIPIENT],
+      subject,
+      html,
+      text,
+    }),
+  })
   const raw = await response.text()
-  if (!response.ok) throw new Error(`AgentMail send failed (${response.status}): ${raw.slice(0, 500)}`)
+  if (!response.ok) throw new Error(`Resend send failed (${response.status}): ${raw.slice(0, 500)}`)
   return raw ? JSON.parse(raw) : {}
 }
 
@@ -184,7 +174,7 @@ Deno.serve(async (req) => {
       ),
     ].join('\n')
 
-    const delivery = await sendAgentMail(
+    const delivery = await sendResend(
       subject,
       html,
       text,
@@ -201,8 +191,8 @@ Deno.serve(async (req) => {
       overdue,
       at_risk: atRisk,
       on_track: onTrack,
-      message_id: delivery.message_id,
-      thread_id: delivery.thread_id,
+      provider: 'resend',
+      message_id: delivery.id,
     })
   } catch (error) {
     console.error('lpo-deepak-alerts error', error)
