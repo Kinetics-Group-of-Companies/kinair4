@@ -94,7 +94,9 @@ const AGENTMAIL_API_BASE = 'https://api.agentmail.to/v0'
 let resolvedAgentMailInbox: Promise<string> | null = null
 
 function resendFrom(): string {
-  return Deno.env.get('RESEND_FROM_EMAIL')?.trim() || 'KINAIR <onboarding@resend.dev>'
+  const configured = Deno.env.get('RESEND_FROM_EMAIL')?.trim()
+  if (configured && !configured.includes('onboarding@resend.dev')) return configured
+  return 'KINAIR <alerts@kinair.ae>'
 }
 
 async function sendResend(subject: string, html: string, text: string, idempotencyKey: string) {
