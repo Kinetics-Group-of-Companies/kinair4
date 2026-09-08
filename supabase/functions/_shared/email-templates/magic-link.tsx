@@ -30,7 +30,7 @@ export const MagicLinkEmail = ({
     <Preview>Your login link for {siteName}</Preview>
     <Body style={main}>
       <Container style={container}>
-        <Img src="https://kinvent.lovable.app/kinair-logo.png" alt="KINAIR" width="140" style={{ marginBottom: 24 }} />
+        <Img src="https://kinair.ae/kinair-logo.png" alt="KINAIR" width="140" style={{ marginBottom: 24 }} />
         <Heading style={h1}>Your login link</Heading>
         <Text style={text}>
           Click the button below to log in to {siteName}. This link will expire
