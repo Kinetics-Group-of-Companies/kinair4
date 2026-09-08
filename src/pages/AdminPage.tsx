@@ -21,6 +21,7 @@ import { FlexibleDimensionsEditor } from '@/components/admin/FlexibleDimensionsE
 import { DatasheetConfigEditor } from '@/components/admin/DatasheetConfigEditor';
 import { AccessoryFireRatingEditor } from '@/components/admin/AccessoryFireRatingEditor';
 import { BackendSettingsEditor } from '@/components/admin/BackendSettingsEditor';
+import { GuestTrialSettingsEditor } from '@/components/admin/GuestTrialSettingsEditor';
 import { SoftwareReleaseManager } from '@/components/admin/SoftwareReleaseManager';
 
 import { Button } from '@/components/ui/button';
@@ -577,6 +578,7 @@ export default function AdminPage() {
                 { id: 'documentation', icon: FileText, label: 'Documentation' },
                 { id: 'pages', icon: FileText, label: 'About/Quote Pages' },
                 { id: 'backend', icon: Database, label: 'Backend Settings' },
+                { id: 'guest-trial', icon: Clock, label: 'Guest Trial' },
               ].map(item => (
                 <button
                   key={item.id}
@@ -1475,6 +1477,10 @@ export default function AdminPage() {
 
           {activeTab === 'backend' && isAdmin && (
             <BackendSettingsEditor tenantId={tenantId} />
+          )}
+
+          {activeTab === 'guest-trial' && isAdmin && (
+            <GuestTrialSettingsEditor />
           )}
 
           {activeTab === 'aircurtains' && isAdmin && <AirCurtainManager />}

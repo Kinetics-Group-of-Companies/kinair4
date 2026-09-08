@@ -263,7 +263,7 @@ export default function UserAuthPage() {
         <CardContent>
           {trialPrompt ? (
             <div role="alert" className="mb-4 rounded-lg border border-amber-300 bg-amber-50 p-3 text-sm text-amber-950">
-              Your five-minute guest trial is complete. Create a free account to continue selecting with KINAIR AI.
+              Your guest trial is complete. Create a free account to continue selecting with KINAIR AI.
             </div>
           ) : null}
           <Tabs defaultValue={defaultTab} className="w-full">

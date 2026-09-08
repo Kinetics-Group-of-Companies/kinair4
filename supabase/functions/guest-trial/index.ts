@@ -5,7 +5,8 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
   'Access-Control-Allow-Methods': 'POST, OPTIONS',
 }
-const TRIAL_SECONDS = 5 * 60
+const DEFAULT_TRIAL_MINUTES = 5
+const MAX_TRIAL_MINUTES = 60
 const TRIAL_TIME_ZONE = 'Asia/Dubai'
 
 function trialDay(date: Date): string {
@@ -81,6 +82,17 @@ Deno.serve(async (req) => {
   const now = new Date()
   const today = trialDay(now)
 
+  const { data: settings } = await admin
+    .from('guest_trial_settings')
+    .select('duration_minutes')
+    .eq('id', true)
+    .maybeSingle()
+  const trialMinutes = Math.min(
+    MAX_TRIAL_MINUTES,
+    Math.max(1, Number(settings?.duration_minutes) || DEFAULT_TRIAL_MINUTES),
+  )
+  const trialSeconds = trialMinutes * 60
+
   if (action === 'start') {
     const { data: existing, error: existingError } = await admin
       .from('guest_trials')
@@ -93,7 +105,16 @@ Deno.serve(async (req) => {
     if (existing) {
       const remaining = Math.max(0, Math.ceil((Date.parse(existing.expires_at) - now.getTime()) / 1000))
       if (existing.user_id === user.id && remaining > 0) {
-        return json({ active: true, expires_at: existing.expires_at, seconds_remaining: remaining })
+        const originalMinutes = Math.max(
+          1,
+          Math.round((Date.parse(existing.expires_at) - Date.parse(existing.started_at)) / 60000),
+        )
+        return json({
+          active: true,
+          expires_at: existing.expires_at,
+          seconds_remaining: remaining,
+          duration_minutes: originalMinutes,
+        })
       }
       return json({
         active: false,
@@ -102,7 +123,7 @@ Deno.serve(async (req) => {
       }, 403)
     }
 
-    const expiresAt = new Date(now.getTime() + TRIAL_SECONDS * 1000).toISOString()
+    const expiresAt = new Date(now.getTime() + trialSeconds * 1000).toISOString()
     const { data: created, error: createError } = await admin
       .from('guest_trials')
       .insert({ user_id: user.id, ip_hash: ipHash, trial_day: today, started_at: now.toISOString(), expires_at: expiresAt })
@@ -114,12 +135,12 @@ Deno.serve(async (req) => {
       }
       return json({ error: createError.message }, 500)
     }
-    return json({ active: true, expires_at: created.expires_at, seconds_remaining: TRIAL_SECONDS })
+    return json({ active: true, expires_at: created.expires_at, seconds_remaining: trialSeconds, duration_minutes: trialMinutes })
   }
 
   const { data: trial, error: trialError } = await admin
     .from('guest_trials')
-    .select('expires_at')
+    .select('started_at,expires_at')
     .eq('user_id', user.id)
     .eq('ip_hash', ipHash)
     .eq('trial_day', today)
@@ -132,6 +153,9 @@ Deno.serve(async (req) => {
     active: secondsRemaining > 0,
     expires_at: trial?.expires_at ?? null,
     seconds_remaining: secondsRemaining,
+    duration_minutes: trial
+      ? Math.max(1, Math.round((Date.parse(trial.expires_at) - Date.parse(trial.started_at)) / 60000))
+      : trialMinutes,
     code: trial && secondsRemaining === 0 ? 'GUEST_TRIAL_EXPIRED' : undefined,
   })
 })
