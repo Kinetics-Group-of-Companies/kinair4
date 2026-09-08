@@ -1,0 +1,88 @@
+name: Build KINAIR Selection Software v16
+
+on:
+  push:
+    branches:
+      - codex/selection-software-v16
+  pull_request:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  VITE_SUPABASE_URL: https://bfofrgqdvqehdsiccyhk.supabase.co
+  VITE_SUPABASE_PUBLISHABLE_KEY: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImJmb2ZyZ3FkdnFlaGRzaWNjeWhrIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODg2NzY3OTIsImV4cCI6MjEwNDI1Mjc5Mn0.zAFFTXwtRqV1vc-ak1sWBcVwAWehKgzZONZmMReE2gU
+  NODE_OPTIONS: --max-old-space-size=4096
+
+jobs:
+  android:
+    name: Android APK
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+      - run: npm install --no-audit --no-fund
+      - run: npm run build
+      - run: npx cap sync android
+      - name: Build installable APK
+        working-directory: android
+        run: |
+          chmod +x gradlew
+          ./gradlew assembleDebug
+      - name: Stage Android release
+        run: cp android/app/build/outputs/apk/debug/app-debug.apk KINAIR-Selection-Software-v16-Android.apk
+      - uses: actions/upload-artifact@v4
+        with:
+          name: KINAIR-Selection-Software-v16-Android
+          path: KINAIR-Selection-Software-v16-Android.apk
+          if-no-files-found: error
+          retention-days: 7
+
+  windows:
+    name: Windows x64
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            src-tauri/target
+          key: windows-tauri-${{ hashFiles('src-tauri/Cargo.toml') }}
+      - run: npm install --no-audit --no-fund
+      - run: npm run build
+      - name: Prepare Windows icon
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path src-tauri/icons
+          Copy-Item "public/favicon.ico" "src-tauri/icons/icon.ico"
+      - name: Package compact Windows application
+        shell: pwsh
+        run: npx @tauri-apps/cli@latest build --no-bundle
+      - name: Create Windows ZIP
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path windows-release
+          Copy-Item "src-tauri/target/release/kinair-selection-software.exe" "windows-release/KINAIR Selection Software v16.exe"
+          Compress-Archive -Path "windows-release/*" -DestinationPath "KINAIR-Selection-Software-v16-Windows-x64.zip"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: KINAIR-Selection-Software-v16-Windows-x64
+          path: KINAIR-Selection-Software-v16-Windows-x64.zip
+          if-no-files-found: error
+          retention-days: 7

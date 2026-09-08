@@ -135,7 +135,7 @@ export default function DownloadsPage() {
       <div className="container mx-auto px-4 py-8 md:py-12 max-w-5xl">
         <header className="mb-8 md:mb-10">
           <Badge variant="secondary" className="mb-3">Software Downloads</Badge>
-          <h1 className="text-2xl md:text-4xl font-bold mb-3">Download Fan Selector Software</h1>
+          <h1 className="text-2xl md:text-4xl font-bold mb-3">Download KINAIR Selection Software</h1>
           <p className="text-muted-foreground max-w-2xl text-sm md:text-base">
             Install the offline desktop edition on Windows, or the mobile app on Android. The fan
             catalogue works without an internet connection and syncs with the cloud when online.
