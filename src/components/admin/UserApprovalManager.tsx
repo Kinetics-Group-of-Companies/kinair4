@@ -32,6 +32,7 @@ import {
   PopoverTrigger,
 } from "@/components/ui/popover";
 import { Calendar as CalendarComponent } from "@/components/ui/calendar";
+import { LpoEmailRecipientScheduleManager } from '@/components/admin/LpoEmailRecipientScheduleManager';
 
 const SUPER_ADMIN_EMAILS = ['chndeepak7@gmail.com', 'deepak@kineticsgroup.ae'];
 
@@ -553,7 +554,7 @@ export function UserApprovalManager() {
             LPO Tracker &amp; Email Permissions
           </CardTitle>
           <CardDescription>
-            Control tracker access and daily LPO summary delivery separately. Super administrators always retain tracker access.
+            Grant Tracker access only to selected accounts. User alerts are separate from the scheduled summary recipient list below.
           </CardDescription>
         </CardHeader>
         <CardContent>
@@ -564,9 +565,9 @@ export function UserApprovalManager() {
               <TableHeader>
                 <TableRow>
                   <TableHead>User</TableHead>
-                  <TableHead>Delivery email</TableHead>
+                  <TableHead>Alert email</TableHead>
                   <TableHead className="text-center">LPO Tracker</TableHead>
-                  <TableHead className="text-center">Daily email</TableHead>
+                  <TableHead className="text-center">User alerts</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -624,6 +625,8 @@ export function UserApprovalManager() {
           )}
         </CardContent>
       </Card>
+
+      <LpoEmailRecipientScheduleManager />
 
       {/* Pending Approvals */}
       <Card>

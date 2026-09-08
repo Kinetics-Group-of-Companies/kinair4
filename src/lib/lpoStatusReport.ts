@@ -9,6 +9,7 @@ import {
 
   factoryVariance,
   formatDate,
+  formatDateTime,
   formatDateWindow,
   materialList,
   orderMilestones,
@@ -49,6 +50,8 @@ async function loadImageDataUrl(url: string): Promise<string | null> {
 /** Client-facing order status report — one page summary of where the order stands. */
 export async function downloadLpoStatusReport(order: LpoOrder, opts: Options = {}) {
   const doc = new jsPDF({ unit: 'mm', format: 'a4' });
+  doc.setFont('helvetica', 'normal');
+  doc.setCharSpace(0);
   const committed = committedWindow(order);
   const supEstimate = supplierEstimatedWindowAll(order);
   const supConfirmed = supplierConfirmedWindow(order);
@@ -79,13 +82,15 @@ export async function downloadLpoStatusReport(order: LpoOrder, opts: Options = {
   doc.text(`Generated ${formatDate(new Date().toISOString().slice(0, 10))}`, 14, 36);
   doc.setTextColor(0);
 
+  const pdfDateWindow = (min: string | null | undefined, max: string | null | undefined) =>
+    formatDateWindow(min, max).replace(' → ', ' - ');
   const sent = (status: string | null | undefined, date: string | null | undefined) =>
-    `${status === 'sent' ? 'Sent' : 'Not sent'}${date ? ` · ${formatDate(date)}` : ''}`;
+    `${status === 'sent' ? 'Sent' : 'Not sent'}${date ? ` | ${formatDate(date)}` : ''}`;
 
   autoTable(doc, {
     startY: 42,
     theme: 'grid',
-    styles: { fontSize: 9, cellPadding: 2 },
+    styles: { font: 'helvetica', fontStyle: 'normal', fontSize: 9, cellPadding: 2 },
     head: [['Order details', '']],
     body: [
       ['LPO Ref. No.', order.lpo_ref],
@@ -108,7 +113,7 @@ export async function downloadLpoStatusReport(order: LpoOrder, opts: Options = {
   autoTable(doc, {
     startY: nextY(),
     theme: 'grid',
-    styles: { fontSize: 9, cellPadding: 2 },
+    styles: { font: 'helvetica', fontStyle: 'normal', fontSize: 9, cellPadding: 2 },
     head: [['Contractor side (our commitment)', '']],
     body: [
       ['LPO date', formatDate(order.lpo_date)],
@@ -118,8 +123,8 @@ export async function downloadLpoStatusReport(order: LpoOrder, opts: Options = {
       ['Lead time (weeks)', order.lead_time_weeks_max != null
         ? `${order.lead_time_weeks_min != null && order.lead_time_weeks_min !== order.lead_time_weeks_max ? `${order.lead_time_weeks_min} – ` : ''}${order.lead_time_weeks_max}`
         : '—'],
-      ['Estimated delivery (min / max)', formatDateWindow(ourEstimate.min, ourEstimate.max)],
-      ['Date confirmed to contractor', formatDateWindow(committed.min, committed.max)],
+      ['Estimated delivery (min / max)', pdfDateWindow(ourEstimate.min, ourEstimate.max)],
+      ['Date confirmed to contractor', pdfDateWindow(committed.min, committed.max)],
     ],
   });
 
@@ -127,7 +132,7 @@ export async function downloadLpoStatusReport(order: LpoOrder, opts: Options = {
   autoTable(doc, {
     startY: nextY(),
     theme: 'grid',
-    styles: { fontSize: 8, cellPadding: 2 },
+    styles: { font: 'helvetica', fontStyle: 'normal', fontSize: 8, cellPadding: 2 },
     head: [['Supplier', 'PO released', 'Advance released', 'Clearance sent', 'Lead time (wk)', 'Estimated (min / max)', 'Confirmed (min / max)']],
     body: suppliers.length
       ? suppliers.map((s) => {
@@ -140,8 +145,8 @@ export async function downloadLpoStatusReport(order: LpoOrder, opts: Options = {
             s.lead_time_weeks_max != null
               ? `${s.lead_time_weeks_min != null && s.lead_time_weeks_min !== s.lead_time_weeks_max ? `${s.lead_time_weeks_min} – ` : ''}${s.lead_time_weeks_max}`
               : '—',
-            formatDateWindow(est.start, est.end),
-            formatDateWindow(s.confirmed_delivery_date_min ?? s.expected_delivery_date, s.confirmed_delivery_date_max ?? s.expected_delivery_date),
+            pdfDateWindow(est.start, est.end),
+            pdfDateWindow(s.confirmed_delivery_date_min ?? s.expected_delivery_date, s.confirmed_delivery_date_max ?? s.expected_delivery_date),
           ];
         })
       : [['No supplier recorded', '—', '—', '—', '—', '—', '—']],
@@ -150,14 +155,14 @@ export async function downloadLpoStatusReport(order: LpoOrder, opts: Options = {
   autoTable(doc, {
     startY: nextY(),
     theme: 'grid',
-    styles: { fontSize: 9, cellPadding: 2 },
+    styles: { font: 'helvetica', fontStyle: 'normal', fontSize: 9, cellPadding: 2 },
     head: [['Delivery position', '']],
     body: [
-      ['Confirmed to contractor', formatDateWindow(committed.min, committed.max)],
-      ['Supplier estimated', formatDateWindow(supEstimate.min, supEstimate.max)],
-      ['Supplier confirmed', formatDateWindow(supConfirmed.min, supConfirmed.max)],
+      ['Confirmed to contractor', pdfDateWindow(committed.min, committed.max)],
+      ['Supplier estimated', pdfDateWindow(supEstimate.min, supEstimate.max)],
+      ['Supplier confirmed', pdfDateWindow(supConfirmed.min, supConfirmed.max)],
       ['Delay (min / max)', variance.label],
-      ['Delivery status', `${health.label} — ${health.detail}`],
+      ['Delivery status', `${health.label} - ${health.detail}`],
       ['Delay reason', order.delay_reason || '—'],
     ],
   });
@@ -166,7 +171,7 @@ export async function downloadLpoStatusReport(order: LpoOrder, opts: Options = {
   autoTable(doc, {
     startY: nextY(),
     theme: 'grid',
-    styles: { fontSize: 9, cellPadding: 2 },
+    styles: { font: 'helvetica', fontStyle: 'normal', fontSize: 9, cellPadding: 2 },
     head: [['Confirmations', '']],
     body: [
       ['Order acknowledgement', sent(order.order_ack_status, order.order_ack_sent_date)],
@@ -177,7 +182,7 @@ export async function downloadLpoStatusReport(order: LpoOrder, opts: Options = {
   autoTable(doc, {
     startY: nextY(),
     theme: 'striped',
-    styles: { fontSize: 9, cellPadding: 2 },
+    styles: { font: 'helvetica', fontStyle: 'normal', fontSize: 9, cellPadding: 2 },
     head: [['Milestone', 'Date', 'Status']],
     body: orderMilestones(order).map((m) => [m.label, formatDate(m.date), m.date ? 'Completed' : 'Pending']),
   });
@@ -186,7 +191,7 @@ export async function downloadLpoStatusReport(order: LpoOrder, opts: Options = {
     autoTable(doc, {
       startY: nextY(),
       theme: 'grid',
-      styles: { fontSize: 9, cellPadding: 2 },
+      styles: { font: 'helvetica', fontStyle: 'normal', fontSize: 9, cellPadding: 2 },
       head: [['Notes']],
       body: [[order.notes]],
     });
@@ -195,7 +200,7 @@ export async function downloadLpoStatusReport(order: LpoOrder, opts: Options = {
   if (order.last_updated_by_name) {
     doc.setFontSize(8);
     doc.setTextColor(120);
-    doc.text(`Last revised by ${order.last_updated_by_name} · ${new Date(order.updated_at).toLocaleString('en-GB')}`, 14, nextY() + 2);
+    doc.text(`Last revised by ${order.last_updated_by_name} | ${formatDateTime(order.updated_at)}`, 14, nextY() + 2);
     doc.setTextColor(0);
   }
 
@@ -205,7 +210,7 @@ export async function downloadLpoStatusReport(order: LpoOrder, opts: Options = {
     autoTable(doc, {
       startY: 18,
       theme: 'grid',
-      styles: { fontSize: 8, cellPadding: 2 },
+      styles: { font: 'helvetica', fontStyle: 'normal', fontSize: 8, cellPadding: 2 },
       head: [['Rev.', 'LPO ref', 'Received', 'Value', 'Lead time', 'Committed was', 'Committed now', 'Reason']],
       body: revisions
         .slice()

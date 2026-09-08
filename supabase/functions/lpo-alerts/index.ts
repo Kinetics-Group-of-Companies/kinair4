@@ -265,8 +265,8 @@ Deno.serve(async (req) => {
         wouldSend++
         if (dryRun) continue
 
-        // One alert per order, per level, per day.
-        const alertKey = `${o.id}:${h.level}:${today}`
+        // Send again on the same day only when the order status changes.
+        const alertKey = `${o.id}:${h.level}:${o.status}:${today}`
         const { data: existing } = await supabase
           .from('lpo_alert_log')
           .select('id')

@@ -660,10 +660,30 @@ export const HEALTH_CLASSES: Record<HealthLevel, string> = {
   closed: 'bg-muted text-muted-foreground border-border',
 };
 
+const SHORT_MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'] as const;
+
 export function formatDate(value: string | null | undefined): string {
   if (!value) return '—';
-  const d = new Date(`${value}T00:00:00Z`);
-  return d.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric', timeZone: 'UTC' });
+  const dateOnly = value.slice(0, 10);
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(dateOnly);
+  if (!match) return '—';
+  const [, year, month, day] = match;
+  const monthName = SHORT_MONTHS[Number(month) - 1];
+  return monthName ? `${day} ${monthName} ${year}` : '—';
+}
+
+export function formatDateTime(value: string | null | undefined): string {
+  if (!value) return '—';
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return '—';
+  const datePart = formatDate(date.toISOString().slice(0, 10));
+  const timePart = new Intl.DateTimeFormat('en-GB', {
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false,
+    timeZone: 'Asia/Dubai',
+  }).format(date);
+  return `${datePart}, ${timePart} GST`;
 }
 
 /** Format a min/max date window; shows a single date when both sides are the same or the min is missing. */
