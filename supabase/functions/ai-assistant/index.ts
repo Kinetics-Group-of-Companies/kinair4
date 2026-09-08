@@ -865,11 +865,6 @@ Deno.serve(async (req) => {
     //   calculations, or automatic failover when Luna is unavailable.
     // Manual provider choices in the chat header remain respected.
     const latestRequest = JSON.stringify(messages.at(-1) ?? "").toLowerCase();
-    const conversationHistory = JSON.stringify(messages).toLowerCase();
-    const hasToolHistory =
-      /tool-call|tool-result|toolcallid|prepare_datasheet|prepare_air_curtain_datasheet|prepare_schedule_selection|find_fans|find_air_curtains|estimate_duty/.test(
-        conversationHistory,
-      );
     const isScheduleRequest =
       /schedule|spreadsheet|excel|xlsx|xls|csv|pdf|image|photo|screenshot|attachment|uploaded|combined pdf|multiple (fan|unit)|\bqty\b|\bquantity\b/.test(
         latestRequest,
