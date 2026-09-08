@@ -2666,6 +2666,33 @@ export type Database = {
           },
         ]
       }
+      user_lpo_permissions: {
+        Row: {
+          can_access_lpo: boolean
+          notification_email: string | null
+          receive_lpo_emails: boolean
+          updated_at: string
+          updated_by: string | null
+          user_id: string
+        }
+        Insert: {
+          can_access_lpo?: boolean
+          notification_email?: string | null
+          receive_lpo_emails?: boolean
+          updated_at?: string
+          updated_by?: string | null
+          user_id: string
+        }
+        Update: {
+          can_access_lpo?: boolean
+          notification_email?: string | null
+          receive_lpo_emails?: boolean
+          updated_at?: string
+          updated_by?: string | null
+          user_id?: string
+        }
+        Relationships: []
+      }
       user_roles: {
         Row: {
           id: string
@@ -2709,6 +2736,10 @@ export type Database = {
       }
     }
     Functions: {
+      can_access_lpo: {
+        Args: { _user_id: string }
+        Returns: boolean
+      }
       get_user_tenant_id: { Args: { _user_id: string }; Returns: string }
       has_role: {
         Args: {
