@@ -223,17 +223,34 @@ Deno.serve(async (req) => {
     const open = (orders ?? []) as Order[]
     if (open.length === 0) return json({ mode, sent: 0, orders: 0 })
 
-    // Resolve recipient emails (order override, else the owner's account email).
+    // Email is opt-in and controlled from Admin → User Management.
     const userIds = [...new Set(open.map((o) => o.user_id).filter(Boolean))]
-    const { data: profiles } = await supabase
-      .from('profiles')
-      .select('user_id,email')
-      .in('user_id', userIds)
+    const [{ data: profiles, error: profileError }, { data: permissions, error: permissionError }] =
+      await Promise.all([
+        supabase.from('profiles').select('user_id,email,is_approved').in('user_id', userIds),
+        supabase
+          .from('user_lpo_permissions')
+          .select('user_id,receive_lpo_emails,notification_email')
+          .in('user_id', userIds),
+      ])
+    if (profileError) throw profileError
+    if (permissionError) throw permissionError
+
     const emailByUser = new Map<string, string>()
-    for (const p of profiles ?? []) {
-      if (p.email) emailByUser.set(p.user_id, p.email)
+    const approvedUsers = new Set<string>()
+    for (const profile of profiles ?? []) {
+      if (profile.email) emailByUser.set(profile.user_id, profile.email)
+      if (profile.is_approved) approvedUsers.add(profile.user_id)
     }
-    const recipientFor = (o: Order) => o.notify_email || emailByUser.get(o.user_id) || null
+    const permissionByUser = new Map((permissions ?? []).map((permission) => [
+      permission.user_id,
+      permission,
+    ]))
+    const recipientFor = (o: Order) => {
+      const permission = permissionByUser.get(o.user_id)
+      if (!approvedUsers.has(o.user_id) || !permission?.receive_lpo_emails) return null
+      return permission.notification_email || o.notify_email || emailByUser.get(o.user_id) || null
+    }
 
     let sent = 0
     let skipped = 0
