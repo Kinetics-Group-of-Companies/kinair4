@@ -23,7 +23,7 @@ export const ReauthenticationEmail = ({ token }: ReauthenticationEmailProps) => 
     <Preview>Your verification code</Preview>
     <Body style={main}>
       <Container style={container}>
-        <Img src="https://kinvent.lovable.app/kinair-logo.png" alt="KINAIR" width="140" style={{ marginBottom: 24 }} />
+        <Img src="https://kinair.ae/kinair-logo.png" alt="KINAIR" width="140" style={{ marginBottom: 24 }} />
         <Heading style={h1}>Confirm reauthentication</Heading>
         <Text style={text}>Use the code below to confirm your identity:</Text>
         <Text style={codeStyle}>{token}</Text>
