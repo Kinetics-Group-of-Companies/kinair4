@@ -376,6 +376,18 @@ type DutyRequest = {
   material?: string | null;
   fan_type?: FanInstallType | null;
   motor_poles?: number | null;
+  motor_brand?: string | null;
+  motor_efficiency_class?: 'None' | 'IE1' | 'IE2' | 'IE3' | 'IE4' | null;
+  frequency_hz?: 50 | 60 | null;
+  fire_class?: '' | 'ClassB' | 'ClassH' | 'F250' | 'F300' | 'F400' | null;
+  accessory?: '' | 'ET' | 'ID' | 'ETID' | null;
+  atex_rating?: '' | 'II2GExdIIB(H2)T4' | 'II2GExdIIBT4' | 'II2GExeIIT3' | 'II3DExtcIIIBT125' | 'II3DExtcIIICT125' | null;
+  safety_factor?: number | null;
+  tolerance_min?: number | null;
+  tolerance_max?: number | null;
+  temperature_c?: number | null;
+  air_density_kg_m3?: number | null;
+  altitude_m?: number | null;
   fan_size_mm?: number | null;
   max_fan_size_mm?: number | null;
   application?: string | null;
@@ -389,6 +401,69 @@ type DutyRequest = {
  * the manual page. Gemini remains available for conversation, estimates,
  * attachments and schedules.
  */
+function parseManualFanParameters(userText: string): Partial<DutyRequest> {
+  const motorBrand = userText.match(
+    /(?:motor\s*(?:make|brand|manufacturer)|make)\s*(?:is|=|:|of)?\s*([A-Za-z][A-Za-z0-9 .&-]{1,30})/i,
+  )?.[1]?.trim().replace(/[,.]$/, '') ?? null;
+  const ieClass = userText.match(/\bIE\s*([1-4])\b/i)?.[1];
+  const frequency = Number(userText.match(/\b(50|60)\s*Hz\b/i)?.[1]);
+  const fireToken = userText.match(/\b(F\s*(?:250|300|400)|Class\s*[BH])\b/i)?.[1]
+    ?.toUpperCase()
+    .replace(/\s/g, '');
+  const fireClass: DutyRequest['fire_class'] =
+    fireToken === 'CLASSB' ? 'ClassB' :
+    fireToken === 'CLASSH' ? 'ClassH' :
+    fireToken === 'F250' || fireToken === 'F300' || fireToken === 'F400' ? fireToken :
+    null;
+  const hasTerminalBox = /\b(?:external\s*terminal\s*box|terminal\s*box|\bET\b)\b/i.test(userText);
+  const hasInspectionDoor = /\b(?:inspection\s*door|access\s*door|\bID\b)\b/i.test(userText);
+  const accessory: DutyRequest['accessory'] =
+    hasTerminalBox && hasInspectionDoor ? 'ETID' :
+    hasTerminalBox ? 'ET' :
+    hasInspectionDoor ? 'ID' :
+    null;
+  const normalizedAtex = userText.toUpperCase().replace(/[\s-]/g, '');
+  const atexRating: DutyRequest['atex_rating'] =
+    normalizedAtex.includes('II2GEXDIIB(H2)T4') ? 'II2GExdIIB(H2)T4' :
+    normalizedAtex.includes('II2GEXDIIBT4') ? 'II2GExdIIBT4' :
+    normalizedAtex.includes('II2GEXEIIT3') ? 'II2GExeIIT3' :
+    normalizedAtex.includes('II3DEXTCIIIBT125') ? 'II3DExtcIIIBT125' :
+    normalizedAtex.includes('II3DEXTCIIICT125') ? 'II3DExtcIIICT125' :
+    null;
+  const safetyRaw = Number(
+    userText.match(/(?:motor\s*)?safety\s*factor\s*(?:of|=|:)?\s*(\d+(?:\.\d+)?)\s*(%)?/i)?.[1],
+  );
+  const safetyPercent = /(?:motor\s*)?safety\s*factor[^%]{0,20}%/i.test(userText);
+  const tolerance = userText.match(
+    /(?:selection\s*)?tolerance\s*(?:of|=|:)?\s*(\d+(?:\.\d+)?)\s*(?:%\s*)?(?:to|-|–|—)\s*(\d+(?:\.\d+)?)\s*%?/i,
+  );
+  const temperature = Number(
+    userText.match(/(?:air\s*)?temperature\s*(?:of|=|:)?\s*(-?\d+(?:\.\d+)?)\s*°?\s*C\b/i)?.[1],
+  );
+  const density = Number(
+    userText.match(/air\s*density\s*(?:of|=|:)?\s*(\d+(?:\.\d+)?)\s*kg\s*\/\s*m(?:³|3)\b/i)?.[1],
+  );
+  const altitude = Number(
+    userText.match(/(?:altitude|elevation)\s*(?:of|=|:)?\s*(\d+(?:\.\d+)?)\s*m\b/i)?.[1],
+  );
+
+  return {
+    motor_poles: Number(userText.match(/\b([2468]|12)\s*(?:pole|p)\b/i)?.[1]) || null,
+    motor_brand: motorBrand,
+    motor_efficiency_class: ieClass ? (`IE${ieClass}` as DutyRequest['motor_efficiency_class']) : null,
+    frequency_hz: frequency === 50 || frequency === 60 ? frequency as 50 | 60 : null,
+    fire_class: fireClass,
+    accessory,
+    atex_rating: atexRating,
+    safety_factor: safetyRaw > 0 ? (safetyPercent ? 1 + safetyRaw / 100 : safetyRaw) : null,
+    tolerance_min: tolerance ? Number(tolerance[1]) : null,
+    tolerance_max: tolerance ? Number(tolerance[2]) : null,
+    temperature_c: Number.isFinite(temperature) && temperature !== 0 ? temperature : null,
+    air_density_kg_m3: density > 0 ? density : null,
+    altitude_m: altitude > 0 ? altitude : null,
+  };
+}
+
 function parseDirectFanDuty(userText: string): DutyRequest | null {
   if (/\b(?:air\s*curtain|door|entrance|opening)\b/i.test(userText)) return null;
 
@@ -489,7 +564,7 @@ function parseDirectFanDuty(userText: string): DutyRequest | null {
     series_name: seriesName,
     material: mentionsPlastic ? 'plastic' : mentionsMetal ? 'metal' : null,
     fan_type: fanType,
-    motor_poles: Number(userText.match(/\b([2468])\s*(?:pole|p)\b/i)?.[1]) || null,
+    ...parseManualFanParameters(userText),
     fan_size_mm: exactSizeMatch ? Number(exactSizeMatch[1]) : null,
     max_fan_size_mm: maxSizeMatch ? Number(maxSizeMatch[1]) : null,
     application,
@@ -711,6 +786,18 @@ type ScheduleItem = {
   application?: string | null;
 
   motor_poles?: number | null;
+  motor_brand?: string | null;
+  motor_efficiency_class?: 'None' | 'IE1' | 'IE2' | 'IE3' | 'IE4' | null;
+  frequency_hz?: 50 | 60 | null;
+  fire_class?: DutyRequest['fire_class'];
+  accessory?: DutyRequest['accessory'];
+  atex_rating?: DutyRequest['atex_rating'];
+  safety_factor?: number | null;
+  tolerance_min?: number | null;
+  tolerance_max?: number | null;
+  temperature_c?: number | null;
+  air_density_kg_m3?: number | null;
+  altitude_m?: number | null;
   max_noise_db?: number | null;
   door_width?: number | null;
   door_width_unit?: AcLengthUnit;
@@ -768,7 +855,7 @@ function findLatestInstantDuty(messages: any[]): InstantFollowUp | null {
 
 function parseInstantFollowUp(userText: string, messages: any[]): InstantFollowUp | null {
   const isAction =
-    /\b(?:another|alternative|option|change|switch|revise|promote|upgrade|replace|quieter|quietest|silent|efficient|efficiency|lower|lowest|compact|smallest|more airflow|more pressure|stronger|throw|drawing|dimension|noise data|sound data|datasheet|data sheet|EC motor|AC motor|wall mounted|surface mounted|recessed|ceiling|concealed|not in stock|out of stock|unavailable)\b/i.test(userText);
+    /\b(?:another|alternative|option|change|switch|revise|promote|upgrade|replace|quieter|quietest|silent|efficient|efficiency|lower|lowest|compact|smallest|more airflow|more pressure|stronger|throw|drawing|dimension|noise data|sound data|datasheet|data sheet|EC motor|AC motor|wall mounted|surface mounted|recessed|ceiling|concealed|not in stock|out of stock|unavailable|motor\s*(?:pole|brand|make|class)|\b(?:2|4|6|8|12)\s*(?:pole|p)\b|\bIE\s*[1-4]\b|\b(?:50|60)\s*Hz\b|\bF\s*(?:250|300|400)\b|Class\s*[BH]|ATEX|terminal\s*box|inspection\s*door|safety\s*factor|tolerance|temperature|air\s*density|altitude|elevation)\b/i.test(userText);
   if (!isAction) return null;
 
   const previous = findLatestInstantDuty(messages);
@@ -794,8 +881,12 @@ function parseInstantFollowUp(userText: string, messages: any[]): InstantFollowU
     if (/\b(?:wall mounted|wall fan|wall extract|KIN[ -]?E)\b/i.test(userText)) input.fan_type = 'wall_mounted';
     if (/\b(?:inline|ducted|KVF[ -]?[PM])\b/i.test(userText)) input.fan_type = 'inline_ducted';
     if (/\b(?:axial|KTAF)\b/i.test(userText)) input.fan_type = 'axial';
-    const poles = Number(userText.match(/\b([2468])\s*(?:pole|p)\b/i)?.[1]);
-    if (poles) input.motor_poles = poles;
+    const manualParameters = parseManualFanParameters(userText);
+    for (const [key, value] of Object.entries(manualParameters)) {
+      if (value !== null && value !== undefined) {
+        (input as any)[key] = value;
+      }
+    }
     return { product: 'fan', input };
   }
 
@@ -1401,6 +1492,17 @@ export function AssistantChat({
                 : resolveFanSeries(database, effectiveSeriesName, effectiveMaterial, install);
 
 
+        const requestedMotorBrand = duty.motor_brand?.trim().toLowerCase();
+        const motorBrandId = requestedMotorBrand
+          ? database.motorDatabase?.brands?.find((brand: any) =>
+              String(brand.name ?? '').toLowerCase() === requestedMotorBrand ||
+              String(brand.name ?? '').toLowerCase().includes(requestedMotorBrand),
+            )?.id
+          : undefined;
+        const effectiveTemperature = duty.temperature_c ?? 20;
+        const effectiveDensity = duty.air_density_kg_m3 ??
+          calculateAirDensity(duty.altitude_m ?? 0, effectiveTemperature);
+
         const results = findOptimalSelections(
           database,
           {
@@ -1410,8 +1512,18 @@ export function AssistantChat({
             pressureUnit: (PRESSURE_UNITS as any)[duty.pressure_unit] ? duty.pressure_unit : 'Pa',
             seriesId: (series as any)?.id,
             motorPole: duty.motor_poles ?? undefined,
+            motorBrandId,
+            efficiencyClass: duty.motor_efficiency_class ?? undefined,
+            frequency: duty.frequency_hz ?? 50,
+            fireClass: duty.fire_class ?? '',
+            accessory: duty.accessory ?? '',
+            atexRating: duty.atex_rating ?? '',
+            safetyFactor: duty.safety_factor ?? fanSelectorDefaults(database, series).safetyFactor,
+            toleranceMin: duty.tolerance_min ?? fanSelectorDefaults(database, series).toleranceMin,
+            toleranceMax: duty.tolerance_max ?? fanSelectorDefaults(database, series).toleranceMax,
+            temperature: effectiveTemperature,
+            airDensity: effectiveDensity,
             dimensionsBySeriesAndSize: dimensionsMap,
-            ...fanSelectorDefaults(database, series),
           },
           50,
         );
