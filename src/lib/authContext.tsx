@@ -13,6 +13,7 @@ interface AuthContextType {
   isApproved: boolean;
   subscriptionEnd: Date | null;
   isSubscriptionValid: boolean;
+  isAccountTrialActive: boolean;
   tenantId: string | null;
   canAccessLpo: boolean;
   receivesLpoEmails: boolean;
@@ -42,6 +43,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [isApproved, setIsApproved] = useState(false);
   const [subscriptionEnd, setSubscriptionEnd] = useState<Date | null>(null);
   const [tenantId, setTenantId] = useState<string | null>(null);
+  const [isTenantActive, setIsTenantActive] = useState(false);
   const [canAccessLpo, setCanAccessLpo] = useState(false);
   const [receivesLpoEmails, setReceivesLpoEmails] = useState(false);
 
@@ -53,6 +55,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     if (!subscriptionEnd) return true; // null means unlimited
     return new Date(subscriptionEnd) > new Date();
   }, [subscriptionEnd]);
+
+  const isAccountTrialActive = React.useMemo(() => (
+    Boolean(
+      user
+      && !user.is_anonymous
+      && tenantId
+      && !isApproved
+      && isTenantActive
+      && subscriptionEnd
+      && subscriptionEnd > new Date()
+    )
+  ), [isApproved, isTenantActive, subscriptionEnd, tenantId, user]);
 
   const fetchUserStatus = async (userId: string, email?: string) => {
     try {
@@ -114,6 +128,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       }
 
       setTenantId(resolvedTenantId);
+      setIsTenantActive(Boolean(tenant?.is_active) || superAdmin);
       setIsApproved(Boolean(profileData?.is_approved) || superAdmin);
 
       if (tenant?.subscription_end) {
@@ -145,6 +160,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           setIsSuperAdmin(false);
           setIsApproved(false);
           setTenantId(null);
+          setIsTenantActive(false);
           setCanAccessLpo(false);
           setReceivesLpoEmails(false);
           setSubscriptionEnd(null);
@@ -160,6 +176,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           setIsSuperAdmin(false);
           setIsApproved(false);
           setTenantId(null);
+          setIsTenantActive(false);
           setCanAccessLpo(false);
           setReceivesLpoEmails(false);
           setSubscriptionEnd(null);
@@ -186,6 +203,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           setIsSuperAdmin(false);
           setIsApproved(false);
           setTenantId(null);
+          setIsTenantActive(false);
           setCanAccessLpo(false);
           setReceivesLpoEmails(false);
           setSubscriptionEnd(null);
@@ -235,6 +253,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setIsSuperAdmin(false);
     setIsApproved(false);
     setTenantId(null);
+    setIsTenantActive(false);
     setCanAccessLpo(false);
     setReceivesLpoEmails(false);
     setSubscriptionEnd(null);
@@ -250,6 +269,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       isApproved,
       subscriptionEnd,
       isSubscriptionValid,
+      isAccountTrialActive,
       isAuthenticated: !!user,
       tenantId,
       canAccessLpo,

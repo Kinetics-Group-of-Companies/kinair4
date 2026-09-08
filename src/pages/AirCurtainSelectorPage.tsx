@@ -18,6 +18,7 @@ import { useAuth } from '@/lib/authContext';
 import { useSearchParams } from 'react-router-dom';
 import { GuestAccessPrompt } from '@/components/guest/GuestAccessPrompt';
 import { GuestTrialBanner } from '@/components/guest/GuestTrialBanner';
+import { AccountTrialBanner } from '@/components/trial/AccountTrialBanner';
 import { useGuestTrial } from '@/lib/guestTrialContext';
 import {
   useAirCurtainModels,
@@ -71,7 +72,7 @@ const formatLengthM = (m: number, unit: LengthUnit): string =>
   `${roundSmart(fromMm(m * 1000, unit))} ${LENGTH_UNIT_LABELS[unit]}`;
 
 export default function AirCurtainSelectorPage() {
-  const { isAuthenticated, isApproved, isSuperAdmin, isLoading: authLoading } = useAuth();
+  const { isAuthenticated, isApproved, isSuperAdmin, isLoading: authLoading, isAccountTrialActive } = useAuth();
   const { isGuest, trialActive, trialLoading } = useGuestTrial();
   const { data: models = [], isLoading } = useAirCurtainModels();
   const { data: brandRecords = [] } = useAirCurtainBrands();
@@ -297,7 +298,7 @@ export default function AirCurtainSelectorPage() {
     );
   }
 
-  if (!isApproved && !isSuperAdmin && !trialActive) {
+  if (!isApproved && !isSuperAdmin && !isAccountTrialActive && !trialActive) {
     return (
       <MainLayout>
         <div className="min-h-[60vh] flex items-center justify-center text-center max-w-md mx-auto p-8">
@@ -313,6 +314,7 @@ export default function AirCurtainSelectorPage() {
   return (
     <MainLayout>
       <GuestTrialBanner />
+      <AccountTrialBanner />
       <section className="bg-gradient-primary text-primary-foreground py-8">
         <div className="container mx-auto px-4">
           <div className="flex items-center gap-4">

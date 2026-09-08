@@ -15,11 +15,12 @@ import { Button } from '@/components/ui/button';
 import { useSearchParams } from 'react-router-dom';
 import { GuestAccessPrompt } from '@/components/guest/GuestAccessPrompt';
 import { GuestTrialBanner } from '@/components/guest/GuestTrialBanner';
+import { AccountTrialBanner } from '@/components/trial/AccountTrialBanner';
 import { useGuestTrial } from '@/lib/guestTrialContext';
 
 
 export default function FanSelectorPage() {
-  const { isAuthenticated, isApproved, isLoading: authLoading, isSuperAdmin } = useAuth();
+  const { isAuthenticated, isApproved, isLoading: authLoading, isSuperAdmin, isAccountTrialActive } = useAuth();
   const { isGuest, trialActive, trialLoading } = useGuestTrial();
   const [searchParams] = useSearchParams();
   const { database, isLoading } = useSupabaseFanDatabase();
@@ -169,7 +170,7 @@ export default function FanSelectorPage() {
   }
 
   // Show pending approval screen for unapproved users (except super admins)
-  if (!isApproved && !isSuperAdmin && !trialActive) {
+  if (!isApproved && !isSuperAdmin && !isAccountTrialActive && !trialActive) {
     return (
       <MainLayout>
         <div className="min-h-[60vh] flex items-center justify-center">
@@ -192,6 +193,7 @@ export default function FanSelectorPage() {
 
   return <MainLayout>
       <GuestTrialBanner />
+      <AccountTrialBanner />
       {/* Hero Section */}
       <section className="bg-gradient-primary text-primary-foreground py-8">
         <div className="container mx-auto px-4">
