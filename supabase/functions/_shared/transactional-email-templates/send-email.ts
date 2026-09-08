@@ -2,8 +2,7 @@ import * as React from 'npm:react@18.3.1'
 import { renderAsync } from 'npm:@react-email/components@0.0.22'
 import { TEMPLATES } from './registry.ts'
 
-const AGENTMAIL_API_BASE = 'https://api.agentmail.to/v0'
-let resolvedInbox: Promise<string> | null = null
+const RESEND_API_URL = 'https://api.resend.com/emails'
 
 export type SendTemplateEmailResult =
   | { sent: true; messageId?: string; threadId?: string }
@@ -16,33 +15,14 @@ export interface SendTemplateEmailOptions {
   replyTo?: string
 }
 
-function requireAgentMailKey(): string {
-  const apiKey = Deno.env.get('AGENTMAIL_API_KEY')
-  if (!apiKey) throw new Error('AGENTMAIL_API_KEY is not configured')
+function requireResendKey(): string {
+  const apiKey = Deno.env.get('RESEND_API_KEY')
+  if (!apiKey) throw new Error('RESEND_API_KEY is not configured')
   return apiKey
 }
 
-async function resolveInboxId(apiKey: string): Promise<string> {
-  const configured = Deno.env.get('AGENTMAIL_INBOX_ID')?.trim()
-  if (configured) return configured
-
-  resolvedInbox ??= (async () => {
-    const response = await fetch(`${AGENTMAIL_API_BASE}/inboxes?limit=1`, {
-      headers: { Authorization: `Bearer ${apiKey}` },
-    })
-    const raw = await response.text()
-    if (!response.ok) {
-      throw new Error(`AgentMail inbox lookup failed (${response.status}): ${raw.slice(0, 500)}`)
-    }
-    const data = JSON.parse(raw)
-    const inboxId = data?.inboxes?.[0]?.inbox_id
-    if (!inboxId) {
-      throw new Error('No AgentMail inbox exists. Create a free @agentmail.to inbox first.')
-    }
-    return String(inboxId)
-  })()
-
-  return resolvedInbox
+function resendFrom(): string {
+  return Deno.env.get('RESEND_FROM_EMAIL')?.trim() || 'KINAIR <onboarding@resend.dev>'
 }
 
 function validIdempotencyKey(value: string): string {
@@ -55,7 +35,7 @@ export async function sendTemplateEmail(
   to: string,
   options: SendTemplateEmailOptions = {}
 ): Promise<SendTemplateEmailResult> {
-  const apiKey = requireAgentMailKey()
+  const apiKey = requireResendKey()
   const template = TEMPLATES[templateName]
   if (!template) {
     throw new Error(
@@ -77,30 +57,27 @@ export async function sendTemplateEmail(
       ? template.subject(templateData)
       : template.subject
 
-  const inboxId = await resolveInboxId(apiKey)
-  const response = await fetch(
-    `${AGENTMAIL_API_BASE}/inboxes/${encodeURIComponent(inboxId)}/messages/send`,
-    {
-      method: 'POST',
-      headers: {
-        Authorization: `Bearer ${apiKey}`,
-        'Content-Type': 'application/json',
-        'Idempotency-Key': validIdempotencyKey(options.idempotencyKey || crypto.randomUUID()),
-      },
-      body: JSON.stringify({
-        to: [recipient],
-        subject,
-        html,
-        text,
-        ...(options.replyTo ? { reply_to: options.replyTo } : {}),
-      }),
+  const response = await fetch(RESEND_API_URL, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${apiKey}`,
+      'Content-Type': 'application/json',
+      'Idempotency-Key': validIdempotencyKey(options.idempotencyKey || crypto.randomUUID()),
     },
-  )
+    body: JSON.stringify({
+      from: resendFrom(),
+      to: [recipient],
+      subject,
+      html,
+      text,
+      ...(options.replyTo ? { reply_to: options.replyTo } : {}),
+    }),
+  })
 
   const raw = await response.text()
   if (!response.ok) {
-    throw new Error(`AgentMail send failed (${response.status}): ${raw.slice(0, 500)}`)
+    throw new Error(`Resend send failed (${response.status}): ${raw.slice(0, 500)}`)
   }
   const result = raw ? JSON.parse(raw) : {}
-  return { sent: true, messageId: result.message_id, threadId: result.thread_id }
+  return { sent: true, messageId: result.id }
 }
