@@ -682,9 +682,9 @@ type AcDutyRequest = {
 function parseManualAirCurtainParameters(userText: string): Partial<AcDutyRequest> {
   const parsed: Partial<AcDutyRequest> = {};
 
-  if (/\b(?:low|slow)\s*(?:speed)?\b/i.test(userText)) parsed.speed = 'low';
-  else if (/\bmedium\s*(?:speed)?\b/i.test(userText)) parsed.speed = 'medium';
-  else if (/\b(?:high|full|max(?:imum)?)\s*(?:speed)?\b/i.test(userText)) parsed.speed = 'high';
+  if (/\b(?:low|slow)\s*speed\b/i.test(userText)) parsed.speed = 'low';
+  else if (/\bmedium\s*speed\b/i.test(userText)) parsed.speed = 'medium';
+  else if (/\b(?:high|full|max(?:imum)?)\s*speed\b/i.test(userText)) parsed.speed = 'high';
 
   const nozzleVelocity = userText.match(
     /\b(?:minimum|min\.?\s*)?(?:nozzle|outlet|discharge)\s*(?:air\s*)?velocity\s*(?:of|=|:|at least|minimum|min\.?)?\s*(\d+(?:\.\d+)?)\s*m\/?s\b/i,
