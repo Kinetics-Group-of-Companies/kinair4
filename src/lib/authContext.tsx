@@ -14,6 +14,8 @@ interface AuthContextType {
   subscriptionEnd: Date | null;
   isSubscriptionValid: boolean;
   tenantId: string | null;
+  canAccessLpo: boolean;
+  receivesLpoEmails: boolean;
   signOut: () => Promise<void>;
   refreshUserStatus: () => Promise<void>;
 }
@@ -40,6 +42,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [isApproved, setIsApproved] = useState(false);
   const [subscriptionEnd, setSubscriptionEnd] = useState<Date | null>(null);
   const [tenantId, setTenantId] = useState<string | null>(null);
+  const [canAccessLpo, setCanAccessLpo] = useState(false);
+  const [receivesLpoEmails, setReceivesLpoEmails] = useState(false);
 
   const checkSuperAdmin = (email: string | undefined) => {
     return email ? SUPER_ADMIN_EMAILS.includes(email.toLowerCase()) : false;
@@ -64,6 +68,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         .maybeSingle();
 
       setIsAdmin(roleData?.role === 'admin' || superAdmin);
+
+      const { data: lpoPermission, error: lpoPermissionError } = await supabase
+        .from('user_lpo_permissions')
+        .select('can_access_lpo, receive_lpo_emails')
+        .eq('user_id', userId)
+        .maybeSingle();
+
+      if (lpoPermissionError) throw lpoPermissionError;
+      setCanAccessLpo(superAdmin || Boolean(lpoPermission?.can_access_lpo));
+      setReceivesLpoEmails(Boolean(lpoPermission?.receive_lpo_emails));
 
       // Fetch profile with tenant info
       const { data: profileData, error: profileError } = await supabase
@@ -131,6 +145,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           setIsSuperAdmin(false);
           setIsApproved(false);
           setTenantId(null);
+          setCanAccessLpo(false);
+          setReceivesLpoEmails(false);
           setSubscriptionEnd(null);
           setIsLoading(false);
           return;
@@ -144,6 +160,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           setIsSuperAdmin(false);
           setIsApproved(false);
           setTenantId(null);
+          setCanAccessLpo(false);
+          setReceivesLpoEmails(false);
           setSubscriptionEnd(null);
           queryClient.invalidateQueries();
           setIsLoading(false);
@@ -168,6 +186,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           setIsSuperAdmin(false);
           setIsApproved(false);
           setTenantId(null);
+          setCanAccessLpo(false);
+          setReceivesLpoEmails(false);
           setSubscriptionEnd(null);
         }
         
@@ -215,6 +235,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setIsSuperAdmin(false);
     setIsApproved(false);
     setTenantId(null);
+    setCanAccessLpo(false);
+    setReceivesLpoEmails(false);
     setSubscriptionEnd(null);
   };
 
@@ -230,6 +252,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       isSubscriptionValid,
       isAuthenticated: !!user,
       tenantId,
+      canAccessLpo,
+      receivesLpoEmails,
       signOut,
       refreshUserStatus
     }}>

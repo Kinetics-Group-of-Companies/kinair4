@@ -8,7 +8,7 @@ import { SyncNowButton } from '@/components/offline/SyncNowButton';
 
 export function Header() {
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
-  const { user, isAuthenticated, signOut, isAdmin, isApproved } = useAuth();
+  const { user, isAuthenticated, signOut, isAdmin, isApproved, canAccessLpo } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
   const isActive = (path: string) => location.pathname === path;
@@ -46,7 +46,7 @@ export function Header() {
             {isAuthenticated && (
               <Link to="/projects" className={navClass('/projects')}>Projects</Link>
             )}
-            {isAuthenticated && (
+            {isAuthenticated && canAccessLpo && (
               <Link to="/tracker" className={navClass('/tracker')}>Tracker</Link>
             )}
             <Link to="/documentation" className={navClass('/documentation')}>Docs</Link>
@@ -136,7 +136,7 @@ export function Header() {
                   Projects
                 </Link>
               )}
-              {isAuthenticated && (
+              {isAuthenticated && canAccessLpo && (
                 <Link 
                   to="/tracker" 
                   className="px-4 py-2 text-sm font-medium text-muted-foreground hover:bg-muted rounded-lg flex items-center gap-2"
