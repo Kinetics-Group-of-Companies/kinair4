@@ -24,7 +24,9 @@ function requireResendKey(): string {
 }
 
 function resendFrom(): string {
-  return Deno.env.get('RESEND_FROM_EMAIL')?.trim() || 'KINAIR <onboarding@resend.dev>'
+  const configured = Deno.env.get('RESEND_FROM_EMAIL')?.trim()
+  if (configured && !configured.includes('onboarding@resend.dev')) return configured
+  return 'KINAIR <alerts@kinair.ae>'
 }
 
 function requireAgentMailKey(): string {
