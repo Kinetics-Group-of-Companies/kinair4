@@ -23,6 +23,10 @@ export async function generateAirCurtainDatasheetForSelection(
     doorWidthMm: number;
     doorHeightM: number;
     minFloorVelocity: number;
+    noiseMode?: 'dba' | 'octave';
+    airflowUnit?: 'cmh' | 'cfm' | 'ls';
+    widthUnit?: 'mm' | 'cm' | 'm' | 'in';
+    heightUnit?: 'mm' | 'cm' | 'm' | 'in';
   },
   ctx: ChatAirCurtainContext,
 ) {
@@ -31,6 +35,17 @@ export async function generateAirCurtainDatasheetForSelection(
     ctx.brands.find((b) => b.id === (selection.model.brandId ?? seriesInfo?.brandId)) ??
     ctx.brands.find((b) => b.name === selection.model.brand) ??
     null;
+
+  const airflowUnits = {
+    cmh: { label: 'm³/h', factor: 1 },
+    cfm: { label: 'CFM', factor: 1.6990107955 },
+    ls: { label: 'l/s', factor: 3.6 },
+  } as const;
+  const lengthFactors = { mm: 1, cm: 10, m: 1000, in: 25.4 } as const;
+  const lengthLabels = { mm: 'mm', cm: 'cm', m: 'm', in: 'inch' } as const;
+  const airflowUnit = opts.airflowUnit ?? 'cmh';
+  const widthUnit = opts.widthUnit ?? 'mm';
+  const heightUnit = opts.heightUnit ?? 'm';
 
   await downloadAirCurtainDatasheet({
     selection,
@@ -47,12 +62,12 @@ export async function generateAirCurtainDatasheetForSelection(
     companyLogoUrl: ctx.tenant?.logo_url ?? null,
     companyName: ctx.tenant?.name ?? undefined,
     contactInfo: { phone: ctx.tenant?.phone ?? undefined, email: ctx.tenant?.email ?? undefined },
-    noiseMode: 'dba',
-    airflowUnit: 'cmh',
-    airflowUnitLabel: 'm³/h',
-    lengthUnitFactorMm: 1,
-    lengthUnitLabel: 'mm',
-    heightUnitFactorMm: 1000,
-    heightUnitLabel: 'm',
+    noiseMode: opts.noiseMode ?? 'dba',
+    airflowUnit,
+    airflowUnitLabel: airflowUnits[airflowUnit].label,
+    lengthUnitFactorMm: lengthFactors[widthUnit],
+    lengthUnitLabel: lengthLabels[widthUnit],
+    heightUnitFactorMm: lengthFactors[heightUnit],
+    heightUnitLabel: lengthLabels[heightUnit],
   });
 }

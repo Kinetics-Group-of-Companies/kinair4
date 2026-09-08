@@ -667,10 +667,85 @@ type AcDutyRequest = {
   series_name?: string | null;
   min_airflow?: number | null;
   min_airflow_unit?: string;
+  min_nozzle_velocity?: number | null;
   min_floor_velocity?: number | null;
+  allow_combinations?: boolean | null;
+  supply_frequency_hz?: 50 | 60 | null;
+  min_match_percent?: number | null;
+  max_match_percent?: number | null;
+  selection_basis?: 'door' | 'airflow';
+  noise_mode?: 'dba' | 'octave';
   output?: DocOutput;
   optimize_for?: AcOptimizeFor;
 };
+
+function parseManualAirCurtainParameters(userText: string): Partial<AcDutyRequest> {
+  const parsed: Partial<AcDutyRequest> = {};
+
+  if (/\b(?:low|slow)\s*speed\b/i.test(userText)) parsed.speed = 'low';
+  else if (/\bmedium\s*speed\b/i.test(userText)) parsed.speed = 'medium';
+  else if (/\b(?:high|full|max(?:imum)?)\s*speed\b/i.test(userText)) parsed.speed = 'high';
+
+  const nozzleVelocity = userText.match(
+    /\b(?:minimum|min\.?\s*)?(?:nozzle|outlet|discharge)\s*(?:air\s*)?velocity\s*(?:of|=|:|at least|minimum|min\.?)?\s*(\d+(?:\.\d+)?)\s*m\/?s\b/i,
+  );
+  if (nozzleVelocity) parsed.min_nozzle_velocity = Number(nozzleVelocity[1]);
+
+  const floorVelocity = userText.match(
+    /\b(?:minimum|min\.?\s*)?(?:floor|terminal)\s*(?:air\s*)?velocity\s*(?:of|=|:|at least|minimum|min\.?)?\s*(\d+(?:\.\d+)?)\s*m\/?s\b/i,
+  );
+  if (floorVelocity) parsed.min_floor_velocity = Number(floorVelocity[1]);
+
+  const airflow = userText.match(
+    /\b(?:minimum|min\.?|required)?\s*(?:airflow|air\s*flow|air\s*volume|capacity)\s*(?:of|=|:|at least|minimum|min\.?)?\s*(\d+(?:\.\d+)?)\s*(m(?:³|3)\/?h|cmh|cfm|l\/?s|lps)\b/i,
+  );
+  if (airflow) {
+    parsed.min_airflow = Number(airflow[1]);
+    const unit = airflow[2].toLowerCase();
+    parsed.min_airflow_unit = unit === 'cfm' ? 'CFM' : /l\/?s|lps/.test(unit) ? 'LPS' : 'CMH';
+  }
+
+  if (/\b(?:select(?:ion)?|size|basis|based)\s*(?:only\s*)?(?:by|on|from)?\s*(?:airflow|air\s*volume|capacity)\b/i.test(userText)) {
+    parsed.selection_basis = 'airflow';
+  } else if (/\b(?:select(?:ion)?|size|basis|based)\s*(?:only\s*)?(?:by|on|from)?\s*(?:door|opening)(?:\s*width)?\b/i.test(userText)) {
+    parsed.selection_basis = 'door';
+  }
+
+  if (/\b(?:no|without|disable)\s*(?:model|unit|length)?\s*(?:mix(?:ing)?|combinations?)\b|\bsingle\s*unit\s*only\b/i.test(userText)) {
+    parsed.allow_combinations = false;
+  } else if (/\b(?:allow|enable|use)\s*(?:model|unit|length)?\s*(?:mix(?:ing)?|combinations?)\b|\bmixed\s*(?:model|unit|length)s?\b/i.test(userText)) {
+    parsed.allow_combinations = true;
+  }
+
+  const frequency = userText.match(/\b(50|60)\s*Hz\b/i);
+  if (frequency) parsed.supply_frequency_hz = Number(frequency[1]) as 50 | 60;
+
+  const matchRange = userText.match(
+    /\b(?:length\s*)?match(?:ing)?\s*(?:range)?\s*(?:of|=|:)?\s*(\d+(?:\.\d+)?)\s*%?\s*(?:-|–|—|to)\s*(\d+(?:\.\d+)?)\s*%/i,
+  );
+  if (matchRange) {
+    parsed.min_match_percent = Number(matchRange[1]);
+    parsed.max_match_percent = Number(matchRange[2]);
+  } else {
+    const minMatch = userText.match(/\b(?:minimum|min\.?)\s*(?:length\s*)?match(?:ing)?\s*(?:of|=|:)?\s*(\d+(?:\.\d+)?)\s*%/i);
+    const maxMatch = userText.match(/\b(?:maximum|max\.?)\s*(?:length\s*)?match(?:ing)?\s*(?:of|=|:)?\s*(\d+(?:\.\d+)?)\s*%/i);
+    if (minMatch) parsed.min_match_percent = Number(minMatch[1]);
+    if (maxMatch) parsed.max_match_percent = Number(maxMatch[1]);
+  }
+
+  parsed.noise_mode = /\boctave(?:\s*band)?\b/i.test(userText)
+    ? 'octave'
+    : /\b(?:overall\s*)?dB\(?A\)?\b/i.test(userText)
+      ? 'dba'
+      : undefined;
+
+  const brand = userText.match(
+    /\bbrand\s*(?:is|=|:)?\s*([A-Za-z0-9][A-Za-z0-9&.+ -]{0,30}?)(?=\s*(?:,|;|\b(?:series|motor|speed|at|for|with|door|opening|50\s*Hz|60\s*Hz)\b|$))/i,
+  );
+  if (brand?.[1]) parsed.brand = brand[1].trim();
+
+  return parsed;
+}
 
 
 /**
@@ -700,7 +775,14 @@ function parseDirectAirCurtainDuty(userText: string): AcDutyRequest | null {
     return normalized.startsWith('in') ? 'in' : normalized as AcLengthUnit;
   };
 
-  const doorWidth = widthMatch ? Number(widthMatch[1]) : dimensionsMatch ? Number(dimensionsMatch[1]) : 1;
+  const manualParameters = parseManualAirCurtainParameters(userText);
+  const doorWidth = widthMatch
+    ? Number(widthMatch[1])
+    : dimensionsMatch
+      ? Number(dimensionsMatch[1])
+      : manualParameters.selection_basis === 'airflow'
+        ? 0
+        : 1;
   const doorWidthUnit = widthMatch
     ? normalizeUnit(widthMatch[2])
     : dimensionsMatch
@@ -712,7 +794,11 @@ function parseDirectAirCurtainDuty(userText: string): AcDutyRequest | null {
     : dimensionsMatch
       ? normalizeUnit(dimensionsMatch[4])
       : 'm';
-  if (!doorHeight || doorHeight <= 0 || doorWidth <= 0) return null;
+  if (
+    !doorHeight ||
+    doorHeight <= 0 ||
+    (manualParameters.selection_basis !== 'airflow' && doorWidth <= 0)
+  ) return null;
 
   const mounting: AirCurtainCategory | 'any' =
     /\b(?:ceiling|recess(?:ed)?|concealed|flush[ -]?mount(?:ed)?)\b/i.test(userText)
@@ -753,8 +839,9 @@ function parseDirectAirCurtainDuty(userText: string): AcDutyRequest | null {
     door_width_unit: doorWidthUnit,
     door_height: doorHeight,
     door_height_unit: doorHeightUnit,
+    ...manualParameters,
     mounting,
-    speed: 'high',
+    speed: manualParameters.speed ?? 'high',
     motor_type: /\bEC\b/i.test(userText) ? 'EC' : /\bAC\b/i.test(userText) ? 'AC' : 'any',
     series_name: seriesName,
     output,
@@ -767,6 +854,10 @@ type AcAutoSelection = {
   doorHeightM: number;
   minFloorVelocity: number;
   optimizeFor: AcOptimizeFor;
+  noiseMode: 'dba' | 'octave';
+  airflowUnit: 'cmh' | 'cfm' | 'ls';
+  widthUnit: AcLengthUnit;
+  heightUnit: AcLengthUnit;
   results: AirCurtainSelection[];
 };
 
@@ -804,8 +895,20 @@ type ScheduleItem = {
   door_height?: number | null;
   door_height_unit?: AcLengthUnit;
   mounting?: AirCurtainCategory | 'any';
+  speed?: AirCurtainSpeed;
   motor_type?: AirCurtainMotorType | 'any';
   brand?: string | null;
+  min_airflow?: number | null;
+  min_airflow_unit?: string;
+  min_nozzle_velocity?: number | null;
+  min_floor_velocity?: number | null;
+  allow_combinations?: boolean | null;
+  supply_frequency_hz?: 50 | 60 | null;
+  min_match_percent?: number | null;
+  max_match_percent?: number | null;
+  selection_basis?: 'door' | 'airflow';
+  noise_mode?: 'dba' | 'octave';
+  optimize_for?: AcOptimizeFor;
   /** Exact model/arrangement already shown in an uploaded schedule; never inferred. */
   existing_selection?: string | null;
 };
@@ -855,7 +958,7 @@ function findLatestInstantDuty(messages: any[]): InstantFollowUp | null {
 
 function parseInstantFollowUp(userText: string, messages: any[]): InstantFollowUp | null {
   const isAction =
-    /\b(?:another|alternative|option|change|switch|revise|promote|upgrade|replace|quieter|quietest|silent|efficient|efficiency|lower|lowest|compact|smallest|more airflow|more pressure|stronger|throw|drawing|dimension|noise data|sound data|datasheet|data sheet|EC motor|AC motor|wall mounted|surface mounted|recessed|ceiling|concealed|not in stock|out of stock|unavailable|motor\s*(?:pole|brand|make|class)|\b(?:2|4|6|8|12)\s*(?:pole|p)\b|\bIE\s*[1-4]\b|\b(?:50|60)\s*Hz\b|\bF\s*(?:250|300|400)\b|Class\s*[BH]|ATEX|terminal\s*box|inspection\s*door|safety\s*factor|tolerance|temperature|air\s*density|altitude|elevation)\b/i.test(userText);
+    /\b(?:another|alternative|option|change|switch|revise|promote|upgrade|replace|quieter|quietest|silent|efficient|efficiency|lower|lowest|compact|smallest|more airflow|more pressure|stronger|throw|drawing|dimension|noise data|sound data|datasheet|data sheet|EC motor|AC motor|wall mounted|surface mounted|recessed|ceiling|concealed|not in stock|out of stock|unavailable|motor\s*(?:pole|brand|make|class)|\b(?:2|4|6|8|12)\s*(?:pole|p)\b|\bIE\s*[1-4]\b|\b(?:50|60)\s*Hz\b|high\s*speed|medium\s*speed|low\s*speed|brand|nozzle\s*velocity|floor\s*velocity|combinations?|mixed\s*lengths?|single\s*unit\s*only|match(?:ing)?|select\s*by\s*(?:airflow|door)|octave|dB\(?A\)?|air\s*volume|required\s*airflow|\bF\s*(?:250|300|400)\b|Class\s*[BH]|ATEX|terminal\s*box|inspection\s*door|safety\s*factor|tolerance|temperature|air\s*density|altitude|elevation)\b/i.test(userText);
   if (!isAction) return null;
 
   const previous = findLatestInstantDuty(messages);
@@ -906,6 +1009,21 @@ function parseInstantFollowUp(userText: string, messages: any[]): InstantFollowU
   if (/\bAC(?:\s*motor)?\b/i.test(userText)) input.motor_type = 'AC';
   if (/\b(?:ceiling|recess(?:ed)?|concealed|flush mounted)\b/i.test(userText)) input.mounting = 'recessed';
   if (/\b(?:wall mounted|surface mounted|exposed)\b/i.test(userText)) input.mounting = 'surface';
+  const manualParameters = parseManualAirCurtainParameters(userText);
+  for (const [key, value] of Object.entries(manualParameters)) {
+    if (value !== null && value !== undefined) {
+      (input as any)[key] = value;
+    }
+  }
+  const seriesName =
+    /\b(?:XD[ -]?Centrifugal|FM[ -]?(?:35|45|55)(?:09|10|12|15|18|20)XD)\b/i.test(userText)
+      ? 'XD-Centrifugal Flow'
+      : /\b(?:N[ -]?Cross|FM[ -]?12(?:09|10|12|15|18|20)N)\b/i.test(userText)
+        ? 'N-Cross Flow'
+        : /\b(?:N[ -]?Centrifugal|FM[ -]?(?:35|45|55)(?:09|10|12|15|18|20)-L)\b/i.test(userText)
+          ? 'N-Centrifugal flow'
+          : null;
+  if (seriesName) input.series_name = seriesName;
   return { product: 'air_curtain', input };
 }
 
@@ -927,17 +1045,7 @@ function parseInstantTypedSchedule(userText: string): ScheduleItem[] | null {
     }
     const airCurtain = parseDirectAirCurtainDuty(line);
     if (airCurtain) {
-      items.push({
-        tag,
-        product: 'air_curtain',
-        door_width: airCurtain.door_width,
-        door_width_unit: airCurtain.door_width_unit,
-        door_height: airCurtain.door_height,
-        door_height_unit: airCurtain.door_height_unit,
-        mounting: airCurtain.mounting,
-        motor_type: airCurtain.motor_type,
-        series_name: airCurtain.series_name,
-      });
+      items.push({ tag, product: 'air_curtain', ...airCurtain });
       continue;
     }
     return null;
@@ -1663,6 +1771,10 @@ export function AssistantChat({
               doorWidthMm: auto.doorWidthMm,
               doorHeightM: auto.doorHeightM,
               minFloorVelocity: auto.minFloorVelocity,
+              noiseMode: auto.noiseMode,
+              airflowUnit: auto.airflowUnit,
+              widthUnit: auto.widthUnit,
+              heightUnit: auto.heightUnit,
             },
             { brands: acBrands, series: acSeries, dimensions: acDimensions, tenant },
           );
@@ -1735,23 +1847,25 @@ export function AssistantChat({
         const airflowFactor = AC_AIRFLOW_TO_CMH[duty.min_airflow_unit ?? 'CMH'] ?? 1;
         const minAirflowCmh = duty.min_airflow ? duty.min_airflow * airflowFactor : 0;
         const minFloorVelocity = duty.min_floor_velocity ?? 2;
+        const selectionBasis =
+          duty.selection_basis ?? (minAirflowCmh > 0 && !duty.door_width ? 'airflow' : 'door');
 
         const results = selectAirCurtains(acModels, {
           doorWidthMm,
           doorHeightM,
           category: effectiveMounting,
           speed: duty.speed ?? 'high',
-          minNozzleVelocity: 0,
+          minNozzleVelocity: duty.min_nozzle_velocity ?? 0,
           minAirflowCmh,
           motorType: duty.motor_type ?? 'any',
           brand: brandMatch ?? 'any',
           seriesId: series?.id ?? 'any',
-          allowCombinations: true,
+          allowCombinations: duty.allow_combinations ?? true,
           minFloorVelocity,
-          supplyFrequencyHz: 50,
-          minMatchPercent: AC_MIN_MATCH_PERCENT,
-          maxMatchPercent: AC_MAX_MATCH_PERCENT,
-          selectionBasis: minAirflowCmh > 0 && !duty.door_width ? 'airflow' : 'door',
+          supplyFrequencyHz: duty.supply_frequency_hz ?? 50,
+          minMatchPercent: duty.min_match_percent ?? AC_MIN_MATCH_PERCENT,
+          maxMatchPercent: duty.max_match_percent ?? AC_MAX_MATCH_PERCENT,
+          selectionBasis,
         });
 
         const optimizeFor: AcOptimizeFor = duty.optimize_for ?? 'balanced';
@@ -1778,6 +1892,15 @@ export function AssistantChat({
           doorHeightM,
           minFloorVelocity,
           optimizeFor,
+          noiseMode: duty.noise_mode ?? 'dba',
+          airflowUnit:
+            duty.min_airflow_unit === 'CFM'
+              ? 'cfm'
+              : duty.min_airflow_unit === 'LPS'
+                ? 'ls'
+                : 'cmh',
+          widthUnit: duty.door_width_unit ?? 'mm',
+          heightUnit: duty.door_height_unit ?? 'm',
           results: ranked,
         };
         setAcAutoSelections((prev) => ({ ...prev, [key]: auto }));
@@ -1868,26 +1991,32 @@ export function AssistantChat({
                 ? seriesMatch
                 : undefined;
 
+            const airflowFactor = AC_AIRFLOW_TO_CMH[item.min_airflow_unit ?? 'CMH'] ?? 1;
+            const minAirflowCmh = item.min_airflow ? item.min_airflow * airflowFactor : 0;
+            const minFloorVelocity = item.min_floor_velocity ?? 2;
+            const selectionBasis =
+              item.selection_basis ?? (minAirflowCmh > 0 && !item.door_width ? 'airflow' : 'door');
             const coreResults = selectAirCurtains(acModels, {
                 doorWidthMm,
                 doorHeightM,
                 category,
-                speed: 'high',
-                minNozzleVelocity: 0,
-                minAirflowCmh: 0,
+                speed: item.speed ?? 'high',
+                minNozzleVelocity: item.min_nozzle_velocity ?? 0,
+                minAirflowCmh,
                 motorType: (item.motor_type as any) ?? 'any',
                 brand: brandMatch ?? 'any',
                 seriesId: series?.id ?? 'any',
-                allowCombinations: true,
-                minFloorVelocity: 2,
-                supplyFrequencyHz: 50,
-                minMatchPercent: AC_MIN_MATCH_PERCENT,
-                maxMatchPercent: AC_MAX_MATCH_PERCENT,
-                selectionBasis: 'door',
+                allowCombinations: item.allow_combinations ?? true,
+                minFloorVelocity,
+                supplyFrequencyHz: item.supply_frequency_hz ?? 50,
+                minMatchPercent: item.min_match_percent ?? AC_MIN_MATCH_PERCENT,
+                maxMatchPercent: item.max_match_percent ?? AC_MAX_MATCH_PERCENT,
+                selectionBasis,
               });
-            const results = acOptimize === 'balanced'
+            const rowOptimize = item.optimize_for ?? acOptimize;
+            const results = rowOptimize === 'balanced'
               ? coreResults
-              : rankAirCurtains(coreResults, acOptimize);
+              : rankAirCurtains(coreResults, rowOptimize);
             const optimum = results[0];
             if (!optimum) {
               return { tag, quantity, product: 'air_curtain', duty, label: 'No suitable model', detail: '' };
@@ -1899,7 +2028,7 @@ export function AssistantChat({
                   optimum,
                   acModels,
                   acSeries,
-                  { doorWidthMm, doorHeightM, minFloorVelocity: 2 },
+                  { doorWidthMm, doorHeightM, minFloorVelocity },
                   scheduleUserText,
                 )
               : optimum;
@@ -1912,7 +2041,7 @@ export function AssistantChat({
               detail: `${Math.round(best.totalAirVolumeCmh).toLocaleString()} m³/h · ${Math.round(
                 best.totalPowerW,
               )} W${best.noiseDb ? ` · ${Math.round(best.noiseDb)} dB(A)` : ''}`,
-              selection: { kind: 'air_curtain', selection: best, doorWidthMm, doorHeightM, minFloorVelocity: 2 },
+              selection: { kind: 'air_curtain', selection: best, doorWidthMm, doorHeightM, minFloorVelocity },
             };
           }
 
