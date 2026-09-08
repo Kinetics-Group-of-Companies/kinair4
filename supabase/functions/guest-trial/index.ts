@@ -98,7 +98,7 @@ Deno.serve(async (req) => {
       return json({
         active: false,
         code: 'GUEST_TRIAL_USED',
-        error: 'Today's five-minute guest trial has already been used on this network. Please sign up to continue or return tomorrow.',
+        error: "Today's five-minute guest trial has already been used on this network. Please sign up to continue or return tomorrow.",
       }, 403)
     }
 
@@ -110,7 +110,7 @@ Deno.serve(async (req) => {
       .single()
     if (createError) {
       if (createError.code === '23505') {
-        return json({ active: false, code: 'GUEST_TRIAL_USED', error: 'Today's guest trial has already been used. Please sign up to continue or return tomorrow.' }, 403)
+        return json({ active: false, code: 'GUEST_TRIAL_USED', error: "Today's guest trial has already been used. Please sign up to continue or return tomorrow." }, 403)
       }
       return json({ error: createError.message }, 500)
     }
