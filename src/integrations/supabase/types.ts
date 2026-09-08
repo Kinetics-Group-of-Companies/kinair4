@@ -2666,6 +2666,86 @@ export type Database = {
           },
         ]
       }
+      lpo_email_recipients: {
+        Row: {
+          all_tenants: boolean
+          created_at: string
+          created_by: string | null
+          display_name: string | null
+          email: string
+          id: string
+          is_enabled: boolean
+          tenant_id: string | null
+          updated_at: string
+        }
+        Insert: {
+          all_tenants?: boolean
+          created_at?: string
+          created_by?: string | null
+          display_name?: string | null
+          email: string
+          id?: string
+          is_enabled?: boolean
+          tenant_id?: string | null
+          updated_at?: string
+        }
+        Update: {
+          all_tenants?: boolean
+          created_at?: string
+          created_by?: string | null
+          display_name?: string | null
+          email?: string
+          id?: string
+          is_enabled?: boolean
+          tenant_id?: string | null
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "lpo_email_recipients_tenant_id_fkey"
+            columns: ["tenant_id"]
+            isOneToOne: false
+            referencedRelation: "tenants"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      lpo_email_schedule: {
+        Row: {
+          cron_expression: string
+          enabled: boolean
+          frequency: string
+          id: number
+          send_time: string
+          timezone: string
+          updated_at: string
+          updated_by: string | null
+          weekday: number
+        }
+        Insert: {
+          cron_expression?: string
+          enabled?: boolean
+          frequency?: string
+          id?: number
+          send_time?: string
+          timezone?: string
+          updated_at?: string
+          updated_by?: string | null
+          weekday?: number
+        }
+        Update: {
+          cron_expression?: string
+          enabled?: boolean
+          frequency?: string
+          id?: number
+          send_time?: string
+          timezone?: string
+          updated_at?: string
+          updated_by?: string | null
+          weekday?: number
+        }
+        Relationships: []
+      }
       user_lpo_permissions: {
         Row: {
           can_access_lpo: boolean
@@ -2739,6 +2819,26 @@ export type Database = {
       can_access_lpo: {
         Args: { _user_id: string }
         Returns: boolean
+      }
+      update_lpo_email_schedule: {
+        Args: {
+          p_enabled: boolean
+          p_frequency: string
+          p_send_time: string
+          p_timezone: string
+          p_weekday: number
+        }
+        Returns: {
+          cron_expression: string
+          enabled: boolean
+          frequency: string
+          id: number
+          send_time: string
+          timezone: string
+          updated_at: string
+          updated_by: string | null
+          weekday: number
+        }
       }
       get_user_tenant_id: { Args: { _user_id: string }; Returns: string }
       has_role: {
