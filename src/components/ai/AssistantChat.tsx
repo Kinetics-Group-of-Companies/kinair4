@@ -9,6 +9,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/lib/authContext';
 import { useNavigate } from 'react-router-dom';
+import { useGuestTrial } from '@/lib/guestTrialContext';
 import { toast } from 'sonner';
 import { useSupabaseFanDatabase } from '@/hooks/useSupabaseFanDatabase';
 import { useAllFanDimensions } from '@/hooks/useFanDatabase';
@@ -627,6 +628,7 @@ export function AssistantChat({
   heightClass?: string;
 }) {
   const { isAuthenticated, isLoading: authLoading } = useAuth();
+  const { isGuest, trialActive } = useGuestTrial();
   const navigate = useNavigate();
   const [input, setInput] = useState('');
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -636,7 +638,7 @@ export function AssistantChat({
   const [availableModels, setAvailableModels] = useState<RegisteredAiModel[]>([]);
 
   useEffect(() => {
-    if (!isAuthenticated) return;
+    if (!isAuthenticated || (isGuest && !trialActive)) return;
     let cancelled = false;
     void supabase.functions.invoke('ai-model-registry').then(({ data, error }) => {
       if (cancelled || error || !Array.isArray(data?.models)) return;
@@ -645,7 +647,7 @@ export function AssistantChat({
     return () => {
       cancelled = true;
     };
-  }, [isAuthenticated]);
+  }, [isAuthenticated, isGuest, trialActive]);
 
   const dynamicModelOptions = useMemo(() => {
     const modeFor = (model: RegisteredAiModel): AiMode | null => {
@@ -736,6 +738,9 @@ export function AssistantChat({
                 signal: controller.signal,
                 body: JSON.stringify({ ...originalBody, aiMode: mode }),
               });
+              if (response.status === 403) {
+                return response;
+              }
               const provider = response.headers.get('X-KINAIR-AI-Provider');
               const model = response.headers.get('X-KINAIR-AI-Model');
               const providerMismatch =
