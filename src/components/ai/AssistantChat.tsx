@@ -403,8 +403,8 @@ type DutyRequest = {
  */
 function parseManualFanParameters(userText: string): Partial<DutyRequest> {
   const motorBrand = userText.match(
-    /(?:motor\s*(?:make|brand|manufacturer)|make)\s*(?:is|=|:|of)?\s*([A-Za-z][A-Za-z0-9 .&-]{1,30})/i,
-  )?.[1]?.trim().replace(/[,.]$/, '') ?? null;
+    /(?:motor\s*(?:make|brand|manufacturer)|make)\s*(?:(?:is|of|to)\s+|[=:]\s*)?([A-Za-z][A-Za-z0-9 .&-]{1,30})/i,
+  )?.[1]?.split(/\b(?:with|and|at|for)\b/i)[0]?.trim().replace(/[,.]$/, '') ?? null;
   const ieClass = userText.match(/\bIE\s*([1-4])\b/i)?.[1];
   const frequency = Number(userText.match(/\b(50|60)\s*Hz\b/i)?.[1]);
   const fireToken = userText.match(/\b(F\s*(?:250|300|400)|Class\s*[BH])\b/i)?.[1]
