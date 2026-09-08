@@ -6,6 +6,19 @@ const corsHeaders = {
   'Access-Control-Allow-Methods': 'POST, OPTIONS',
 }
 const TRIAL_SECONDS = 5 * 60
+const TRIAL_TIME_ZONE = 'Asia/Dubai'
+
+function trialDay(date: Date): string {
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone: TRIAL_TIME_ZONE,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).formatToParts(date)
+  const value = (type: Intl.DateTimeFormatPartTypes) =>
+    parts.find((part) => part.type === type)?.value ?? ''
+  return `${value('year')}-${value('month')}-${value('day')}`
+}
 
 function json(body: unknown, status = 200) {
   return new Response(JSON.stringify(body), {
@@ -66,12 +79,14 @@ Deno.serve(async (req) => {
   }
   const action = body.action === 'start' ? 'start' : 'status'
   const now = new Date()
+  const today = trialDay(now)
 
   if (action === 'start') {
     const { data: existing, error: existingError } = await admin
       .from('guest_trials')
       .select('user_id,started_at,expires_at')
       .eq('ip_hash', ipHash)
+      .eq('trial_day', today)
       .maybeSingle()
     if (existingError) return json({ error: existingError.message }, 500)
 
@@ -83,19 +98,19 @@ Deno.serve(async (req) => {
       return json({
         active: false,
         code: 'GUEST_TRIAL_USED',
-        error: 'The five-minute guest trial has already been used on this network. Please sign up to continue.',
+        error: "Today's five-minute guest trial has already been used on this network. Please sign up to continue or return tomorrow.",
       }, 403)
     }
 
     const expiresAt = new Date(now.getTime() + TRIAL_SECONDS * 1000).toISOString()
     const { data: created, error: createError } = await admin
       .from('guest_trials')
-      .insert({ user_id: user.id, ip_hash: ipHash, started_at: now.toISOString(), expires_at: expiresAt })
+      .insert({ user_id: user.id, ip_hash: ipHash, trial_day: today, started_at: now.toISOString(), expires_at: expiresAt })
       .select('expires_at')
       .single()
     if (createError) {
       if (createError.code === '23505') {
-        return json({ active: false, code: 'GUEST_TRIAL_USED', error: 'Guest trial already used. Please sign up to continue.' }, 403)
+        return json({ active: false, code: 'GUEST_TRIAL_USED', error: "Today's guest trial has already been used. Please sign up to continue or return tomorrow." }, 403)
       }
       return json({ error: createError.message }, 500)
     }
@@ -107,6 +122,7 @@ Deno.serve(async (req) => {
     .select('expires_at')
     .eq('user_id', user.id)
     .eq('ip_hash', ipHash)
+    .eq('trial_day', today)
     .maybeSingle()
   if (trialError) return json({ error: trialError.message }, 500)
   const secondsRemaining = trial
