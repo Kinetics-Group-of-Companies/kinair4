@@ -859,10 +859,10 @@ Deno.serve(async (req) => {
     // - The official deterministic KINAIR engine performs every product
     //   calculation; the language model only understands the request and
     //   calls the matching selector tool.
-    // - OpenAI Luna handles routine chat, single selections, datasheets and
-    //   schedules (the target is at least 95% of automatic AI traffic).
-    // - Anthropic is reserved for explicitly high-complexity engineering
-    //   calculations, or automatic failover when Luna is unavailable.
+    // - OpenAI Luna handles product selection, datasheets and schedules.
+    // - Gemini handles ordinary conversation and casual chat.
+    // - Anthropic is reserved for an explicitly high-complexity engineering
+    //   request only; the following message is classified again from scratch.
     // Manual provider choices in the chat header remain respected.
     const latestRequest = JSON.stringify(messages.at(-1) ?? "").toLowerCase();
     const isScheduleRequest =
@@ -875,19 +875,24 @@ Deno.serve(async (req) => {
       );
     const isSingleSelectionRequest = needsTools && !isScheduleRequest;
 
-    // Keep this deliberately strict: ordinary calculations, normal
-    // ventilation questions and all selector operations stay on Luna.
+    // Keep this deliberately strict: only genuinely complex engineering
+    // analysis uses Claude. Product selection stays on Luna; casual chat uses Gemini.
     const needsClaude =
       /psychrometric analysis|multi-stage system design|duct network calculation|acoustic calculation|fan law extrapolation|engineering compliance review|complex pressure loss calculation|high[- ]complexity engineering calculation|finite element analysis|computational fluid dynamics|\bcfd\b/.test(
         latestRequest,
       );
 
-    // "standard" is retained for older website/app clients, but now follows
-    // the same automatic Luna-first policy. If Luna is unavailable, the
-    // provider chain below falls through to Anthropic automatically.
+    // "standard" is retained for older website/app clients. Classification
+    // uses only the latest user message, so a Claude answer can never make
+    // Anthropic sticky for the next normal selection.
+    const automaticMode = needsClaude
+      ? "anthropic_sonnet"
+      : needsTools
+        ? "openai_luna"
+        : "gemini";
     const routedMode =
       aiMode === "auto" || aiMode === "standard"
-        ? (needsClaude ? "anthropic_sonnet" : "openai_luna")
+        ? automaticMode
         : aiMode;
 
     // Resolve the newest enabled model in each price tier from the dynamic
