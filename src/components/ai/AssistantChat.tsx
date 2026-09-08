@@ -1051,6 +1051,29 @@ export function AssistantChat({
           };
           const originalBody =
             typeof init?.body === 'string' ? JSON.parse(init.body) : {};
+
+          // Selection tools run in the KINAIR browser engine, not at the AI
+          // provider. Do not replay those UI-only tool parts to a later model:
+          // OpenAI requires a matching tool output and Gemini additionally
+          // requires its provider thought signature. Preserve a history marker.
+          const providerSafeBody = {
+            ...originalBody,
+            messages: Array.isArray(originalBody.messages)
+              ? originalBody.messages.map((message: any) => ({
+                  ...message,
+                  parts: Array.isArray(message.parts)
+                    ? message.parts.flatMap((part: any) =>
+                        typeof part?.type === 'string' && part.type.startsWith('tool-')
+                          ? [{
+                              type: 'text',
+                              text: '[KINAIR selection tool completed in the website.]',
+                            }]
+                          : [part],
+                      )
+                    : message.parts,
+                }))
+              : originalBody.messages,
+          };
           let lastFailure = '';
           let lastAttemptProvider: string | null = null;
 
@@ -1071,7 +1094,7 @@ export function AssistantChat({
               const response = await fetch(input, {
                 ...init,
                 signal: controller.signal,
-                body: JSON.stringify({ ...originalBody, aiMode: mode }),
+                body: JSON.stringify({ ...providerSafeBody, aiMode: mode }),
               });
               if (response.status === 403) {
                 return response;
