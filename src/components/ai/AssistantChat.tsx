@@ -376,6 +376,9 @@ type DutyRequest = {
   material?: string | null;
   fan_type?: FanInstallType | null;
   motor_poles?: number | null;
+  fan_size_mm?: number | null;
+  max_fan_size_mm?: number | null;
+  application?: string | null;
   output?: DocOutput;
   optimize_for?: FanOptimizeFor;
 };
@@ -390,18 +393,18 @@ function parseDirectFanDuty(userText: string): DutyRequest | null {
   if (/\b(?:air\s*curtain|door|entrance|opening)\b/i.test(userText)) return null;
 
   const airflowPattern =
-    /(\d+(?:\.\d+)?)\s*(m(?:³|3)?\s*\/\s*h|cmh|l\s*\/\s*s|lps|cfm|m(?:³|3)?\s*\/\s*s|cms)\b/gi;
+    /(\d+(?:\.\d+)?)\s*(m(?:³|3)?\s*\/(?:\s*h|\s*hr)|m(?:³|3)?\s*(?:per\s*hour|ph)|cmh|l(?:itre|iter)?s?\s*(?:\/\s*s|per\s*second)|lps|cfm|cubic\s*feet\s*per\s*minute|m(?:³|3)?\s*\/\s*s|cms)\b/gi;
   const airflowMatches = [...userText.matchAll(airflowPattern)];
   if (airflowMatches.length !== 1) return null;
 
   const pressurePattern =
-    /(?:(?:@|\bat\b|static\s*pressure|esp|pressure)\s*)?(\d+(?:\.\d+)?)\s*(pa|in(?:\.|\s*)w(?:\.|\s*)g|inwg|mm(?:\.|\s*)w(?:\.|\s*)g|mmwg)\b/i;
+    /(?:(?:@|\bat\b|static\s*pressure|external\s*static\s*pressure|esp|pressure)\s*)?(\d+(?:\.\d+)?)\s*(pa|pascals?|in(?:\.|\s*)w(?:\.|\s*)g|inwg|inch(?:es)?\s*(?:of\s*)?(?:water|wg)|mm(?:\.|\s*)w(?:\.|\s*)g|mmwg|mm\s*(?:of\s*)?water)\b/i;
   const pressureMatch = userText.match(pressurePattern);
 
   const airflowToken = airflowMatches[0][2].toLowerCase().replace(/\s/g, '');
   const pressureToken = pressureMatch?.[2]?.toLowerCase().replace(/[.\s]/g, '') ?? 'pa';
   const airflowUnit: keyof typeof AIRFLOW_UNITS =
-    airflowToken === 'cfm'
+    airflowToken === 'cfm' || airflowToken.includes('cubicfeetperminute')
       ? 'CFM'
       : airflowToken === 'cms' || /m(?:³|3)\/s/.test(airflowToken)
         ? 'CMS'
@@ -415,8 +418,8 @@ function parseDirectFanDuty(userText: string): DutyRequest | null {
   const seriesName = seriesMatch
     ? seriesMatch[1].toUpperCase().replace(/\s/g, '').replace(/^KVF([PM])$/, 'KVF-$1').replace(/^KIN-?E$/, 'KIN-E')
     : null;
-  const mentionsPlastic = /\b(plastic|pvc|abs|polypropylene|polymer|pp)\b/i.test(userText);
-  const mentionsMetal = /\b(metal|metallic|steel|galvanized|galvanised|gi)\b/i.test(userText);
+  const mentionsPlastic = /\b(plastic|pvc|u-pvc|upvc|abs|polypropylene|polymer|pp)\b/i.test(userText);
+  const mentionsMetal = /\b(metal|metallic|steel|stainless\s*steel|ss\s*304|ss\s*316|galvanized|galvanised|gi|aluminium|aluminum)\b/i.test(userText);
   const fanType: FanInstallType | null =
     /\b(ktaf|tube axial|axial fan|axial flow)\b/i.test(userText)
       ? 'axial'
@@ -433,13 +436,13 @@ function parseDirectFanDuty(userText: string): DutyRequest | null {
         ? 'noise'
         : 'full';
   const optimizeFor: FanOptimizeFor =
-    /\b(?:quiet|quieter|silent|low\s*noise)\b/i.test(userText)
+    /\b(?:quiet|quieter|quietest|silent|low(?:est)?\s*(?:noise|sound)|acoustic|dba\s*limit)\b/i.test(userText)
       ? 'low_noise'
-      : /\b(?:efficient|efficiency)\b/i.test(userText)
+      : /\b(?:efficient|efficiency|highest\s*efficiency|best\s*efficiency|energy\s*efficient|minimum\s*sfp|lowest\s*sfp)\b/i.test(userText)
         ? 'high_efficiency'
-        : /\b(?:low(?:er|est)?\s*(?:power|kw)|energy saving|consumption)\b/i.test(userText)
+        : /\b(?:low(?:er|est)?\s*(?:power|kw|watts?|bhp|consumption)|minimum\s*(?:power|kw|watts?|bhp)|energy saving)\b/i.test(userText)
           ? 'low_power'
-          : /\b(?:compact|smallest)\b/i.test(userText)
+          : /\b(?:compact|smallest|lowest\s*size|minimum\s*size|smallest\s*(?:casing|diameter|footprint)|space\s*constraint|limited\s*space)\b/i.test(userText)
             ? 'smallest_size'
             : /\b(?:more|max(?:imum)?)\s*airflow\b/i.test(userText)
               ? 'max_airflow'
@@ -461,6 +464,22 @@ function parseDirectFanDuty(userText: string): DutyRequest | null {
     fanType === 'wall_mounted' || seriesName === 'KIN-E'
       ? (airflowLps <= 25 ? 3 : 10)
       : 75;
+  const exactSizeMatch =
+    userText.match(/(?:fan|duct|spigot|connection|diameter|dia\.?|size|ø)\s*(?:of|=|:)?\s*(\d{2,4})\s*mm\b/i) ??
+    userText.match(/\b(\d{2,4})\s*mm\s*(?:dia(?:meter)?|fan|duct|spigot|connection|size)\b/i);
+  const maxSizeMatch = userText.match(
+    /(?:maximum|max|not\s*more\s*than|up\s*to)\s*(?:fan|duct|spigot|connection|diameter|dia\.?|size)?\s*(\d{2,4})\s*mm\b/i,
+  );
+  const application =
+    /\b(?:toilet|washroom|bathroom|wc|restroom)\b/i.test(userText) ? 'toilet_exhaust' :
+    /\b(?:kitchen|hood|grease)\b/i.test(userText) ? 'kitchen_extract' :
+    /\b(?:car\s*park|parking|basement)\b/i.test(userText) ? 'car_park_ventilation' :
+    /\b(?:staircase|stairwell|pressurization|pressurisation)\b/i.test(userText) ? 'staircase_pressurization' :
+    /\b(?:fresh\s*air|supply\s*air|make[- ]?up\s*air)\b/i.test(userText) ? 'fresh_air_supply' :
+    /\b(?:smoke\s*extract|smoke\s*exhaust|fire\s*rated)\b/i.test(userText) ? 'smoke_extract' :
+    /\b(?:laboratory|lab\s*exhaust|chemical|corrosive|fume)\b/i.test(userText) ? 'corrosive_exhaust' :
+    /\b(?:general\s*exhaust|extract|exhaust)\b/i.test(userText) ? 'general_exhaust' :
+    null;
 
   return {
     airflow: airflowValue,
@@ -471,6 +490,9 @@ function parseDirectFanDuty(userText: string): DutyRequest | null {
     material: mentionsPlastic ? 'plastic' : mentionsMetal ? 'metal' : null,
     fan_type: fanType,
     motor_poles: Number(userText.match(/\b([2468])\s*(?:pole|p)\b/i)?.[1]) || null,
+    fan_size_mm: exactSizeMatch ? Number(exactSizeMatch[1]) : null,
+    max_fan_size_mm: maxSizeMatch ? Number(maxSizeMatch[1]) : null,
+    application,
     output,
     optimize_for: optimizeFor,
   };
@@ -630,7 +652,7 @@ function parseDirectAirCurtainDuty(userText: string): AcDutyRequest | null {
         ? 'noise'
         : 'full';
   const optimizeFor: AcOptimizeFor =
-    /\b(?:quiet|quieter|silent|low\s*noise)\b/i.test(userText)
+    /\b(?:quiet|quieter|quietest|silent|low(?:est)?\s*(?:noise|sound)|acoustic|dba\s*limit)\b/i.test(userText)
       ? 'low_noise'
       : /\b(?:low(?:er|est)?\s*(?:power|watts?)|energy saving|consumption)\b/i.test(userText)
         ? 'low_power'
@@ -684,7 +706,9 @@ type ScheduleItem = {
   series_name?: string | null;
   material?: string | null;
   fan_type?: FanInstallType | null;
-
+  fan_size_mm?: number | null;
+  max_fan_size_mm?: number | null;
+  application?: string | null;
 
   motor_poles?: number | null;
   max_noise_db?: number | null;
@@ -752,9 +776,9 @@ function parseInstantFollowUp(userText: string, messages: any[]): InstantFollowU
   if (previous.product === 'fan') {
     const input: DutyRequest = { ...previous.input };
     if (/\b(?:quiet|quieter|quietest|silent|low\s*noise)\b/i.test(userText)) input.optimize_for = 'low_noise';
-    else if (/\b(?:efficient|efficiency)\b/i.test(userText)) input.optimize_for = 'high_efficiency';
+    else if (/\b(?:efficient|efficiency|highest\s*efficiency|best\s*efficiency|energy\s*efficient|minimum\s*sfp|lowest\s*sfp)\b/i.test(userText)) input.optimize_for = 'high_efficiency';
     else if (/\b(?:lower|lowest|low)\s*(?:power|kw|consumption)|energy saving\b/i.test(userText)) input.optimize_for = 'low_power';
-    else if (/\b(?:compact|smallest)\b/i.test(userText)) input.optimize_for = 'smallest_size';
+    else if (/\b(?:compact|smallest|lowest\s*size|minimum\s*size|smallest\s*(?:casing|diameter|footprint)|space\s*constraint|limited\s*space)\b/i.test(userText)) input.optimize_for = 'smallest_size';
     else if (/\b(?:more|max(?:imum)?)\s*airflow\b/i.test(userText)) input.optimize_for = 'max_airflow';
     else if (/\b(?:more|max(?:imum)?)\s*(?:pressure|static)\b/i.test(userText)) input.optimize_for = 'max_pressure';
 
@@ -1345,8 +1369,8 @@ export function AssistantChat({
           .join(' ')
           .toLowerCase() ?? '';
 
-        const mentionsPlastic = /\b(plastic|pvc|abs|polypropylene|polymer|pp)\b/i.test(userText);
-        const mentionsMetal = /\b(metal|metallic|steel|galvanized|galvanised|gi)\b/i.test(userText);
+        const mentionsPlastic = /\b(plastic|pvc|u-pvc|upvc|abs|polypropylene|polymer|pp)\b/i.test(userText);
+        const mentionsMetal = /\b(metal|metallic|steel|stainless\s*steel|ss\s*304|ss\s*316|galvanized|galvanised|gi|aluminium|aluminum)\b/i.test(userText);
         const mentionsWall = /\b(wall[ -]?mounted|wall extract|wall fan)\b/i.test(userText);
         const mentionsAxial = /\b(ktaf|tube axial|axial fan|axial flow)\b/i.test(userText);
         const mentionsKvfp = /\bkvf[ -]?p\b/i.test(userText);
@@ -1393,8 +1417,15 @@ export function AssistantChat({
         );
 
 
+        const sizeFilteredResults = results.filter((selection) => {
+          if (duty.fan_size_mm && selection.diameter !== duty.fan_size_mm) return false;
+          if (duty.max_fan_size_mm && selection.diameter > duty.max_fan_size_mm) return false;
+          return true;
+        });
         const optimizeFor = duty.optimize_for ?? 'balanced';
-        const ranked = optimizeFor === 'balanced' ? results : rankFanSelections(results, optimizeFor);
+        const ranked = optimizeFor === 'balanced'
+          ? sizeFilteredResults
+          : rankFanSelections(sizeFilteredResults, optimizeFor);
         setAutoSelections((prev) => ({ ...prev, [key]: { duty, results: ranked } }));
 
         // Only auto-download once the reply stream has fully finished — starting a
