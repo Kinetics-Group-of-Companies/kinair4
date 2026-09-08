@@ -33,7 +33,7 @@ export const InviteEmail = ({
     <Preview>You've been invited to join {siteName}</Preview>
     <Body style={main}>
       <Container style={container}>
-        <Img src="https://kinvent.lovable.app/kinair-logo.png" alt="KINAIR" width="140" style={{ marginBottom: 24 }} />
+        <Img src="https://kinair.ae/kinair-logo.png" alt="KINAIR" width="140" style={{ marginBottom: 24 }} />
         <Heading style={h1}>You've been invited</Heading>
         <Text style={text}>
           You've been invited to join{' '}
