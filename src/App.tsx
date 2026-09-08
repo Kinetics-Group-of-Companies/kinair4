@@ -6,6 +6,7 @@ import { BrowserRouter, HashRouter, Routes, Route } from "react-router-dom";
 import { HelmetProvider } from "react-helmet-async";
 import { AuthProvider } from "@/lib/authContext";
 import { FanDatabaseProvider } from "@/lib/fanDatabaseContext";
+import { GuestTrialProvider } from "@/lib/guestTrialContext";
 import { FaviconLoader } from "@/components/FaviconLoader";
 import { Seo } from "@/components/Seo";
 import { isOfflineMode } from "@/lib/offline/mode";
@@ -54,6 +55,7 @@ const App = () => {
     <HelmetProvider>
     <QueryClientProvider client={queryClient}>
       <AuthProvider>
+        <GuestTrialProvider>
         <FanDatabaseProvider>
           <TooltipProvider>
             <Toaster />
@@ -140,6 +142,7 @@ const App = () => {
             </Router>
           </TooltipProvider>
         </FanDatabaseProvider>
+        </GuestTrialProvider>
       </AuthProvider>
     </QueryClientProvider>
     </HelmetProvider>
