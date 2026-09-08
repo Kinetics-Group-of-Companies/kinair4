@@ -627,7 +627,7 @@ export function AssistantChat({
   context?: AssistantContext;
   heightClass?: string;
 }) {
-  const { isAuthenticated, isLoading: authLoading } = useAuth();
+  const { isAuthenticated } = useAuth();
   const { isGuest, trialActive } = useGuestTrial();
   const navigate = useNavigate();
   const [input, setInput] = useState('');
