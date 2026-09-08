@@ -2,14 +2,14 @@ import { useState } from 'react';
 import { Clock3, LogIn, Sparkles, UserPlus } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
-import { useGuestTrial } from '@/lib/guestTrialContext';
+import { useGuestTrial, wasGuestTrialUsedToday } from '@/lib/guestTrialContext';
 
 export function GuestAccessPrompt({ productName }: { productName: string }) {
   const navigate = useNavigate();
   const { startTrial, trialLoading } = useGuestTrial();
   const [failure, setFailure] = useState<string | null>(() =>
-    sessionStorage.getItem('kinair_guest_trial_expired')
-      ? 'Your five-minute guest trial is complete. Sign up to continue using KINAIR.'
+    wasGuestTrialUsedToday()
+      ? "Today's five-minute guest trial is complete. Sign up to continue, or return tomorrow."
       : null,
   );
 
@@ -29,7 +29,7 @@ export function GuestAccessPrompt({ productName }: { productName: string }) {
           {failure ? 'Continue with a free account' : 'Try KINAIR for 5 minutes'}
         </h2>
         <p className="text-muted-foreground mb-6">
-          {failure || `Use the ${productName} and AI Selection Assistant without logging in. One trial is available per network.`}
+          {failure || `Use the ${productName} and AI Selection Assistant without logging in. One trial is available per network each day.`}
         </p>
         <div className="flex flex-col sm:flex-row gap-3 justify-center">
           {failure ? (
