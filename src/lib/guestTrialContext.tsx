@@ -17,6 +17,22 @@ interface GuestTrialContextValue {
 const GuestTrialContext = createContext<GuestTrialContextValue | undefined>(undefined);
 const EXPIRED_FLAG = 'kinair_guest_trial_expired';
 
+export function currentGuestTrialDay(date = new Date()): string {
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone: 'Asia/Dubai',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).formatToParts(date);
+  const value = (type: Intl.DateTimeFormatPartTypes) =>
+    parts.find((part) => part.type === type)?.value ?? '';
+  return `${value('year')}-${value('month')}-${value('day')}`;
+}
+
+export function wasGuestTrialUsedToday(): boolean {
+  return sessionStorage.getItem(EXPIRED_FLAG) === currentGuestTrialDay();
+}
+
 async function functionErrorMessage(error: unknown): Promise<string> {
   const fallback = error instanceof Error ? error.message : 'Unable to start guest trial';
   const context = (error as { context?: Response } | null)?.context;
@@ -46,7 +62,7 @@ export function GuestTrialProvider({ children }: { children: ReactNode }) {
   const finishExpiredTrial = useCallback(async () => {
     if (endingRef.current) return;
     endingRef.current = true;
-    sessionStorage.setItem(EXPIRED_FLAG, '1');
+    sessionStorage.setItem(EXPIRED_FLAG, currentGuestTrialDay());
     clearTrial();
     await supabase.auth.signOut({ scope: 'local' }).catch(() => undefined);
     endingRef.current = false;
