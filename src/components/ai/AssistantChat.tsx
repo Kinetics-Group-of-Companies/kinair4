@@ -397,10 +397,9 @@ function parseDirectFanDuty(userText: string): DutyRequest | null {
   const pressurePattern =
     /(?:@|\bat\b)\s*(\d+(?:\.\d+)?)\s*(pa|in(?:\.|\s*)w(?:\.|\s*)g|inwg|mm(?:\.|\s*)w(?:\.|\s*)g|mmwg)\b/i;
   const pressureMatch = userText.match(pressurePattern);
-  if (!pressureMatch) return null;
 
   const airflowToken = airflowMatches[0][2].toLowerCase().replace(/\s/g, '');
-  const pressureToken = pressureMatch[2].toLowerCase().replace(/[.\s]/g, '');
+  const pressureToken = pressureMatch?.[2]?.toLowerCase().replace(/[.\s]/g, '') ?? 'pa';
   const airflowUnit: keyof typeof AIRFLOW_UNITS =
     airflowToken === 'cfm'
       ? 'CFM'
@@ -448,11 +447,26 @@ function parseDirectFanDuty(userText: string): DutyRequest | null {
                 ? 'max_pressure'
                 : 'balanced';
 
+  if (!pressureMatch && !fanType && !seriesName) return null;
+  const airflowValue = Number(airflowMatches[0][1]);
+  const airflowLps =
+    airflowUnit === 'LPS'
+      ? airflowValue
+      : airflowUnit === 'CMH'
+        ? airflowValue / 3.6
+        : airflowUnit === 'CFM'
+          ? (airflowValue * 1.6990107955) / 3.6
+          : airflowValue * 1000;
+  const defaultPressure =
+    fanType === 'wall_mounted' || seriesName === 'KIN-E'
+      ? (airflowLps <= 25 ? 3 : 10)
+      : 75;
+
   return {
-    airflow: Number(airflowMatches[0][1]),
+    airflow: airflowValue,
     airflow_unit: airflowUnit,
-    static_pressure: Number(pressureMatch[1]),
-    pressure_unit: pressureUnit,
+    static_pressure: pressureMatch ? Number(pressureMatch[1]) : defaultPressure,
+    pressure_unit: pressureMatch ? pressureUnit : 'Pa',
     series_name: seriesName,
     material: mentionsPlastic ? 'plastic' : mentionsMetal ? 'metal' : null,
     fan_type: fanType,
@@ -560,6 +574,86 @@ type AcDutyRequest = {
   output?: DocOutput;
   optimize_for?: AcOptimizeFor;
 };
+
+
+/**
+ * Parse a clear single air-curtain duty locally. This is KINAIR's provider-free
+ * fast path: it emits the same tool part consumed by the manual selector engine.
+ */
+function parseDirectAirCurtainDuty(userText: string): AcDutyRequest | null {
+  if (!/\b(?:air\s*curtain|door|entrance|opening)\b/i.test(userText)) return null;
+  if (/\b(?:schedule|spreadsheet|excel|xlsx|xls|csv|pdf|image|photo|attachment|multiple|several)\b/i.test(userText)) return null;
+
+  const unit = String.raw`(mm|cm|m|in(?:ch(?:es)?)?)`;
+  const widthMatch = userText.match(
+    new RegExp(String.raw`(?:door|opening)?\s*width\s*(?:of|=|:)?\s*(\d+(?:\.\d+)?)\s*${unit}\b`, 'i'),
+  ) ?? userText.match(
+    new RegExp(String.raw`(\d+(?:\.\d+)?)\s*${unit}\s*(?:door|opening)?\s*wide\b`, 'i'),
+  );
+  const heightMatch = userText.match(
+    new RegExp(String.raw`(?:door|opening)?\s*height\s*(?:of|=|:)?\s*(\d+(?:\.\d+)?)\s*${unit}\b`, 'i'),
+  ) ?? userText.match(
+    new RegExp(String.raw`(\d+(?:\.\d+)?)\s*${unit}\s*(?:door|opening)?\s*high\b`, 'i'),
+  );
+  const dimensionsMatch = userText.match(
+    new RegExp(String.raw`(\d+(?:\.\d+)?)\s*${unit}\s*[x×]\s*(\d+(?:\.\d+)?)\s*${unit}`, 'i'),
+  );
+  const normalizeUnit = (value?: string): AcLengthUnit => {
+    const normalized = String(value ?? 'm').toLowerCase();
+    return normalized.startsWith('in') ? 'in' : normalized as AcLengthUnit;
+  };
+
+  const doorWidth = widthMatch ? Number(widthMatch[1]) : dimensionsMatch ? Number(dimensionsMatch[1]) : 1;
+  const doorWidthUnit = widthMatch
+    ? normalizeUnit(widthMatch[2])
+    : dimensionsMatch
+      ? normalizeUnit(dimensionsMatch[2])
+      : 'm';
+  const doorHeight = heightMatch ? Number(heightMatch[1]) : dimensionsMatch ? Number(dimensionsMatch[3]) : null;
+  const doorHeightUnit = heightMatch
+    ? normalizeUnit(heightMatch[2])
+    : dimensionsMatch
+      ? normalizeUnit(dimensionsMatch[4])
+      : 'm';
+  if (!doorHeight || doorHeight <= 0 || doorWidth <= 0) return null;
+
+  const mounting: AirCurtainCategory | 'any' =
+    /\b(?:ceiling|recess(?:ed)?|concealed|flush[ -]?mount(?:ed)?)\b/i.test(userText)
+      ? 'recessed'
+      : /\b(?:wall[ -]?mount(?:ed)?|surface[ -]?mount(?:ed)?|exposed)\b/i.test(userText)
+        ? 'surface'
+        : 'any';
+  const output: DocOutput =
+    /\b(?:drawing|dimension)\b/i.test(userText)
+      ? 'drawing'
+      : /\b(?:noise|sound)\b/i.test(userText)
+        ? 'noise'
+        : 'full';
+  const optimizeFor: AcOptimizeFor =
+    /\b(?:quiet|quieter|silent|low\s*noise)\b/i.test(userText)
+      ? 'low_noise'
+      : /\b(?:low(?:er|est)?\s*(?:power|watts?)|energy saving|consumption)\b/i.test(userText)
+        ? 'low_power'
+        : /\b(?:stronger|throw|floor velocity|tall door)\b/i.test(userText)
+          ? 'max_velocity'
+          : /\b(?:single unit|minimum quantity|fewest units)\b/i.test(userText)
+            ? 'fewest_units'
+            : /\b(?:more|max(?:imum)?)\s*(?:air|airflow)\b/i.test(userText)
+              ? 'max_airflow'
+              : 'balanced';
+
+  return {
+    door_width: doorWidth,
+    door_width_unit: doorWidthUnit,
+    door_height: doorHeight,
+    door_height_unit: doorHeightUnit,
+    mounting,
+    speed: 'high',
+    motor_type: /\bEC\b/i.test(userText) ? 'EC' : /\bAC\b/i.test(userText) ? 'AC' : 'any',
+    output,
+    optimize_for: optimizeFor,
+  };
+}
 
 type AcAutoSelection = {
   doorWidthMm: number;
@@ -917,6 +1011,37 @@ export function AssistantChat({
                 toolCallId,
                 state: 'input-available',
                 input: directDuty,
+              },
+            ],
+          },
+        ] as any);
+        return;
+      }
+      const directAirCurtainDuty = parseDirectAirCurtainDuty(value);
+      if (directAirCurtainDuty) {
+        const requestId = crypto.randomUUID();
+        const toolCallId = crypto.randomUUID();
+        setActiveProvider('KINAIR selection engine · instant');
+        setMessages((current) => [
+          ...current,
+          {
+            id: requestId,
+            role: 'user',
+            parts: [{ type: 'text', text: value }],
+          },
+          {
+            id: crypto.randomUUID(),
+            role: 'assistant',
+            parts: [
+              {
+                type: 'text',
+                text: `Running the official KINAIR air-curtain selector for ${directAirCurtainDuty.door_width} ${directAirCurtainDuty.door_width_unit} width × ${directAirCurtainDuty.door_height} ${directAirCurtainDuty.door_height_unit} height.`,
+              },
+              {
+                type: 'tool-prepare_air_curtain_datasheet',
+                toolCallId,
+                state: 'input-available',
+                input: directAirCurtainDuty,
               },
             ],
           },
