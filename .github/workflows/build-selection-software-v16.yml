@@ -1,0 +1,82 @@
+name: Build KINAIR Selection Software v16
+
+on:
+  push:
+    branches:
+      - codex/selection-software-v16
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  VITE_SUPABASE_URL: https://bfofrgqdvqehdsiccyhk.supabase.co
+  VITE_SUPABASE_PUBLISHABLE_KEY: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImJmb2ZyZ3FkdnFlaGRzaWNjeWhrIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODg2NzY3OTIsImV4cCI6MjEwNDI1Mjc5Mn0.zAFFTXwtRqV1vc-ak1sWBcVwAWehKgzZONZmMReE2gU
+  NODE_OPTIONS: --max-old-space-size=4096
+
+jobs:
+  android:
+    name: Android APK
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+      - run: npm ci
+      - run: npm run build
+      - run: npx cap sync android
+      - name: Build installable APK
+        working-directory: android
+        run: |
+          chmod +x gradlew
+          ./gradlew assembleDebug
+      - name: Stage Android release
+        run: cp android/app/build/outputs/apk/debug/app-debug.apk KINAIR-Selection-Software-v16-Android.apk
+      - uses: actions/upload-artifact@v4
+        with:
+          name: KINAIR-Selection-Software-v16-Android
+          path: KINAIR-Selection-Software-v16-Android.apk
+          if-no-files-found: error
+          retention-days: 7
+
+  windows:
+    name: Windows x64
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run build
+      - name: Package Windows application
+        shell: pwsh
+        run: >
+          npx electron-packager .
+          "KINAIR Selection Software"
+          --platform=win32
+          --arch=x64
+          --icon=electron/kinair-icon.ico
+          --app-version=16.0.0
+          --app-copyright="KINAIR"
+          --win32metadata.CompanyName="KINAIR"
+          --win32metadata.ProductName="KINAIR Selection Software"
+          --win32metadata.FileDescription="KINAIR Selection Software"
+          --overwrite
+          --out=release
+      - name: Create Windows ZIP
+        shell: pwsh
+        run: Compress-Archive -Path "release/KINAIR Selection Software-win32-x64/*" -DestinationPath "KINAIR-Selection-Software-v16-Windows-x64.zip"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: KINAIR-Selection-Software-v16-Windows-x64
+          path: KINAIR-Selection-Software-v16-Windows-x64.zip
+          if-no-files-found: error
+          retention-days: 7
