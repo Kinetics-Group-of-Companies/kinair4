@@ -676,8 +676,10 @@ export function AssistantChat({
       new DefaultChatTransport({
         api: `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/ai-assistant`,
         fetch: async (input, init) => {
-          // Automatic mode spends from free -> cheap -> balanced -> premium.
-          // A manual provider choice keeps that provider first, then crosses over.
+          // Auto must reach the server unchanged so every new message is
+          // classified independently: selection -> Luna, casual chat -> Gemini,
+          // and explicitly complex engineering -> Claude. Provider metadata is
+          // display-only and never changes the selected mode.
           const economyLadder = [
             'gemini',
             'openai_luna',
@@ -709,7 +711,7 @@ export function AssistantChat({
                     'gemini',
                   ]
                 : aiMode === 'auto' || aiMode === 'standard'
-                  ? economyLadder
+                  ? ['auto', 'openai_luna', 'anthropic_sonnet', 'gemini']
                   : [aiMode, ...economyLadder.filter((mode) => mode !== aiMode)];
           const expectedProvider: Record<string, string> = {
             gemini: 'Google Gemini',
@@ -723,8 +725,14 @@ export function AssistantChat({
           const originalBody =
             typeof init?.body === 'string' ? JSON.parse(init.body) : {};
           let lastFailure = '';
+          let lastAttemptProvider: string | null = null;
 
           for (const mode of fallbackModes) {
+            // After the automatic request identifies its provider, do not retry
+            // that same provider explicitly. Move straight to the next service.
+            if (mode !== 'auto' && expectedProvider[mode] === lastAttemptProvider) {
+              continue;
+            }
             const controller = new AbortController();
             const connectTimeoutMs = mode === 'gemini' ? 5_000 : 8_000;
             const timeoutId = window.setTimeout(() => controller.abort(), connectTimeoutMs);
@@ -743,6 +751,11 @@ export function AssistantChat({
               }
               const provider = response.headers.get('X-KINAIR-AI-Provider');
               const model = response.headers.get('X-KINAIR-AI-Model');
+              if (provider) {
+                lastAttemptProvider = provider.startsWith('KINAIR AI · OpenAI')
+                  ? 'OpenAI'
+                  : provider;
+              }
               const providerMismatch =
                 expectedProvider[mode] != null && provider !== expectedProvider[mode];
 
