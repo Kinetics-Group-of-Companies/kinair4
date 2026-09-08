@@ -34,7 +34,7 @@ import {
 import { cn } from '@/lib/utils';
 
 export default function LpoTrackerPage() {
-  const { user, isLoading, isAdmin } = useAuth();
+  const { user, isLoading, isAdmin, canAccessLpo } = useAuth();
   const { orders, isLoading: ordersLoading, deleteOrder } = useLpoOrders();
 
   const [search, setSearch] = useState('');
@@ -105,6 +105,7 @@ export default function LpoTrackerPage() {
     );
   }
   if (!user) return <Navigate to="/login" replace />;
+  if (!canAccessLpo) return <Navigate to="/" replace />;
 
   return (
     <MainLayout>
