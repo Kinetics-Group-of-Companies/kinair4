@@ -5,8 +5,9 @@ import { Input } from '@/components/ui/input';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Badge } from '@/components/ui/badge';
+import { Switch } from '@/components/ui/switch';
 import { toast } from 'sonner';
-import { Check, X, Calendar, Loader2, RefreshCw, UserCheck, UserX, Clock, Shield, User, Trash2, CalendarDays } from 'lucide-react';
+import { Check, X, Calendar, Loader2, RefreshCw, UserCheck, UserX, Clock, Shield, User, Trash2, CalendarDays, Mail, Truck } from 'lucide-react';
 import { format } from 'date-fns';
 import {
   AlertDialog,
@@ -61,10 +62,14 @@ interface UserProfile {
     is_active: boolean;
   };
   user_email?: string;
+  can_access_lpo?: boolean;
+  receive_lpo_emails?: boolean;
+  notification_email?: string | null;
 }
 
 export function UserApprovalManager() {
   const [users, setUsers] = useState<UserProfile[]>([]);
+  const [lpoUsers, setLpoUsers] = useState<UserProfile[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [actionLoading, setActionLoading] = useState<string | null>(null);
   const [subscriptionDays, setSubscriptionDays] = useState<{ [key: string]: number }>({});
@@ -100,19 +105,37 @@ export function UserApprovalManager() {
 
       const roleMap = new Map(roles?.map(r => [r.user_id, r.role]) || []);
 
-      // Transform to flatten tenant and use email from profile (synced from auth.users)
-      const transformedProfiles = (profiles || [])
-        .map(p => ({
+      const { data: lpoPermissions, error: permissionsError } = await supabase
+        .from('user_lpo_permissions')
+        .select('user_id, can_access_lpo, receive_lpo_emails, notification_email');
+
+      if (permissionsError) throw permissionsError;
+
+      const permissionMap = new Map((lpoPermissions || []).map(permission => [
+        permission.user_id,
+        permission,
+      ]));
+
+      // Transform to flatten tenant and use email from profile (synced from auth.users).
+      const transformedProfiles = (profiles || []).map(p => {
+        const permission = permissionMap.get(p.user_id);
+        return {
           ...p,
           tenant: Array.isArray(p.tenant) ? p.tenant[0] : p.tenant,
-          // Use profile email (synced from auth.users) first, fallback to tenant email
           user_email: (p as any).email || (Array.isArray(p.tenant) ? p.tenant[0]?.email : (p.tenant as any)?.email),
-          role: roleMap.get(p.user_id) as 'admin' | 'user' | undefined
-        }))
-        // Super-admin accounts control this screen and must not be managed as subscribers.
-        .filter(profile => !SUPER_ADMIN_EMAILS.includes((profile.user_email || '').toLowerCase()));
+          role: roleMap.get(p.user_id) as 'admin' | 'user' | undefined,
+          can_access_lpo: permission?.can_access_lpo ?? false,
+          receive_lpo_emails: permission?.receive_lpo_emails ?? false,
+          notification_email: permission?.notification_email ?? null,
+        };
+      });
 
-      setUsers(transformedProfiles);
+      // Only real authenticated accounts have a permission row. Orphaned legacy
+      // profiles are excluded from the LPO controls so they cannot look enabled.
+      setLpoUsers(transformedProfiles.filter(profile => permissionMap.has(profile.user_id)));
+      setUsers(transformedProfiles.filter(
+        profile => !SUPER_ADMIN_EMAILS.includes((profile.user_email || '').toLowerCase()),
+      ));
     } catch (error) {
       console.error('Error fetching users:', error);
       toast.error('Failed to load users');
@@ -435,6 +458,32 @@ export function UserApprovalManager() {
     }
   };
 
+  const handleLpoPermissionChange = async (
+    profile: UserProfile,
+    changes: Partial<Pick<UserProfile, 'can_access_lpo' | 'receive_lpo_emails' | 'notification_email'>>,
+  ) => {
+    setActionLoading(`lpo-${profile.user_id}`);
+    try {
+      const payload = {
+        ...changes,
+        updated_at: new Date().toISOString(),
+      };
+      const { error } = await supabase
+        .from('user_lpo_permissions')
+        .update(payload)
+        .eq('user_id', profile.user_id);
+
+      if (error) throw error;
+      toast.success('LPO permissions updated');
+      await fetchUsers();
+    } catch (error) {
+      console.error('Error updating LPO permissions:', error);
+      toast.error('Failed to update LPO permissions');
+    } finally {
+      setActionLoading(null);
+    }
+  };
+
   const getSubscriptionStatus = (tenant?: UserProfile['tenant']) => {
     if (!tenant) return { status: 'unknown', label: 'Unknown', variant: 'secondary' as const };
     
@@ -496,6 +545,85 @@ export function UserApprovalManager() {
           Refresh
         </Button>
       </div>
+
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <Truck className="h-5 w-5 text-primary" />
+            LPO Tracker &amp; Email Permissions
+          </CardTitle>
+          <CardDescription>
+            Control tracker access and daily LPO summary delivery separately. Super administrators always retain tracker access.
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          {lpoUsers.length === 0 ? (
+            <p className="text-sm text-muted-foreground text-center py-4">No authenticated users found</p>
+          ) : (
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>User</TableHead>
+                  <TableHead>Delivery email</TableHead>
+                  <TableHead className="text-center">LPO Tracker</TableHead>
+                  <TableHead className="text-center">Daily email</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {lpoUsers.map((profile) => {
+                  const superAdmin = isSuperAdmin(profile.user_email);
+                  const loading = actionLoading === `lpo-${profile.user_id}`;
+                  return (
+                    <TableRow key={profile.user_id}>
+                      <TableCell>
+                        <div className="font-medium">{profile.display_name || profile.user_email || 'User'}</div>
+                        <div className="text-xs text-muted-foreground">{profile.user_email}</div>
+                      </TableCell>
+                      <TableCell className="min-w-56">
+                        <Input
+                          type="email"
+                          aria-label={`LPO delivery email for ${profile.user_email}`}
+                          defaultValue={profile.notification_email || profile.user_email || ''}
+                          disabled={loading}
+                          onBlur={(event) => {
+                            const value = event.currentTarget.value.trim();
+                            const current = profile.notification_email || profile.user_email || '';
+                            if (value && value !== current) {
+                              void handleLpoPermissionChange(profile, { notification_email: value });
+                            }
+                          }}
+                        />
+                      </TableCell>
+                      <TableCell className="text-center">
+                        <div className="inline-flex items-center gap-2">
+                          <Switch
+                            checked={superAdmin || Boolean(profile.can_access_lpo)}
+                            disabled={superAdmin || loading}
+                            aria-label={`Allow LPO Tracker access for ${profile.user_email}`}
+                            onCheckedChange={(checked) => void handleLpoPermissionChange(profile, { can_access_lpo: checked })}
+                          />
+                          {superAdmin && <Badge variant="secondary">Always on</Badge>}
+                        </div>
+                      </TableCell>
+                      <TableCell className="text-center">
+                        <div className="inline-flex items-center gap-2">
+                          <Mail className="h-4 w-4 text-muted-foreground" />
+                          <Switch
+                            checked={Boolean(profile.receive_lpo_emails)}
+                            disabled={loading}
+                            aria-label={`Send LPO email to ${profile.user_email}`}
+                            onCheckedChange={(checked) => void handleLpoPermissionChange(profile, { receive_lpo_emails: checked })}
+                          />
+                        </div>
+                      </TableCell>
+                    </TableRow>
+                  );
+                })}
+              </TableBody>
+            </Table>
+          )}
+        </CardContent>
+      </Card>
 
       {/* Pending Approvals */}
       <Card>
