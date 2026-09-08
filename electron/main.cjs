@@ -8,7 +8,7 @@ function createWindow() {
     icon: path.join(__dirname, 'kinair-icon.png'),
     show: false,
     autoHideMenuBar: true,
-    title: 'KINAIR Fan Selector',
+    title: 'KINAIR Selection Software',
     webPreferences: {
       contextIsolation: true,
       nodeIntegration: false,
