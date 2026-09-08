@@ -40,7 +40,7 @@ export const EmailChangeEmail = ({
     <Preview>Confirm your email change for {siteName}</Preview>
     <Body style={main}>
       <Container style={container}>
-        <Img src="https://kinvent.lovable.app/kinair-logo.png" alt="KINAIR" width="140" style={{ marginBottom: 24 }} />
+        <Img src="https://kinair.ae/kinair-logo.png" alt="KINAIR" width="140" style={{ marginBottom: 24 }} />
         <Heading style={h1}>Confirm your email change</Heading>
         <Text style={text}>
           You requested to change your email address for {siteName} from{' '}
