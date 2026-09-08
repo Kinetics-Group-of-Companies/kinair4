@@ -47,14 +47,23 @@ export default function UserAuthPage() {
 
         const { data: profile } = await supabase
           .from('profiles')
-          .select('is_approved')
+          .select('is_approved, tenant:tenants(subscription_end, is_active)')
           .eq('user_id', session.user.id)
           .maybeSingle();
 
-        if (profile?.is_approved) {
+        const tenant = profile
+          ? (Array.isArray(profile.tenant) ? profile.tenant[0] : profile.tenant)
+          : null;
+        const trialActive = Boolean(
+          !profile?.is_approved
+          && tenant?.is_active
+          && tenant.subscription_end
+          && new Date(tenant.subscription_end) > new Date()
+        );
+
+        if (profile?.is_approved || trialActive) {
           navigate('/');
         } else {
-          // Sign out unapproved users
           await supabase.auth.signOut();
         }
       }
@@ -75,11 +84,21 @@ export default function UserAuthPage() {
 
           const { data: profile } = await supabase
             .from('profiles')
-            .select('is_approved')
+            .select('is_approved, tenant:tenants(subscription_end, is_active)')
             .eq('user_id', session.user.id)
             .maybeSingle();
 
-          if (profile?.is_approved) {
+          const tenant = profile
+            ? (Array.isArray(profile.tenant) ? profile.tenant[0] : profile.tenant)
+            : null;
+          const trialActive = Boolean(
+            !profile?.is_approved
+            && tenant?.is_active
+            && tenant.subscription_end
+            && new Date(tenant.subscription_end) > new Date()
+          );
+
+          if (profile?.is_approved || trialActive) {
             navigate('/');
           }
           // Don't sign out here - let handleLogin handle it
@@ -113,7 +132,7 @@ export default function UserAuthPage() {
     return Object.keys(newErrors).length === 0;
   };
 
-  const checkApprovalStatus = async (userId: string, userEmail: string): Promise<{ approved: boolean; hasProfile: boolean }> => {
+  const checkApprovalStatus = async (userId: string, userEmail: string): Promise<{ approved: boolean; hasProfile: boolean; trialActive: boolean }> => {
     // Super admins bypass approval check - use trimmed lowercase email
     const superAdminEmails = ['chndeepak7@gmail.com', 'deepak@kineticsgroup.ae'];
     const normalizedEmail = (userEmail || '').trim().toLowerCase();
@@ -122,13 +141,13 @@ export default function UserAuthPage() {
     
     if (normalizedEmail && superAdminEmails.includes(normalizedEmail)) {
       console.log('Super admin detected, bypassing approval check');
-      return { approved: true, hasProfile: true };
+      return { approved: true, hasProfile: true, trialActive: false };
     }
 
     try {
       const { data: profile, error } = await supabase
         .from('profiles')
-        .select('is_approved')
+        .select('is_approved, tenant:tenants(subscription_end, is_active)')
         .eq('user_id', userId)
         .maybeSingle();
 
@@ -136,27 +155,34 @@ export default function UserAuthPage() {
         console.error('Error fetching profile:', error);
         // For super admins, still allow even if profile query fails
         if (normalizedEmail && superAdminEmails.includes(normalizedEmail)) {
-          return { approved: true, hasProfile: true };
+          return { approved: true, hasProfile: true, trialActive: false };
         }
-        return { approved: false, hasProfile: false };
+        return { approved: false, hasProfile: false, trialActive: false };
       }
 
       // If no profile exists, check if super admin (in case profile wasn't created)
       if (!profile) {
         if (normalizedEmail && superAdminEmails.includes(normalizedEmail)) {
-          return { approved: true, hasProfile: true };
+          return { approved: true, hasProfile: true, trialActive: false };
         }
-        return { approved: false, hasProfile: false };
+        return { approved: false, hasProfile: false, trialActive: false };
       }
 
-      return { approved: profile.is_approved === true, hasProfile: true };
+      const tenant = Array.isArray(profile.tenant) ? profile.tenant[0] : profile.tenant;
+      const trialActive = Boolean(
+        !profile.is_approved
+        && tenant?.is_active
+        && tenant.subscription_end
+        && new Date(tenant.subscription_end) > new Date()
+      );
+      return { approved: profile.is_approved === true, hasProfile: true, trialActive };
     } catch (err) {
       console.error('Exception checking approval:', err);
       // Fallback for super admins
       if (normalizedEmail && superAdminEmails.includes(normalizedEmail)) {
-        return { approved: true, hasProfile: true };
+        return { approved: true, hasProfile: true, trialActive: false };
       }
-      return { approved: false, hasProfile: false };
+      return { approved: false, hasProfile: false, trialActive: false };
     }
   };
 
@@ -184,7 +210,7 @@ export default function UserAuthPage() {
       if (data.user) {
         const userEmail = data.user.email || email; // Fallback to form email
         console.log('Login successful, checking approval for:', userEmail);
-        const { approved, hasProfile } = await checkApprovalStatus(data.user.id, userEmail);
+        const { approved, hasProfile, trialActive } = await checkApprovalStatus(data.user.id, userEmail);
         
         if (!hasProfile) {
           // No profile means something went wrong - sign out and show generic error
@@ -193,15 +219,18 @@ export default function UserAuthPage() {
           return;
         }
         
-        if (!approved) {
-          // Sign out the user immediately
+        if (!approved && !trialActive) {
           await supabase.auth.signOut();
-          toast.error('Your account is pending approval. Please wait for an administrator to approve your access.');
+          toast.error('Your account trial has expired and approval is still pending. Please contact the administrator.');
           return;
         }
-      }
 
-      toast.success('Logged in successfully!');
+        toast.success(
+          trialActive
+            ? 'Logged in. Your account trial is active while approval is pending.'
+            : 'Logged in successfully!'
+        );
+      }
     } catch (error) {
       toast.error('An unexpected error occurred. Please try again.');
     } finally {
@@ -237,7 +266,7 @@ export default function UserAuthPage() {
         return;
       }
 
-      toast.success('Account created! Your request has been submitted for approval.');
+      toast.success('Account created! Trial access is available while your approval request is pending.');
     } catch (error) {
       toast.error('An unexpected error occurred. Please try again.');
     } finally {
