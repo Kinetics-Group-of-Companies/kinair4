@@ -36,6 +36,7 @@ export function GuestTrialProvider({ children }: { children: ReactNode }) {
   const [secondsRemaining, setSecondsRemaining] = useState(0);
   const [trialLoading, setTrialLoading] = useState(false);
   const endingRef = useRef(false);
+  const startingRef = useRef(false);
 
   const clearTrial = useCallback(() => {
     setExpiresAt(null);
@@ -52,6 +53,7 @@ export function GuestTrialProvider({ children }: { children: ReactNode }) {
   }, [clearTrial]);
 
   const refreshStatus = useCallback(async () => {
+    if (startingRef.current) return;
     if (!user?.is_anonymous) {
       clearTrial();
       return;
@@ -96,6 +98,7 @@ export function GuestTrialProvider({ children }: { children: ReactNode }) {
   }, [expiresAt, finishExpiredTrial, isGuest]);
 
   const startTrial = useCallback(async (): Promise<StartResult> => {
+    startingRef.current = true;
     setTrialLoading(true);
     try {
       let activeUser = user;
@@ -123,6 +126,7 @@ export function GuestTrialProvider({ children }: { children: ReactNode }) {
     } catch (error) {
       return { ok: false, reason: error instanceof Error ? error.message : 'Guest access is unavailable.' };
     } finally {
+      startingRef.current = false;
       setTrialLoading(false);
     }
   }, [user]);
