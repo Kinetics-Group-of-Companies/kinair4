@@ -6,6 +6,7 @@ import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sh
 import { AssistantChat, type AssistantContext, FAN_SUGGESTIONS, AIR_CURTAIN_SUGGESTIONS } from '@/components/ai/AssistantChat';
 import { useAuth } from '@/lib/authContext';
 import { cn } from '@/lib/utils';
+import { useGuestTrial } from '@/lib/guestTrialContext';
 
 const GENERAL_TEASERS = [
   'Select a fan from a room size…',
@@ -28,6 +29,8 @@ export function AssistantLauncher({
   title?: string;
 }) {
   const { isAuthenticated } = useAuth();
+  const { isGuest, trialActive } = useGuestTrial();
+  const assistantAllowed = isAuthenticated && (!isGuest || trialActive);
   const [open, setOpen] = useState(false);
   const [teaserIndex, setTeaserIndex] = useState(0);
   const [teaserDismissed, setTeaserDismissed] = useState(false);
@@ -44,10 +47,10 @@ export function AssistantLauncher({
 
   // Show the teaser bubble shortly after load, then cycle messages
   useEffect(() => {
-    if (!isAuthenticated || open || teaserDismissed) return;
+    if (!assistantAllowed || open || teaserDismissed) return;
     const show = setTimeout(() => setTeaserVisible(true), 1200);
     return () => clearTimeout(show);
-  }, [isAuthenticated, open, teaserDismissed]);
+  }, [assistantAllowed, open, teaserDismissed]);
 
   useEffect(() => {
     if (!teaserVisible || open || teaserDismissed) return;
@@ -55,7 +58,7 @@ export function AssistantLauncher({
     return () => clearInterval(cycle);
   }, [teaserVisible, open, teaserDismissed, teasers.length]);
 
-  if (!isAuthenticated) return null;
+  if (!assistantAllowed) return null;
 
   const showTeaser = teaserVisible && !open && !teaserDismissed;
 

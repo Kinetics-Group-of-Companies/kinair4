@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { DoorOpen, Search, Loader2, LogIn, Gauge, Wind, FileDown } from 'lucide-react';
+import { DoorOpen, Search, Loader2, Gauge, Wind, FileDown } from 'lucide-react';
 import { AssistantLauncher } from '@/components/ai/AssistantLauncher';
 import { AIR_CURTAIN_SUGGESTIONS } from '@/components/ai/AssistantChat';
 import { MainLayout } from '@/components/layout/MainLayout';
@@ -15,7 +15,10 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { useAuth } from '@/lib/authContext';
-import { useNavigate, useSearchParams } from 'react-router-dom';
+import { useSearchParams } from 'react-router-dom';
+import { GuestAccessPrompt } from '@/components/guest/GuestAccessPrompt';
+import { GuestTrialBanner } from '@/components/guest/GuestTrialBanner';
+import { useGuestTrial } from '@/lib/guestTrialContext';
 import {
   useAirCurtainModels,
   useAirCurtainBrands,
@@ -69,7 +72,7 @@ const formatLengthM = (m: number, unit: LengthUnit): string =>
 
 export default function AirCurtainSelectorPage() {
   const { isAuthenticated, isApproved, isSuperAdmin, isLoading: authLoading } = useAuth();
-  const navigate = useNavigate();
+  const { isGuest, trialActive, trialLoading } = useGuestTrial();
   const { data: models = [], isLoading } = useAirCurtainModels();
   const { data: brandRecords = [] } = useAirCurtainBrands();
   const { data: seriesRecords = [] } = useAirCurtainSeries();
@@ -276,7 +279,7 @@ export default function AirCurtainSelectorPage() {
   }, [selected, doorHeightM, minFloorVelocity]);
 
 
-  if (authLoading || isLoading) {
+  if (authLoading || isLoading || (isGuest && trialLoading)) {
     return (
       <MainLayout>
         <div className="min-h-[60vh] flex items-center justify-center">
@@ -289,21 +292,12 @@ export default function AirCurtainSelectorPage() {
   if (!isAuthenticated) {
     return (
       <MainLayout>
-        <div className="min-h-[60vh] flex items-center justify-center">
-          <div className="text-center max-w-md mx-auto p-8">
-            <div className="w-20 h-20 bg-primary/10 rounded-full flex items-center justify-center mx-auto mb-6">
-              <LogIn className="w-10 h-10 text-primary" />
-            </div>
-            <h2 className="text-2xl font-bold mb-3">Login Required</h2>
-            <p className="text-muted-foreground mb-6">Please log in to access the air curtain selector.</p>
-            <Button onClick={() => navigate('/login')} size="lg">Login to Continue</Button>
-          </div>
-        </div>
+        <GuestAccessPrompt productName="air curtain selector" />
       </MainLayout>
     );
   }
 
-  if (!isApproved && !isSuperAdmin) {
+  if (!isApproved && !isSuperAdmin && !trialActive) {
     return (
       <MainLayout>
         <div className="min-h-[60vh] flex items-center justify-center text-center max-w-md mx-auto p-8">
@@ -318,6 +312,7 @@ export default function AirCurtainSelectorPage() {
 
   return (
     <MainLayout>
+      <GuestTrialBanner />
       <section className="bg-gradient-primary text-primary-foreground py-8">
         <div className="container mx-auto px-4">
           <div className="flex items-center gap-4">

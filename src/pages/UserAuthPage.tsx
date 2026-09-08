@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { supabase } from '@/integrations/backend/client';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -10,13 +10,15 @@ import { toast } from 'sonner';
 import { Eye, EyeOff, Loader2, User } from 'lucide-react';
 import { z } from 'zod';
 import { useTenantData } from '@/hooks/useFanDatabase';
-import { Link } from 'react-router-dom';
 
 const emailSchema = z.string().email('Please enter a valid email address');
 const passwordSchema = z.string().min(6, 'Password must be at least 6 characters');
 
 export default function UserAuthPage() {
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+  const defaultTab = searchParams.get('tab') === 'signup' ? 'signup' : 'login';
+  const trialPrompt = searchParams.get('reason') === 'trial-ended' || searchParams.get('reason') === 'guest';
   const { data: tenant } = useTenantData();
   const [isLoading, setIsLoading] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
@@ -259,7 +261,12 @@ export default function UserAuthPage() {
           <CardDescription>{brandName} - User Portal</CardDescription>
         </CardHeader>
         <CardContent>
-          <Tabs defaultValue="login" className="w-full">
+          {trialPrompt ? (
+            <div role="alert" className="mb-4 rounded-lg border border-amber-300 bg-amber-50 p-3 text-sm text-amber-950">
+              Your five-minute guest trial is complete. Create a free account to continue selecting with KINAIR AI.
+            </div>
+          ) : null}
+          <Tabs defaultValue={defaultTab} className="w-full">
             <TabsList className="grid w-full grid-cols-2">
               <TabsTrigger value="login">Login</TabsTrigger>
               <TabsTrigger value="signup">Sign Up</TabsTrigger>

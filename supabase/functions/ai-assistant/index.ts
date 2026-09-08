@@ -102,6 +102,45 @@ function interpolate(points: { x: number; y: number }[], x: number): number | nu
   return null;
 }
 
+
+function requestIp(req: Request): string | null {
+  const forwarded = req.headers.get("x-forwarded-for")?.split(",")[0]?.trim();
+  return req.headers.get("cf-connecting-ip")?.trim()
+    || req.headers.get("x-real-ip")?.trim()
+    || forwarded
+    || null;
+}
+
+async function guestIpHash(ip: string, secret: string): Promise<string> {
+  const key = await crypto.subtle.importKey(
+    "raw",
+    new TextEncoder().encode(secret),
+    { name: "HMAC", hash: "SHA-256" },
+    false,
+    ["sign"],
+  );
+  const signature = await crypto.subtle.sign("HMAC", key, new TextEncoder().encode(ip));
+  return Array.from(new Uint8Array(signature), (byte) => byte.toString(16).padStart(2, "0")).join("");
+}
+
+async function hasActiveGuestTrial(userId: string, req: Request): Promise<boolean> {
+  const ip = requestIp(req);
+  const serviceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
+  if (!ip || !serviceKey) return false;
+  const ipHash = await guestIpHash(ip, serviceKey);
+  const admin = createClient(Deno.env.get("SUPABASE_URL")!, serviceKey, {
+    auth: { persistSession: false },
+  });
+  const { data, error } = await admin
+    .from("guest_trials")
+    .select("expires_at")
+    .eq("user_id", userId)
+    .eq("ip_hash", ipHash)
+    .gt("expires_at", new Date().toISOString())
+    .maybeSingle();
+  return !error && Boolean(data);
+}
+
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
 
@@ -169,6 +208,19 @@ Deno.serve(async (req) => {
         status: 401,
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
+    }
+
+    if (Boolean((userData.user as { is_anonymous?: boolean }).is_anonymous)) {
+      const trialActive = await hasActiveGuestTrial(userData.user.id, req);
+      if (!trialActive) {
+        return new Response(JSON.stringify({
+          error: "Your five-minute guest trial has ended. Sign up to continue.",
+          code: "GUEST_TRIAL_EXPIRED",
+        }), {
+          status: 403,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
     }
 
     const { data: registeredModels } = registryResult;
