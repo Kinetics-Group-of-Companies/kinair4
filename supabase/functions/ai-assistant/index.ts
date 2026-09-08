@@ -224,7 +224,7 @@ Deno.serve(async (req) => {
     }
 
     const { data: registeredModels } = registryResult;
-    const { messages, aiMode = "standard" } = requestBody;
+    const { messages, aiMode = "auto" } = requestBody;
 
     const listSeries = tool({
       description:
@@ -855,15 +855,17 @@ Deno.serve(async (req) => {
       },
     });
 
-    // Auto routing keeps routine catalogue work on Gemini, sends large
-    // schedules/attachments to OpenAI, and uses Claude for complex engineering
-    // reasoning. Users can still override the provider from the chat header.
+    // KINAIR routing policy:
+    // - The official deterministic KINAIR engine performs every product
+    //   calculation; the language model only understands the request and
+    //   calls the matching selector tool.
+    // - OpenAI Luna handles routine chat, single selections, datasheets and
+    //   schedules (the target is at least 95% of automatic AI traffic).
+    // - Anthropic is reserved for explicitly high-complexity engineering
+    //   calculations, or automatic failover when Luna is unavailable.
+    // Manual provider choices in the chat header remain respected.
     const latestRequest = JSON.stringify(messages.at(-1) ?? "").toLowerCase();
     const conversationHistory = JSON.stringify(messages).toLowerCase();
-    // Gemini thinking models require thought_signature continuity across
-    // function-call turns. AI SDK 5's pinned Google adapter does not preserve
-    // that signature in UIMessage history. Keep any tool-bearing conversation
-    // on OpenAI, including short follow-ups whose latest message has no keywords.
     const hasToolHistory =
       /tool-call|tool-result|toolcallid|prepare_datasheet|prepare_air_curtain_datasheet|prepare_schedule_selection|find_fans|find_air_curtains|estimate_duty/.test(
         conversationHistory,
@@ -872,19 +874,26 @@ Deno.serve(async (req) => {
       /schedule|spreadsheet|excel|xlsx|xls|csv|pdf|image|photo|screenshot|attachment|uploaded|combined pdf|multiple (fan|unit)|\bqty\b|\bquantity\b/.test(
         latestRequest,
       );
-    const needsTools = /fan|air curtain|select|selection|datasheet|drawing|noise data|catalogue|catalog|iom|model|airflow|static pressure|\bl\/s\b|\blps\b|\bpa\b|\bcfm\b|\bcmh\b|schedule|spreadsheet|excel|xlsx|xls|csv|pdf|image|photo|screenshot|attachment|uploaded|combined pdf|\bqty\b|\bquantity\b/.test(latestRequest);
-    const needsOpenAI = needsTools || hasToolHistory || isScheduleRequest;
-    // Claude is reserved for clearly technical engineering reasoning.
-    // Generic words such as "why", "compare" or "calculate" must not pull
-    // ordinary conversation away from the Gemini free tier.
-    const needsClaude =
-      /engineering (analysis|review)|technical (analysis|comparison)|troubleshoot|diagnos|compliance|technical standard|specification review|duct (loss|sizing|design)|pressure loss|noise calculation|system design|ventilation calculation|psychrometric|fan law/.test(
+    const needsTools =
+      /fan|air curtain|select|selection|datasheet|drawing|noise data|catalogue|catalog|iom|model|airflow|static pressure|\bl\/s\b|\blps\b|\bpa\b|\bcfm\b|\bcmh\b|schedule|spreadsheet|excel|xlsx|xls|csv|pdf|image|photo|screenshot|attachment|uploaded|combined pdf|\bqty\b|\bquantity\b/.test(
         latestRequest,
       );
-    // Auto always starts with Gemini (including selection tools). Manual
-    // provider choices remain respected. Availability checks below implement
-    // the automatic Gemini -> OpenAI -> Claude fallback chain.
-    const routedMode = aiMode === "auto" ? "standard" : aiMode;
+    const isSingleSelectionRequest = needsTools && !isScheduleRequest;
+
+    // Keep this deliberately strict: ordinary calculations, normal
+    // ventilation questions and all selector operations stay on Luna.
+    const needsClaude =
+      /psychrometric analysis|multi-stage system design|duct network calculation|acoustic calculation|fan law extrapolation|engineering compliance review|complex pressure loss calculation|high[- ]complexity engineering calculation|finite element analysis|computational fluid dynamics|\bcfd\b/.test(
+        latestRequest,
+      );
+
+    // "standard" is retained for older website/app clients, but now follows
+    // the same automatic Luna-first policy. If Luna is unavailable, the
+    // provider chain below falls through to Anthropic automatically.
+    const routedMode =
+      aiMode === "auto" || aiMode === "standard"
+        ? (needsClaude ? "anthropic_sonnet" : "openai_luna")
+        : aiMode;
 
     // Resolve the newest enabled model in each price tier from the dynamic
     // registry. Static constants remain as safe fallbacks if discovery is down.
@@ -1082,7 +1091,7 @@ Deno.serve(async (req) => {
     return result.toUIMessageStreamResponse({
       headers: {
         ...corsHeaders,
-        "X-KINAIR-AI-Provider": providerName,
+        "X-KINAIR-AI-Provider": providerName === "OpenAI" && isSingleSelectionRequest ? "KINAIR AI · OpenAI" : providerName,
         "X-KINAIR-AI-Model": modelName,
         "X-KINAIR-AI-Routing-Ms": String(routingProbeMs),
       },
