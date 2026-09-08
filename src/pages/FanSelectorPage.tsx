@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Wind, Search, Filter, Loader2, Clock, LogIn } from 'lucide-react';
+import { Wind, Search, Filter, Loader2, Clock } from 'lucide-react';
 import { AssistantLauncher } from '@/components/ai/AssistantLauncher';
 import { FAN_SUGGESTIONS } from '@/components/ai/AssistantChat';
 import { MainLayout } from '@/components/layout/MainLayout';
@@ -13,11 +13,15 @@ import { toast } from 'sonner';
 import { useAuth } from '@/lib/authContext';
 import { Button } from '@/components/ui/button';
 import { useNavigate, useSearchParams } from 'react-router-dom';
+import { GuestAccessPrompt } from '@/components/guest/GuestAccessPrompt';
+import { GuestTrialBanner } from '@/components/guest/GuestTrialBanner';
+import { useGuestTrial } from '@/lib/guestTrialContext';
 
 
 export default function FanSelectorPage() {
   const { isAuthenticated, isApproved, isLoading: authLoading, isSuperAdmin } = useAuth();
   const navigate = useNavigate();
+  const { isGuest, trialActive, trialLoading } = useGuestTrial();
   const [searchParams] = useSearchParams();
   const { database, isLoading } = useSupabaseFanDatabase();
   const { data: dimensionsMap, isLoading: loadingDimensions } = useAllFanDimensions();
@@ -143,7 +147,7 @@ export default function FanSelectorPage() {
     }
   };
   // Show loading state
-  if (authLoading || isLoading || loadingDimensions) {
+  if (authLoading || isLoading || loadingDimensions || (isGuest && trialLoading)) {
     return (
       <MainLayout>
         <div className="min-h-[60vh] flex items-center justify-center">
@@ -156,30 +160,17 @@ export default function FanSelectorPage() {
     );
   }
 
-  // Show login prompt for unauthenticated users
+  // Visitors may start one IP-bound five-minute selection trial.
   if (!isAuthenticated) {
     return (
       <MainLayout>
-        <div className="min-h-[60vh] flex items-center justify-center">
-          <div className="text-center max-w-md mx-auto p-8">
-            <div className="w-20 h-20 bg-primary/10 rounded-full flex items-center justify-center mx-auto mb-6">
-              <LogIn className="w-10 h-10 text-primary" />
-            </div>
-            <h2 className="text-2xl font-bold mb-3">Login Required</h2>
-            <p className="text-muted-foreground mb-6">
-              Please log in to access the fan selector tool.
-            </p>
-            <Button onClick={() => navigate('/login')} size="lg">
-              Login to Continue
-            </Button>
-          </div>
-        </div>
+        <GuestAccessPrompt productName="fan selector" />
       </MainLayout>
     );
   }
 
   // Show pending approval screen for unapproved users (except super admins)
-  if (!isApproved && !isSuperAdmin) {
+  if (!isApproved && !isSuperAdmin && !trialActive) {
     return (
       <MainLayout>
         <div className="min-h-[60vh] flex items-center justify-center">
@@ -201,6 +192,7 @@ export default function FanSelectorPage() {
   }
 
   return <MainLayout>
+      <GuestTrialBanner />
       {/* Hero Section */}
       <section className="bg-gradient-primary text-primary-foreground py-8">
         <div className="container mx-auto px-4">
