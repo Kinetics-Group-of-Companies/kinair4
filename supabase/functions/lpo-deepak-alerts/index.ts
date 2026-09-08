@@ -193,6 +193,7 @@ Deno.serve(async (req) => {
       // Scheduled calls may omit a body.
     }
     const test = requestBody?.test === true
+    const resendOnly = test && requestBody?.provider === 'resend'
 
     const supabase = createClient(
       Deno.env.get('SUPABASE_URL')!,
@@ -232,7 +233,7 @@ Deno.serve(async (req) => {
       ),
     ].join('\n')
 
-    const delivery = await sendWithFallback(
+    const delivery = await (resendOnly ? sendResend : sendWithFallback)(
       subject,
       html,
       text,
@@ -249,6 +250,7 @@ Deno.serve(async (req) => {
       overdue,
       at_risk: atRisk,
       on_track: onTrack,
+      requested_provider: resendOnly ? 'resend' : 'auto',
       provider: delivery.provider,
       message_id: delivery.message_id,
       thread_id: 'thread_id' in delivery ? delivery.thread_id : undefined,
