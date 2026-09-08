@@ -3,6 +3,32 @@ import { corsHeaders } from 'npm:@supabase/supabase-js@2/cors'
 
 const CRON_SECRET_SHA256 = '9a0145f42701522a765dd224dc6712f1f934bec2aad7be109d0bd75a221c980c'
 const DAY = 86400000
+const STATUS_LABELS: Record<string, string> = {
+  new: 'New Order',
+  awaiting_advance: 'Awaiting Advance',
+  awaiting_clearance: 'Awaiting Mfg. Clearance',
+  in_production: 'In Production',
+  ready: 'Ready for Dispatch',
+  shipped: 'Shipped',
+  delivered: 'Delivered',
+  on_hold: 'On Hold',
+  cancelled: 'Cancelled',
+}
+const SHORT_MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
+
+function formatDate(value: string | null | undefined): string {
+  if (!value) return '—'
+  const match = /^(\d{4})-(\d{2})-(\d{2})/.exec(value)
+  if (!match) return '—'
+  const [, year, month, day] = match
+  const monthName = SHORT_MONTHS[Number(month) - 1]
+  return monthName ? `${day} ${monthName} ${year}` : '—'
+}
+
+function orderStatus(value: unknown): string {
+  const status = String(value ?? '')
+  return STATUS_LABELS[status] ?? status
+}
 
 async function authorized(req: Request): Promise<boolean> {
   const supplied = req.headers.get('x-kinair-cron-secret') ?? ''
@@ -261,16 +287,16 @@ Deno.serve(async (req) => {
       const atRisk = orders.filter((row) => row.health.level === 'at_risk').length
       const onTrack = orders.filter((row) => row.health.level === 'on_track').length
       const rows = orders.map(({ order, promised, forecast, health: orderHealth }) =>
-        `<tr><td>${escapeHtml(order.lpo_ref)}</td><td>${escapeHtml(order.client_name)}</td><td>${escapeHtml(order.material_type)}</td><td>${escapeHtml(order.status)}</td><td>${escapeHtml(promised)}</td><td>${escapeHtml(forecast)}</td><td>${escapeHtml(orderHealth.label)}</td></tr>`
+        `<tr><td>${escapeHtml(order.lpo_ref)}</td><td>${escapeHtml(order.client_name)}</td><td>${escapeHtml(order.material_type)}</td><td>${escapeHtml(orderStatus(order.status))}</td><td>${escapeHtml(formatDate(promised))}</td><td>${escapeHtml(formatDate(forecast))}</td><td>${escapeHtml(orderHealth.label)}</td></tr>`
       ).join('')
 
       const subject = `${test ? '[TEST] ' : ''}KINAIR daily LPO summary — ${orders.length} open, ${overdue} overdue`
-      const html = `<!doctype html><html><body style="font-family:Arial,sans-serif;color:#222"><h2>KINAIR daily LPO summary</h2><p>Date: ${escapeHtml(today)}</p><p><strong>Open:</strong> ${orders.length} &nbsp; <strong>Overdue:</strong> ${overdue} &nbsp; <strong>At risk:</strong> ${atRisk} &nbsp; <strong>On track:</strong> ${onTrack}</p><table cellpadding="8" cellspacing="0" border="1" style="border-collapse:collapse;font-size:12px"><thead><tr><th>LPO</th><th>Client</th><th>Material</th><th>Status</th><th>Committed</th><th>Forecast</th><th>Health</th></tr></thead><tbody>${rows || '<tr><td colspan="7">No open orders.</td></tr>'}</tbody></table><p style="color:#777;font-size:12px">Open the KINAIR Delivery Tracker for full details and follow-up history.</p></body></html>`
+      const html = `<!doctype html><html><body style="font-family:Arial,sans-serif;color:#222"><h2>KINAIR daily LPO summary</h2><p>Date: ${escapeHtml(formatDate(today))}</p><p><strong>Open:</strong> ${orders.length} &nbsp; <strong>Overdue:</strong> ${overdue} &nbsp; <strong>At risk:</strong> ${atRisk} &nbsp; <strong>On track:</strong> ${onTrack}</p><table cellpadding="8" cellspacing="0" border="1" style="border-collapse:collapse;font-size:12px"><thead><tr><th>LPO</th><th>Client</th><th>Material</th><th>Status</th><th>Committed</th><th>Forecast</th><th>Health</th></tr></thead><tbody>${rows || '<tr><td colspan="7">No open orders.</td></tr>'}</tbody></table><p style="color:#777;font-size:12px">Open the KINAIR Delivery Tracker for full details and follow-up history.</p></body></html>`
       const text = [
-        `KINAIR daily LPO summary — ${today}`,
+        `KINAIR daily LPO summary — ${formatDate(today)}`,
         `Open: ${orders.length}; Overdue: ${overdue}; At risk: ${atRisk}; On track: ${onTrack}`,
         ...orders.map(({ order, promised, forecast, health: orderHealth }) =>
-          `${order.lpo_ref} | ${order.client_name} | ${order.material_type} | committed ${promised ?? '—'} | forecast ${forecast ?? '—'} | ${orderHealth.label}`
+          `${order.lpo_ref} | ${order.client_name} | ${order.material_type} | ${orderStatus(order.status)} | committed ${formatDate(promised)} | forecast ${formatDate(forecast)} | ${orderHealth.label}`
         ),
       ].join('\n')
 
