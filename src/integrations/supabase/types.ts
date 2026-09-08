@@ -2668,18 +2668,21 @@ export type Database = {
       }
       guest_trial_settings: {
         Row: {
+          account_trial_days: number
           duration_minutes: number
           id: boolean
           updated_at: string
           updated_by: string | null
         }
         Insert: {
+          account_trial_days?: number
           duration_minutes?: number
           id?: boolean
           updated_at?: string
           updated_by?: string | null
         }
         Update: {
+          account_trial_days?: number
           duration_minutes?: number
           id?: boolean
           updated_at?: string
