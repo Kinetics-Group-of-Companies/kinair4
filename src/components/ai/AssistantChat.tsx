@@ -655,6 +655,49 @@ type AcLengthUnit = 'mm' | 'cm' | 'm' | 'in';
 const AC_LENGTH_TO_MM: Record<AcLengthUnit, number> = { mm: 1, cm: 10, m: 1000, in: 25.4 };
 const AC_AIRFLOW_TO_CMH: Record<string, number> = { CMH: 1, LPS: 3.6, CFM: 1.6990107955 };
 
+function formatUnitValue(value: number, maximumFractionDigits = 1): string {
+  return value.toLocaleString(undefined, {
+    minimumFractionDigits: 0,
+    maximumFractionDigits,
+  });
+}
+
+function formatFanAirflow(
+  airflowCmh: number,
+  unit: keyof typeof AIRFLOW_UNITS = 'CMH',
+): string {
+  const selectedUnit = AIRFLOW_UNITS[unit] ? unit : 'CMH';
+  const value = airflowCmh * AIRFLOW_UNITS[selectedUnit].factor;
+  const decimals = selectedUnit === 'CMS' ? 3 : 1;
+  return `${formatUnitValue(value, decimals)} ${selectedUnit}`;
+}
+
+function formatFanPressure(
+  pressurePa: number,
+  unit: keyof typeof PRESSURE_UNITS = 'Pa',
+): string {
+  const selectedUnit = PRESSURE_UNITS[unit] ? unit : 'Pa';
+  const value = pressurePa * PRESSURE_UNITS[selectedUnit].factor;
+  const decimals = selectedUnit === 'Pa' ? 0 : 2;
+  const label = selectedUnit === 'inwg' ? 'in.wg' : selectedUnit === 'mmwg' ? 'mm.wg' : 'Pa';
+  return `${formatUnitValue(value, decimals)} ${label}`;
+}
+
+function airCurtainDisplayUnit(
+  unit?: string | null,
+): 'cmh' | 'cfm' | 'ls' {
+  return unit === 'CFM' ? 'cfm' : unit === 'LPS' ? 'ls' : 'cmh';
+}
+
+function formatAirCurtainAirflow(
+  airflowCmh: number,
+  unit: 'cmh' | 'cfm' | 'ls' = 'cmh',
+): string {
+  const factor = unit === 'cfm' ? AIRFLOW_UNITS.CFM.factor : unit === 'ls' ? AIRFLOW_UNITS.LPS.factor : 1;
+  const label = unit === 'cfm' ? 'CFM' : unit === 'ls' ? 'LPS' : 'CMH';
+  return `${formatUnitValue(airflowCmh * factor, 1)} ${label}`;
+}
+
 type AcDutyRequest = {
   door_width?: number | null;
   door_width_unit?: AcLengthUnit;
@@ -698,6 +741,8 @@ function parseManualAirCurtainParameters(userText: string): Partial<AcDutyReques
 
   const airflow = userText.match(
     /\b(?:minimum|min\.?|required)?\s*(?:airflow|air\s*flow|air\s*volume|capacity)\s*(?:of|=|:|at least|minimum|min\.?)?\s*(\d+(?:\.\d+)?)\s*(m(?:³|3)\/?h|cmh|cfm|l\/?s|lps)\b/i,
+  ) ?? userText.match(
+    /\b(\d+(?:\.\d+)?)\s*(m(?:³|3)\/?h|cmh|cfm|l\/?s|lps)\b/i,
   );
   if (airflow) {
     parsed.min_airflow = Number(airflow[1]);
@@ -925,6 +970,10 @@ type ScheduleSelection =
       doorWidthMm: number;
       doorHeightM: number;
       minFloorVelocity: number;
+      airflowUnit: 'cmh' | 'cfm' | 'ls';
+      widthUnit: AcLengthUnit;
+      heightUnit: AcLengthUnit;
+      noiseMode: 'dba' | 'octave';
     };
 
 type ScheduleRow = {
@@ -1997,6 +2046,7 @@ export function AssistantChat({
 
             const airflowFactor = AC_AIRFLOW_TO_CMH[item.min_airflow_unit ?? 'CMH'] ?? 1;
             const minAirflowCmh = item.min_airflow ? item.min_airflow * airflowFactor : 0;
+            const airflowUnit = airCurtainDisplayUnit(item.min_airflow_unit);
             const minFloorVelocity = item.min_floor_velocity ?? 2;
             const selectionBasis =
               item.selection_basis ?? (minAirflowCmh > 0 && !item.door_width ? 'airflow' : 'door');
@@ -2042,10 +2092,20 @@ export function AssistantChat({
               product: 'air_curtain',
               duty,
               label: best.arrangement,
-              detail: `${Math.round(best.totalAirVolumeCmh).toLocaleString()} m³/h · ${Math.round(
+              detail: `${formatAirCurtainAirflow(best.totalAirVolumeCmh, airflowUnit)} · ${Math.round(
                 best.totalPowerW,
               )} W${best.noiseDb ? ` · ${Math.round(best.noiseDb)} dB(A)` : ''}`,
-              selection: { kind: 'air_curtain', selection: best, doorWidthMm, doorHeightM, minFloorVelocity },
+              selection: {
+                kind: 'air_curtain',
+                selection: best,
+                doorWidthMm,
+                doorHeightM,
+                minFloorVelocity,
+                airflowUnit,
+                widthUnit: item.door_width_unit ?? 'mm',
+                heightUnit: item.door_height_unit ?? 'm',
+                noiseMode: item.noise_mode ?? 'dba',
+              },
             };
           }
 
@@ -2102,9 +2162,10 @@ export function AssistantChat({
             product: 'fan',
             duty,
             label: best.nomenclature,
-            detail: `${Math.round(best.operatingPoint.airflow).toLocaleString()} m³/h @ ${Math.round(
+            detail: `${formatFanAirflow(best.operatingPoint.airflow, airflowUnit)} @ ${formatFanPressure(
               best.operatingPoint.staticPressure,
-            )} Pa · ${best.operatingPoint.shaftPower.toFixed(3)} kW${
+              pressureUnit,
+            )} · ${best.operatingPoint.shaftPower.toFixed(3)} kW${
               best.noiseData?.overall ? ` · ${Math.round(best.noiseData.overall)} dB(A)` : ''
             }`,
             selection: { kind: 'fan', selection: best, airflowUnit, pressureUnit },
@@ -2136,6 +2197,10 @@ export function AssistantChat({
               doorWidthMm: row.selection.doorWidthMm,
               doorHeightM: row.selection.doorHeightM,
               minFloorVelocity: row.selection.minFloorVelocity,
+              noiseMode: row.selection.noiseMode,
+              airflowUnit: row.selection.airflowUnit,
+              widthUnit: row.selection.widthUnit,
+              heightUnit: row.selection.heightUnit,
             },
             { brands: acBrands, series: acSeries, dimensions: acDimensions, tenant },
           );
@@ -2188,6 +2253,10 @@ export function AssistantChat({
             doorWidthMm: row.selection.doorWidthMm,
             doorHeightM: row.selection.doorHeightM,
             minFloorVelocity: row.selection.minFloorVelocity,
+            noiseMode: row.selection.noiseMode,
+            airflowUnit: row.selection.airflowUnit,
+            widthUnit: row.selection.widthUnit,
+            heightUnit: row.selection.heightUnit,
           })),
           airCurtainContext: { brands: acBrands, series: acSeries, dimensions: acDimensions },
         });
@@ -2415,8 +2484,8 @@ export function AssistantChat({
                                 {best.nomenclature}
                               </p>
                               <p className="text-xs text-muted-foreground">
-                                {Math.round(best.operatingPoint.airflow).toLocaleString()} m³/h @{' '}
-                                {Math.round(best.operatingPoint.staticPressure)} Pa ·{' '}
+                                {formatFanAirflow(best.operatingPoint.airflow, auto.duty.airflow_unit)} @{' '}
+                                {formatFanPressure(best.operatingPoint.staticPressure, auto.duty.pressure_unit)} ·{' '}
                                 {best.operatingPoint.shaftPower.toFixed(3)} kW absorbed ·{' '}
                                 {best.motorRating} kW motor ·{' '}
                                 {best.operatingPoint.efficiency
@@ -2514,7 +2583,7 @@ export function AssistantChat({
                                 {best.arrangement}
                               </p>
                               <p className="text-xs text-muted-foreground">
-                                {Math.round(best.totalAirVolumeCmh).toLocaleString()} m³/h ·{' '}
+                                {formatAirCurtainAirflow(best.totalAirVolumeCmh, auto.airflowUnit)} ·{' '}
                                 {best.outletVelocity.toFixed(1)} m/s outlet ·{' '}
                                 {best.floorVelocity.toFixed(1)} m/s at floor ·{' '}
                                 {Math.round(best.totalPowerW)} W
