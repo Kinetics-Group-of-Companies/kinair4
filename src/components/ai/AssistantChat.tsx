@@ -553,10 +553,10 @@ function parseDirectFanDuty(userText: string): DutyRequest | null {
       ? (airflowLps <= 25 ? 3 : 10)
       : 75;
   const exactSizeMatch =
-    userText.match(/(?:fan|duct|spigot|connection|diameter|dia\.?|size|ø)\s*(?:of|=|:)?\s*(\d+(?:\.\d+)?)\s*(mm|in(?:ch(?:es)?)?|"|″)\b?/i) ??
+    userText.match(/(?:fan|duct|spigot|connection|diameter|dia\.?|size|ø)\s*(?:of|=|:)?\s*(\d+(?:\.\d+)?)\s*(mm|in(?:ch(?:es)?)?|"|″)(?=\s|$)/i) ??
     userText.match(/\b(\d+(?:\.\d+)?)\s*(mm|in(?:ch(?:es)?)?|"|″)\s*(?:dia(?:meter)?|fan|duct|spigot|connection|size)\b/i);
   const maxSizeMatch = userText.match(
-    /(?:maximum|max|not\s*more\s*than|up\s*to)\s*(?:fan|duct|spigot|connection|diameter|dia\.?|size)?\s*(\d+(?:\.\d+)?)\s*(mm|in(?:ch(?:es)?)?|"|″)\b?/i,
+    /(?:maximum|max|not\s*more\s*than|up\s*to)\s*(?:fan|duct|spigot|connection|diameter|dia\.?|size)?\s*(\d+(?:\.\d+)?)\s*(mm|in(?:ch(?:es)?)?|"|″)(?=\s|$)/i,
   );
   const exactFanSizeMm = exactSizeMatch
     ? normalizeFanSizeMm(Number(exactSizeMatch[1]), exactSizeMatch[2].toLowerCase() === 'mm' ? 'mm' : 'in')
@@ -609,7 +609,7 @@ function parseSizeOnlyFanRequest(userText: string): SizeOnlyFanRequest | null {
   if (/\b(?:air\s*curtain|door|entrance|opening)\b/i.test(userText)) return null;
   if (/\b(?:cmh|cfm|lps|cms|m(?:³|3)?\s*\/\s*(?:h|s)|l\s*\/\s*s)\b/i.test(userText)) return null;
 
-  const sizeMatch = userText.match(/\b(\d+(?:\.\d+)?)\s*(mm|in(?:ch(?:es)?)?|"|″)\b?/i);
+  const sizeMatch = userText.match(/\b(\d+(?:\.\d+)?)\s*(mm|in(?:ch(?:es)?)?|"|″)(?=\s|$)/i);
   if (!sizeMatch) return null;
   const fanSizeMm = normalizeFanSizeMm(
     Number(sizeMatch[1]),
