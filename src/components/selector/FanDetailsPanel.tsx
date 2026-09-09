@@ -1,6 +1,6 @@
 import { useState, useCallback, useMemo, useEffect, useRef } from 'react';
 import jsPDF from 'jspdf';
-import { Wind, Settings2, Download, FileText, Ruler, MousePointer, Layers, Zap, Weight, Gauge, RotateCcw, Activity, FolderPlus, ChevronDown, Volume2, Eye } from 'lucide-react';
+import { Wind, Settings2, Download, FileText, Ruler, MousePointer, Layers, Zap, Weight, Gauge, RotateCcw, Activity, FolderPlus, ChevronDown, Volume2, Eye, Box } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Switch } from '@/components/ui/switch';
@@ -15,6 +15,7 @@ import { useDimensionSchema, useDimensionValues } from '@/hooks/useFlexibleDimen
 import { InteractivePerformanceChart } from './InteractivePerformanceChart';
 import { NoiseDataTable } from './NoiseDataTable';
 import { FanDrawing } from './FanDrawing';
+import { Fan3DView } from './Fan3DView';
 import { AddToProjectDialog } from '@/components/projects/AddToProjectDialog';
 import { useAuth } from '@/lib/authContext';
 import { toast } from 'sonner';
@@ -1651,12 +1652,13 @@ export function FanDetailsPanel({ selection, airflowUnit, pressureUnit, airDensi
 
       {/* Tabs */}
       <Tabs value={activeTab} onValueChange={setActiveTab}>
-        <TabsList className="grid w-full grid-cols-3 sm:grid-cols-5 mb-4">
+        <TabsList className="grid w-full grid-cols-3 sm:grid-cols-6 mb-4">
           <TabsTrigger value="curves">Curves</TabsTrigger>
           <TabsTrigger value="power">Power</TabsTrigger>
           <TabsTrigger value="efficiency">Efficiency</TabsTrigger>
           <TabsTrigger value="noise">Noise</TabsTrigger>
           <TabsTrigger value="drawing">Drawing</TabsTrigger>
+          <TabsTrigger value="3d">3D View</TabsTrigger>
         </TabsList>
 
         {/* Force mount the curves tab so chart ref is always available for PDF capture */}
@@ -1893,6 +1895,16 @@ export function FanDetailsPanel({ selection, airflowUnit, pressureUnit, airDensi
               Fan Dimensions - Ø{selection.diameter}mm
             </h3>
             <FanDrawing diameter={selection.diameter} series={selection.series} />
+          </div>
+        </TabsContent>
+
+        <TabsContent value="3d" className="mt-4">
+          <div className="bg-muted/30 rounded-lg p-4 border border-border/50">
+            <h3 className="text-sm font-medium text-foreground mb-4 flex items-center gap-2">
+              <Box className="w-4 h-4 text-primary" />
+              Interactive 3D View - {selection.nomenclature || selection.series}
+            </h3>
+            <Fan3DView series={selection.series} model={selection.nomenclature} diameter={selection.diameter} />
           </div>
         </TabsContent>
       </Tabs>
