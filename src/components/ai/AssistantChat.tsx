@@ -651,8 +651,8 @@ type AutoSelection = {
   results: FanSelection[];
 };
 
-type AcLengthUnit = 'mm' | 'cm' | 'm' | 'in';
-const AC_LENGTH_TO_MM: Record<AcLengthUnit, number> = { mm: 1, cm: 10, m: 1000, in: 25.4 };
+type AcLengthUnit = 'mm' | 'cm' | 'm' | 'in' | 'ft';
+const AC_LENGTH_TO_MM: Record<AcLengthUnit, number> = { mm: 1, cm: 10, m: 1000, in: 25.4, ft: 304.8 };
 const AC_AIRFLOW_TO_CMH: Record<string, number> = { CMH: 1, LPS: 3.6, CFM: 1.6990107955 };
 
 function formatUnitValue(value: number, maximumFractionDigits = 1): string {
@@ -680,6 +680,14 @@ function formatFanPressure(
   const value = pressurePa * PRESSURE_UNITS[selectedUnit].factor;
   const decimals = selectedUnit === 'Pa' ? 0 : 2;
   const label = selectedUnit === 'inwg' ? 'in.wg' : selectedUnit === 'mmwg' ? 'mm.wg' : 'Pa';
+  return `${formatUnitValue(value, decimals)} ${label}`;
+}
+
+function formatAirCurtainLength(lengthMm: number, unit: AcLengthUnit): string {
+  const selectedUnit = AC_LENGTH_TO_MM[unit] ? unit : 'mm';
+  const value = lengthMm / AC_LENGTH_TO_MM[selectedUnit];
+  const decimals = selectedUnit === 'mm' ? 0 : selectedUnit === 'cm' ? 1 : 2;
+  const label = selectedUnit === 'in' ? 'in' : selectedUnit === 'ft' ? 'ft' : selectedUnit;
   return `${formatUnitValue(value, decimals)} ${label}`;
 }
 
@@ -801,7 +809,7 @@ function parseDirectAirCurtainDuty(userText: string): AcDutyRequest | null {
   if (!/\b(?:air\s*curtain|door|entrance|opening)\b/i.test(userText)) return null;
   if (/\b(?:schedule|spreadsheet|excel|xlsx|xls|csv|pdf|image|photo|attachment|multiple|several)\b/i.test(userText)) return null;
 
-  const unit = String.raw`(mm|cm|m|in(?:ch(?:es)?)?)`;
+  const unit = String.raw`(mm|cm|m|in(?:ch(?:es)?)?|ft|feet|foot|')`;
   const widthMatch = userText.match(
     new RegExp(String.raw`(?:door|opening)?\s*width\s*(?:of|=|:)?\s*(\d+(?:\.\d+)?)\s*${unit}\b`, 'i'),
   ) ?? userText.match(
@@ -821,7 +829,7 @@ function parseDirectAirCurtainDuty(userText: string): AcDutyRequest | null {
   );
   const normalizeUnit = (value?: string): AcLengthUnit => {
     const normalized = String(value ?? 'm').toLowerCase();
-    return normalized.startsWith('in') ? 'in' : normalized as AcLengthUnit;
+    return normalized.startsWith('in') ? 'in' : normalized === "'" || normalized.startsWith('f') ? 'ft' : normalized as AcLengthUnit;
   };
 
   const manualParameters = parseManualAirCurtainParameters(userText);
@@ -2018,7 +2026,7 @@ export function AssistantChat({
             const heightUnit = AC_LENGTH_TO_MM[item.door_height_unit ?? 'm'] ?? 1000;
             const doorWidthMm = item.door_width ? item.door_width * widthUnit : 1000;
             const doorHeightM = item.door_height ? (item.door_height * heightUnit) / 1000 : 3;
-            const duty = `${Math.round(doorWidthMm)} mm × ${doorHeightM} m door`;
+            const duty = `${formatAirCurtainLength(doorWidthMm, item.door_width_unit ?? 'mm')} × ${formatAirCurtainLength(doorHeightM * 1000, item.door_height_unit ?? 'm')} door`;
             const brandMatch = item.brand
               ? acBrands.find((b) => b.name.toLowerCase() === String(item.brand).toLowerCase())?.name
               : undefined;
@@ -2590,8 +2598,9 @@ export function AssistantChat({
                                 {best.noiseDb ? ` · ${Math.round(best.noiseDb)} dB(A)` : ''}
                               </p>
                               <p className="text-[11px] text-muted-foreground">
-                                Opening {Math.round(auto.doorWidthMm)} mm wide ×{' '}
-                                {auto.doorHeightM} m high · {Math.round(best.matchPercent)}% coverage
+                                Opening {formatAirCurtainLength(auto.doorWidthMm, auto.widthUnit)} wide ×{' '}
+                                {formatAirCurtainLength(auto.doorHeightM * 1000, auto.heightUnit)} high ·{' '}
+                                {Math.round(best.matchPercent)}% coverage
                               </p>
                             </div>
                             <div className="grid grid-cols-1 sm:flex sm:flex-wrap gap-2">
