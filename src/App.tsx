@@ -28,6 +28,7 @@ import QuotePage from "./pages/QuotePage";
 import ComparePage from "./pages/ComparePage";
 import DownloadsPage from "./pages/DownloadsPage";
 import ResetPasswordPage from "./pages/ResetPasswordPage";
+import AuthConfirmPage from "./pages/AuthConfirmPage";
 import NotFound from "./pages/NotFound";
 
 // Desktop (Electron) builds load from file:// where history routing breaks
@@ -129,6 +130,9 @@ const App = () => {
                     title="Downloads | KINAIR"
                     description="Download the KINAIR offline fan selection software for Windows and Android, with automatic cloud sync." />
                   <DownloadsPage /></>} />
+                <Route path="/auth/confirm" element={<>
+                  <Seo path="/auth/confirm" title="Confirm Email | KINAIR" description="Confirm your KINAIR account email." noindex />
+                  <AuthConfirmPage /></>} />
                 <Route path="/reset-password" element={<>
                   <Seo path="/reset-password" title="Reset Password | KINAIR" description="Reset your KINAIR account password." noindex />
                   <ResetPasswordPage /></>} />
