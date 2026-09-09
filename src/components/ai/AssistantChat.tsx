@@ -464,6 +464,19 @@ function parseManualFanParameters(userText: string): Partial<DutyRequest> {
   };
 }
 
+const NOMINAL_FAN_SIZES_MM = [80, 100, 125, 150, 160, 180, 200, 250, 315, 355, 400, 450, 500, 560, 630, 710, 800, 900, 1000, 1120, 1250];
+
+function normalizeFanSizeMm(value: number, unit: 'mm' | 'in'): number {
+  if (unit === 'mm') return value;
+  const converted = value * 25.4;
+  const nearest = NOMINAL_FAN_SIZES_MM.reduce((best, size) =>
+    Math.abs(size - converted) < Math.abs(best - converted) ? size : best,
+  );
+  return Math.abs(nearest - converted) <= Math.max(12, converted * 0.04)
+    ? nearest
+    : Math.round(converted);
+}
+
 function parseDirectFanDuty(userText: string): DutyRequest | null {
   if (/\b(?:air\s*curtain|door|entrance|opening)\b/i.test(userText)) return null;
 
@@ -540,11 +553,17 @@ function parseDirectFanDuty(userText: string): DutyRequest | null {
       ? (airflowLps <= 25 ? 3 : 10)
       : 75;
   const exactSizeMatch =
-    userText.match(/(?:fan|duct|spigot|connection|diameter|dia\.?|size|ø)\s*(?:of|=|:)?\s*(\d{2,4})\s*mm\b/i) ??
-    userText.match(/\b(\d{2,4})\s*mm\s*(?:dia(?:meter)?|fan|duct|spigot|connection|size)\b/i);
+    userText.match(/(?:fan|duct|spigot|connection|diameter|dia\.?|size|ø)\s*(?:of|=|:)?\s*(\d+(?:\.\d+)?)\s*(mm|in(?:ch(?:es)?)?|"|″)\b?/i) ??
+    userText.match(/\b(\d+(?:\.\d+)?)\s*(mm|in(?:ch(?:es)?)?|"|″)\s*(?:dia(?:meter)?|fan|duct|spigot|connection|size)\b/i);
   const maxSizeMatch = userText.match(
-    /(?:maximum|max|not\s*more\s*than|up\s*to)\s*(?:fan|duct|spigot|connection|diameter|dia\.?|size)?\s*(\d{2,4})\s*mm\b/i,
+    /(?:maximum|max|not\s*more\s*than|up\s*to)\s*(?:fan|duct|spigot|connection|diameter|dia\.?|size)?\s*(\d+(?:\.\d+)?)\s*(mm|in(?:ch(?:es)?)?|"|″)\b?/i,
   );
+  const exactFanSizeMm = exactSizeMatch
+    ? normalizeFanSizeMm(Number(exactSizeMatch[1]), exactSizeMatch[2].toLowerCase() === 'mm' ? 'mm' : 'in')
+    : null;
+  const maxFanSizeMm = maxSizeMatch
+    ? normalizeFanSizeMm(Number(maxSizeMatch[1]), maxSizeMatch[2].toLowerCase() === 'mm' ? 'mm' : 'in')
+    : null;
   const application =
     /\b(?:toilet|washroom|bathroom|wc|restroom)\b/i.test(userText) ? 'toilet_exhaust' :
     /\b(?:kitchen|hood|grease)\b/i.test(userText) ? 'kitchen_extract' :
@@ -565,8 +584,8 @@ function parseDirectFanDuty(userText: string): DutyRequest | null {
     material: mentionsPlastic ? 'plastic' : mentionsMetal ? 'metal' : null,
     fan_type: fanType,
     ...parseManualFanParameters(userText),
-    fan_size_mm: exactSizeMatch ? Number(exactSizeMatch[1]) : null,
-    max_fan_size_mm: maxSizeMatch ? Number(maxSizeMatch[1]) : null,
+    fan_size_mm: exactFanSizeMm,
+    max_fan_size_mm: maxFanSizeMm,
     application,
     output,
     optimize_for: optimizeFor,
@@ -590,8 +609,12 @@ function parseSizeOnlyFanRequest(userText: string): SizeOnlyFanRequest | null {
   if (/\b(?:air\s*curtain|door|entrance|opening)\b/i.test(userText)) return null;
   if (/\b(?:cmh|cfm|lps|cms|m(?:³|3)?\s*\/\s*(?:h|s)|l\s*\/\s*s)\b/i.test(userText)) return null;
 
-  const sizeMatch = userText.match(/\b(\d{2,4}(?:\.\d+)?)\s*mm\b/i);
+  const sizeMatch = userText.match(/\b(\d+(?:\.\d+)?)\s*(mm|in(?:ch(?:es)?)?|"|″)\b?/i);
   if (!sizeMatch) return null;
+  const fanSizeMm = normalizeFanSizeMm(
+    Number(sizeMatch[1]),
+    sizeMatch[2].toLowerCase() === 'mm' ? 'mm' : 'in',
+  );
 
   const wallMounted = /\b(?:kin[\s-]?e|wall[ -]?mounted|wall extract|wall fan)\b/i.test(userText);
   const inlineDucted = /\b(?:kvf[\s-]?[pm]|inline|ducted)\b/i.test(userText);
@@ -618,7 +641,7 @@ function parseSizeOnlyFanRequest(userText: string): SizeOnlyFanRequest | null {
         : 'full';
 
   return {
-    fanSizeMm: Number(sizeMatch[1]),
+    fanSizeMm,
     seriesName,
     material,
     fanType,
