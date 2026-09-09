@@ -4,8 +4,9 @@ import path from "path";
 
 // https://vitejs.dev/config/
 export default defineConfig(() => ({
-  // relative base so the packaged desktop app can load assets over file://
-  base: "./",
+  // Web builds use root-relative assets so BrowserRouter deep links work.
+  // The desktop packaging script overrides this with --base=./ for file://.
+  base: "/",
   server: {
     host: "::",
     port: 8080,
