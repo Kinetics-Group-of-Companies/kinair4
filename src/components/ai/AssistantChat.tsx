@@ -573,6 +573,112 @@ function parseDirectFanDuty(userText: string): DutyRequest | null {
   };
 }
 
+type SizeOnlyFanRequest = {
+  fanSizeMm: number;
+  seriesName: string;
+  material: 'plastic' | 'metal';
+  fanType: 'inline_ducted' | 'wall_mounted';
+  output: DocOutput;
+};
+
+/**
+ * Recognize a catalogue-size request locally, without spending an AI call.
+ * Examples: "100 mm inline ducted PVC", "125 mm inline ducted metal",
+ * and "100 mm wall mounted fan PVC".
+ */
+function parseSizeOnlyFanRequest(userText: string): SizeOnlyFanRequest | null {
+  if (/\b(?:air\s*curtain|door|entrance|opening)\b/i.test(userText)) return null;
+  if (/\b(?:cmh|cfm|lps|cms|m(?:³|3)?\s*\/\s*(?:h|s)|l\s*\/\s*s)\b/i.test(userText)) return null;
+
+  const sizeMatch = userText.match(/\b(\d{2,4}(?:\.\d+)?)\s*mm\b/i);
+  if (!sizeMatch) return null;
+
+  const wallMounted = /\b(?:kin[\s-]?e|wall[ -]?mounted|wall extract|wall fan)\b/i.test(userText);
+  const inlineDucted = /\b(?:kvf[\s-]?[pm]|inline|ducted)\b/i.test(userText);
+  if (!wallMounted && !inlineDucted) return null;
+
+  const mentionsPlastic = /\b(?:plastic|pvc|u-pvc|upvc|abs|polypropylene|polymer|pp)\b/i.test(userText);
+  const mentionsMetal = /\b(?:metal|metallic|steel|stainless\s*steel|galvanized|galvanised|gi|aluminium|aluminum)\b/i.test(userText);
+  const explicitSeries = userText.match(/\b(KVF[\s-]?[PM]|KIN[\s-]?E)\b/i)?.[1]
+    ?.toUpperCase()
+    .replace(/\s/g, '')
+    .replace(/^KVF([PM])$/, 'KVF-$1')
+    .replace(/^KIN-?E$/, 'KIN-E');
+
+  const fanType = wallMounted ? 'wall_mounted' : 'inline_ducted';
+  const material: 'plastic' | 'metal' = wallMounted || mentionsPlastic ? 'plastic' : 'metal';
+  const seriesName =
+    explicitSeries ??
+    (wallMounted ? 'KIN-E' : mentionsMetal && !mentionsPlastic ? 'KVF-M' : 'KVF-P');
+  const output: DocOutput =
+    /\b(?:drawing|dimension)\b/i.test(userText)
+      ? 'drawing'
+      : /\b(?:noise|sound)\b/i.test(userText)
+        ? 'noise'
+        : 'full';
+
+  return {
+    fanSizeMm: Number(sizeMatch[1]),
+    seriesName,
+    material,
+    fanType,
+    output,
+  };
+}
+
+/**
+ * Build a real duty from the requested catalogue model's best available curve
+ * point. This lets the unchanged manual selection engine return the exact size
+ * without inventing a generic airflow/pressure pair.
+ */
+function buildSizeOnlyFanDuty(database: any, request: SizeOnlyFanRequest | null): DutyRequest | null {
+  if (!request || !database?.fans?.length) return null;
+  const series = resolveFanSeries(database, request.seriesName, request.material, request.fanType);
+  if (!series) return null;
+
+  const seriesId = String(series.id ?? '');
+  const seriesName = String(series.name ?? request.seriesName);
+  const fans = database.fans.filter((fan: any) => {
+    if (Number(fan.diameter) !== request.fanSizeMm) return false;
+    const fanSeriesId = String(fan.seriesId ?? '');
+    const fanSeriesName = String(fan.series ?? '');
+    return (seriesId && fanSeriesId === seriesId) || fanSeriesName.toLowerCase() === seriesName.toLowerCase();
+  });
+
+  let chosen: { fan: any; point: any; score: number } | null = null;
+  for (const fan of fans) {
+    for (const config of fan.bladeConfigurations ?? []) {
+      for (const angle of config.bladeAngles ?? []) {
+        for (const point of config.performanceData?.[angle] ?? []) {
+          if (!(point.airflow > 0) || !(point.staticPressure > 0)) continue;
+          const score = point.efficiency > 0
+            ? 1_000_000_000 + point.efficiency
+            : point.airflow * point.staticPressure;
+          if (!chosen || score > chosen.score) chosen = { fan, point, score };
+        }
+      }
+    }
+  }
+  if (!chosen) return null;
+
+  const motorPole = chosen.fan.referencePoles ?? chosen.fan.motorPoles?.[0] ?? null;
+  return {
+    airflow: chosen.point.airflow,
+    airflow_unit: 'CMH',
+    static_pressure: chosen.point.staticPressure,
+    pressure_unit: 'Pa',
+    series_name: seriesName,
+    material: request.material,
+    fan_type: request.fanType,
+    motor_poles: motorPole,
+    fan_size_mm: request.fanSizeMm,
+    tolerance_min: 0,
+    tolerance_max: 1000,
+    output: request.output,
+    optimize_for: 'balanced',
+  };
+}
+
 /**
  * Resolves the fan series to select from.
  *
@@ -1433,7 +1539,7 @@ export function AssistantChat({
         ] as any);
         return;
       }
-      const directDuty = parseDirectFanDuty(value);
+      const directDuty = parseDirectFanDuty(value) ?? buildSizeOnlyFanDuty(database, parseSizeOnlyFanRequest(value));
       if (directDuty) {
         const requestId = crypto.randomUUID();
         const toolCallId = crypto.randomUUID();
