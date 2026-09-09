@@ -43,7 +43,7 @@ export async function generateAirCurtainDatasheetForSelection(
   } as const;
   const lengthFactors = { mm: 1, cm: 10, m: 1000, in: 25.4, ft: 304.8 } as const;
   const lengthLabels = { mm: 'mm', cm: 'cm', m: 'm', in: 'in', ft: 'ft' } as const;
-  const airflowUnit = opts.airflowUnit ?? 'cmh';
+  const airflowUnit = opts.airflowUnit ?? 'cfm';
   const widthUnit = opts.widthUnit ?? 'mm';
   const heightUnit = opts.heightUnit ?? 'm';
 
