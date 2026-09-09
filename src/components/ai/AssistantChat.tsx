@@ -1146,15 +1146,65 @@ function findLatestInstantDuty(messages: any[]): InstantFollowUp | null {
   return null;
 }
 
+function applyFanFollowUpDutyValues(input: DutyRequest, userText: string): void {
+  const airflow = userText.match(
+    /(\d+(?:\.\d+)?)\s*(m(?:³|3)?\s*\/(?:\s*h|\s*hr)|m(?:³|3)?\s*(?:per\s*hour|ph)|cmh|l(?:itre|iter)?s?\s*(?:\/\s*s|per\s*second)|lps|cfm|cubic\s*feet\s*per\s*minute|m(?:³|3)?\s*\/\s*s|cms)\b/i,
+  );
+  if (airflow) {
+    const token = airflow[2].toLowerCase().replace(/\s/g, '');
+    input.airflow = Number(airflow[1]);
+    input.airflow_unit =
+      token === 'cfm' || token.includes('cubicfeetperminute')
+        ? 'CFM'
+        : token === 'cms' || /m(?:³|3)\/s/.test(token)
+          ? 'CMS'
+          : token === 'lps' || /l\/s/.test(token)
+            ? 'LPS'
+            : 'CMH';
+  }
+
+  const pressure = userText.match(
+    /(?:@|\bat\b|static\s*pressure|external\s*static\s*pressure|esp|pressure|change\s+(?:the\s+)?(?:static\s*)?pressure(?:\s+to)?)?\s*(\d+(?:\.\d+)?)\s*(pa|pascals?|in(?:\.|\s*)w(?:\.|\s*)g|inwg|inch(?:es)?\s*(?:of\s*)?(?:water|wg)|mm(?:\.|\s*)w(?:\.|\s*)g|mmwg|mm\s*(?:of\s*)?water)\b/i,
+  );
+  if (pressure) {
+    const token = pressure[2].toLowerCase().replace(/[.\s]/g, '');
+    input.static_pressure = Number(pressure[1]);
+    input.pressure_unit = token.startsWith('in') ? 'inwg' : token.startsWith('mm') ? 'mmwg' : 'Pa';
+  }
+}
+
+function applyAirCurtainFollowUpDimensions(input: AcDutyRequest, userText: string): void {
+  const unit = String.raw`(mm|cm|m|in(?:ch(?:es)?)?|ft|feet|foot|')`;
+  const width = userText.match(
+    new RegExp(String.raw`(?:door|opening)?\\s*width\\s*(?:of|=|:|to)?\\s*(\\d+(?:\\.\\d+)?)\\s*${unit}`, 'i'),
+  ) ?? userText.match(
+    new RegExp(String.raw`(\\d+(?:\\.\\d+)?)\\s*${unit}\\s*(?:door|opening)?\\s*wide`, 'i'),
+  );
+  const height = userText.match(
+    new RegExp(String.raw`(?:mounting|door|opening)?\\s*height\\s*(?:of|=|:|to)?\\s*(\\d+(?:\\.\\d+)?)\\s*${unit}`, 'i'),
+  ) ?? userText.match(
+    new RegExp(String.raw`(\\d+(?:\\.\\d+)?)\\s*${unit}\\s*(?:mounting|door|opening)?\\s*high`, 'i'),
+  );
+  if (width) {
+    input.door_width = Number(width[1]);
+    input.door_width_unit = normalizeUnit(width[2]);
+  }
+  if (height) {
+    input.door_height = Number(height[1]);
+    input.door_height_unit = normalizeUnit(height[2]);
+  }
+}
+
 function parseInstantFollowUp(userText: string, messages: any[]): InstantFollowUp | null {
   const isAction =
-    /\b(?:another|alternative|option|change|switch|revise|promote|upgrade|replace|quieter|quietest|silent|efficient|efficiency|lower|lowest|compact|smallest|more airflow|more pressure|stronger|throw|drawing|dimension|noise data|sound data|datasheet|data sheet|EC motor|AC motor|wall mounted|surface mounted|recessed|ceiling|concealed|not in stock|out of stock|unavailable|motor\s*(?:pole|brand|make|class)|\b(?:2|4|6|8|12)\s*(?:pole|p)\b|\bIE\s*[1-4]\b|\b(?:50|60)\s*Hz\b|high\s*speed|medium\s*speed|low\s*speed|brand|nozzle\s*velocity|floor\s*velocity|combinations?|mixed\s*lengths?|single\s*unit\s*only|match(?:ing)?|select\s*by\s*(?:airflow|door)|octave|dB\(?A\)?|air\s*volume|required\s*airflow|\bF\s*(?:250|300|400)\b|Class\s*[BH]|ATEX|terminal\s*box|inspection\s*door|safety\s*factor|tolerance|temperature|air\s*density|altitude|elevation)\b/i.test(userText);
+    /\b(?:another|alternative|option|change|switch|revise|promote|upgrade|replace|quieter|quietest|silent|efficient|efficiency|lower|lowest|compact|smallest|more airflow|more pressure|stronger|throw|drawing|dimension|noise data|sound data|datasheet|data sheet|EC motor|AC motor|wall mounted|surface mounted|recessed|ceiling|concealed|not in stock|out of stock|unavailable|motor\s*(?:pole|brand|make|class)|\b(?:2|4|6|8|12)\s*(?:pole|p)\b|\bIE\s*[1-4]\b|\b(?:50|60)\s*Hz\b|high\s*speed|medium\s*speed|low\s*speed|brand|nozzle\s*velocity|floor\s*velocity|combinations?|mixed\s*lengths?|single\s*unit\s*only|door\s*width|door\s*height|mounting\s*height|airflow|static\s*pressure|fan\s*type|series|inline|ducted|axial|wall\s*fan|match(?:ing)?|select\s*by\s*(?:airflow|door)|octave|dB\(?A\)?|air\s*volume|required\s*airflow|\bF\s*(?:250|300|400)\b|Class\s*[BH]|ATEX|terminal\s*box|inspection\s*door|safety\s*factor|tolerance|temperature|air\s*density|altitude|elevation)\b/i.test(userText);
   if (!isAction) return null;
 
   const previous = findLatestInstantDuty(messages);
   if (!previous) return null;
   if (previous.product === 'fan') {
     const input: DutyRequest = { ...previous.input };
+    applyFanFollowUpDutyValues(input, userText);
     if (/\b(?:quiet|quieter|quietest|silent|low\s*noise)\b/i.test(userText)) input.optimize_for = 'low_noise';
     else if (/\b(?:efficient|efficiency|highest\s*efficiency|best\s*efficiency|energy\s*efficient|minimum\s*sfp|lowest\s*sfp)\b/i.test(userText)) input.optimize_for = 'high_efficiency';
     else if (/\b(?:lower|lowest|low)\s*(?:power|kw|consumption)|energy saving\b/i.test(userText)) input.optimize_for = 'low_power';
@@ -1184,6 +1234,7 @@ function parseInstantFollowUp(userText: string, messages: any[]): InstantFollowU
   }
 
   const input: AcDutyRequest = { ...previous.input };
+  applyAirCurtainFollowUpDimensions(input, userText);
   if (/\b(?:quiet|quieter|quietest|silent|low\s*noise)\b/i.test(userText)) input.optimize_for = 'low_noise';
   else if (/\b(?:lower|lowest|low)\s*(?:power|watts?|consumption)|energy saving\b/i.test(userText)) input.optimize_for = 'low_power';
   else if (/\b(?:stronger|throw|floor velocity|tall door)\b/i.test(userText)) input.optimize_for = 'max_velocity';
