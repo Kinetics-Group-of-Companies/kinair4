@@ -1,6 +1,6 @@
 import { Helmet } from "react-helmet-async";
 
-const BASE_URL = "https://kinvent.lovable.app";
+const BASE_URL = "https://kinair.ae";
 
 interface SeoProps {
   title: string;

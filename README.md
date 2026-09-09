@@ -1,73 +1,52 @@
-# Welcome to your Lovable project
+# KINAIR Selection Software
 
-## Project info
+Engineering selection software for KINAIR fans and air curtains.
 
-**URL**: https://lovable.dev/projects/REPLACE_WITH_PROJECT_ID
+## Architecture
 
-## How can I edit this code?
+- Frontend: React + Vite
+- Hosting and deployments: Vercel
+- Source control: GitHub
+- Database, email-verified authentication, storage and Edge Functions: Supabase
+- AI providers: Google Gemini, OpenAI and Anthropic
+- Transactional email: Resend, with AgentMail fallback where configured
 
-There are several ways of editing your application.
+The fan and air-curtain selection engines run from the application code and catalogue data. They do not require an external AI provider for clear single-duty selections.
 
-**Use Lovable**
+## Local development
 
-Simply visit the [Lovable Project](https://lovable.dev/projects/REPLACE_WITH_PROJECT_ID) and start prompting.
-
-Changes made via Lovable will be committed automatically to this repo.
-
-**Use your preferred IDE**
-
-If you want to work locally using your own IDE, you can clone this repo and push changes. Pushed changes will also be reflected in Lovable.
-
-The only requirement is having Node.js & npm installed - [install with nvm](https://github.com/nvm-sh/nvm#installing-and-updating)
-
-Follow these steps:
+Requirements: Node.js 20 or later and npm.
 
 ```sh
-# Step 1: Clone the repository using the project's Git URL.
-git clone <YOUR_GIT_URL>
-
-# Step 2: Navigate to the project directory.
-cd <YOUR_PROJECT_NAME>
-
-# Step 3: Install the necessary dependencies.
-npm i
-
-# Step 4: Start the development server with auto-reloading and an instant preview.
+git clone https://github.com/dpkchn786/kinair4.git
+cd kinair4
+npm ci
 npm run dev
 ```
 
-**Edit a file directly in GitHub**
+Create a local `.env` containing:
 
-- Navigate to the desired file(s).
-- Click the "Edit" button (pencil icon) at the top right of the file view.
-- Make your changes and commit the changes.
+```env
+VITE_SUPABASE_URL=https://YOUR_PROJECT.supabase.co
+VITE_SUPABASE_PUBLISHABLE_KEY=YOUR_PUBLISHABLE_KEY
+VITE_SUPABASE_PROJECT_ID=YOUR_PROJECT_ID
+```
 
-**Use GitHub Codespaces**
+Never commit service-role keys or provider API secrets. Server-side secrets belong in Supabase Edge Function secrets.
 
-- Navigate to the main page of your repository.
-- Click on the "Code" button (green button) near the top right.
-- Select the "Codespaces" tab.
-- Click on "New codespace" to launch a new Codespace environment.
-- Edit files directly within the Codespace and commit and push your changes once you're done.
+## Build
 
-## What technologies are used for this project?
+```sh
+npm run build
+```
 
-This project is built with:
+The generated web application is written to `dist/`. Desktop and Android packaging use the same frontend and local KINAIR selection engines.
 
-- Vite
-- TypeScript
-- React
-- shadcn-ui
-- Tailwind CSS
+## Deployment
 
-## How can I deploy this project?
+The `main` branch deploys automatically to Vercel and serves:
 
-Simply open [Lovable](https://lovable.dev/projects/REPLACE_WITH_PROJECT_ID) and click on Share -> Publish.
+- https://kinair.ae
+- https://www.kinair.ae
 
-## Can I connect a custom domain to my Lovable project?
-
-Yes, you can!
-
-To connect a domain, navigate to Project > Settings > Domains and click Connect Domain.
-
-Read more here: [Setting up a custom domain](https://docs.lovable.dev/features/custom-domain#custom-domain)
+Supabase functions are maintained from `supabase/functions/` and deployed to the KINAIR Supabase project.

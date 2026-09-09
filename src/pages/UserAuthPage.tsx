@@ -19,6 +19,8 @@ export default function UserAuthPage() {
   const [searchParams] = useSearchParams();
   const defaultTab = searchParams.get('tab') === 'signup' ? 'signup' : 'login';
   const trialPrompt = searchParams.get('reason') === 'trial-ended' || searchParams.get('reason') === 'guest';
+  const [activeTab, setActiveTab] = useState(defaultTab);
+  const [confirmationEmail, setConfirmationEmail] = useState<string | null>(null);
   const { data: tenant } = useTenantData();
   const [isLoading, setIsLoading] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
@@ -200,6 +202,9 @@ export default function UserAuthPage() {
       if (error) {
         if (error.message.includes('Invalid login credentials')) {
           toast.error('Invalid email or password. Please try again.');
+        } else if (error.message.toLowerCase().includes('email not confirmed')) {
+          setConfirmationEmail(email.trim());
+          toast.error('Confirm your email before logging in. You can resend the confirmation below.');
         } else {
           toast.error(error.message);
         }
@@ -246,7 +251,7 @@ export default function UserAuthPage() {
     try {
       const redirectUrl = `${window.location.origin}/`;
       
-      const { error } = await supabase.auth.signUp({
+      const { data, error } = await supabase.auth.signUp({
         email,
         password,
         options: {
@@ -266,9 +271,46 @@ export default function UserAuthPage() {
         return;
       }
 
-      toast.success('Account created! Trial access is available while your approval request is pending.');
+      if (data.session) {
+        toast.success('Account created. Your trial is active while approval is pending.');
+        navigate('/');
+      } else {
+        const normalizedEmail = email.trim();
+        setConfirmationEmail(normalizedEmail);
+        setActiveTab('login');
+        toast.success('Account created. Confirm your email, then log in to start your trial.');
+      }
     } catch (error) {
       toast.error('An unexpected error occurred. Please try again.');
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const handleResendConfirmation = async () => {
+    const targetEmail = (confirmationEmail || email).trim();
+    try {
+      emailSchema.parse(targetEmail);
+    } catch {
+      toast.error('Enter a valid email address first.');
+      return;
+    }
+
+    setIsLoading(true);
+    try {
+      const { error } = await supabase.auth.resend({
+        type: 'signup',
+        email: targetEmail,
+        options: { emailRedirectTo: `${window.location.origin}/` },
+      });
+      if (error) {
+        toast.error(error.message);
+        return;
+      }
+      setConfirmationEmail(targetEmail);
+      toast.success('Confirmation email sent. Check your inbox and junk folder.');
+    } catch {
+      toast.error('Could not resend the confirmation email. Please try again.');
     } finally {
       setIsLoading(false);
     }
@@ -295,7 +337,21 @@ export default function UserAuthPage() {
               Your guest trial is complete. Create a free account to continue selecting with KINAIR AI.
             </div>
           ) : null}
-          <Tabs defaultValue={defaultTab} className="w-full">
+          {confirmationEmail ? (
+            <div role="status" className="mb-4 rounded-lg border border-blue-200 bg-blue-50 p-3 text-sm text-blue-950">
+              <p>Confirm <strong>{confirmationEmail}</strong> to activate login and start the trial.</p>
+              <Button
+                type="button"
+                variant="link"
+                className="h-auto px-0 pt-2 text-blue-700"
+                onClick={handleResendConfirmation}
+                disabled={isLoading}
+              >
+                Resend confirmation email
+              </Button>
+            </div>
+          ) : null}
+          <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
             <TabsList className="grid w-full grid-cols-2">
               <TabsTrigger value="login">Login</TabsTrigger>
               <TabsTrigger value="signup">Sign Up</TabsTrigger>
