@@ -25,8 +25,8 @@ export async function generateAirCurtainDatasheetForSelection(
     minFloorVelocity: number;
     noiseMode?: 'dba' | 'octave';
     airflowUnit?: 'cmh' | 'cfm' | 'ls';
-    widthUnit?: 'mm' | 'cm' | 'm' | 'in';
-    heightUnit?: 'mm' | 'cm' | 'm' | 'in';
+    widthUnit?: 'mm' | 'cm' | 'm' | 'in' | 'ft';
+    heightUnit?: 'mm' | 'cm' | 'm' | 'in' | 'ft';
   },
   ctx: ChatAirCurtainContext,
 ) {
@@ -41,8 +41,8 @@ export async function generateAirCurtainDatasheetForSelection(
     cfm: { label: 'CFM', factor: 1.6990107955 },
     ls: { label: 'l/s', factor: 3.6 },
   } as const;
-  const lengthFactors = { mm: 1, cm: 10, m: 1000, in: 25.4 } as const;
-  const lengthLabels = { mm: 'mm', cm: 'cm', m: 'm', in: 'inch' } as const;
+  const lengthFactors = { mm: 1, cm: 10, m: 1000, in: 25.4, ft: 304.8 } as const;
+  const lengthLabels = { mm: 'mm', cm: 'cm', m: 'm', in: 'in', ft: 'ft' } as const;
   const airflowUnit = opts.airflowUnit ?? 'cmh';
   const widthUnit = opts.widthUnit ?? 'mm';
   const heightUnit = opts.heightUnit ?? 'm';
