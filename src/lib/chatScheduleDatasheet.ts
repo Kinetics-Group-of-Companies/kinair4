@@ -29,6 +29,10 @@ export interface ChatScheduleAirCurtainRow {
   doorWidthMm: number;
   doorHeightM: number;
   minFloorVelocity: number;
+  noiseMode?: 'dba' | 'octave';
+  airflowUnit?: 'cmh' | 'cfm' | 'ls';
+  widthUnit?: 'mm' | 'cm' | 'm' | 'in';
+  heightUnit?: 'mm' | 'cm' | 'm' | 'in';
 }
 
 export interface ChatScheduleAirCurtainContext {
@@ -185,6 +189,12 @@ export async function downloadCombinedScheduleDatasheet({
       airCurtainContext?.brands.find((b) => b.id === (selection.model.brandId ?? seriesInfo?.brandId)) ??
       airCurtainContext?.brands.find((b) => b.name === selection.model.brand) ??
       null;
+    const airflowUnit = row.airflowUnit ?? 'cmh';
+    const airflowUnitLabel = airflowUnit === 'cfm' ? 'CFM' : airflowUnit === 'ls' ? 'LPS' : 'CMH';
+    const widthUnit = row.widthUnit ?? 'mm';
+    const heightUnit = row.heightUnit ?? 'm';
+    const lengthFactors = { mm: 1, cm: 10, m: 1000, in: 25.4 } as const;
+    const lengthLabels = { mm: 'mm', cm: 'cm', m: 'm', in: 'inch' } as const;
     await generateAirCurtainDatasheet({
       selection,
       doorWidthMm: row.doorWidthMm,
@@ -200,13 +210,13 @@ export async function downloadCombinedScheduleDatasheet({
         ) ?? [],
       companyLogoUrl: logoUrl ?? null,
       companyName: brandName,
-      noiseMode: 'dba',
-      airflowUnit: 'cmh',
-      airflowUnitLabel: 'm³/h',
-      lengthUnitFactorMm: 1,
-      lengthUnitLabel: 'mm',
-      heightUnitFactorMm: 1000,
-      heightUnitLabel: 'm',
+      noiseMode: row.noiseMode ?? 'dba',
+      airflowUnit,
+      airflowUnitLabel,
+      lengthUnitFactorMm: lengthFactors[widthUnit],
+      lengthUnitLabel: lengthLabels[widthUnit],
+      heightUnitFactorMm: lengthFactors[heightUnit],
+      heightUnitLabel: lengthLabels[heightUnit],
       existingDoc: doc,
     });
   }
