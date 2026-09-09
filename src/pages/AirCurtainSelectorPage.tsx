@@ -280,7 +280,7 @@ export default function AirCurtainSelectorPage() {
   }, [selected, doorHeightM, minFloorVelocity]);
 
 
-  if (authLoading || isLoading || (isGuest && trialLoading)) {
+  if (authLoading || isLoading || ((isGuest || isAccountTrialActive) && trialLoading)) {
     return (
       <MainLayout>
         <div className="min-h-[60vh] flex items-center justify-center">
@@ -298,13 +298,19 @@ export default function AirCurtainSelectorPage() {
     );
   }
 
-  if (!isApproved && !isSuperAdmin && !isAccountTrialActive && !trialActive) {
+  if (!isApproved && !isSuperAdmin && (!isAccountTrialActive || !trialActive)) {
     return (
       <MainLayout>
         <div className="min-h-[60vh] flex items-center justify-center text-center max-w-md mx-auto p-8">
           <div>
-            <h2 className="text-2xl font-bold mb-3">Approval Pending</h2>
-            <p className="text-muted-foreground">Your account is awaiting admin approval.</p>
+            <h2 className="text-2xl font-bold mb-3">
+              {isAccountTrialActive ? 'Daily Trial Limit Reached' : 'Approval Pending'}
+            </h2>
+            <p className="text-muted-foreground">
+              {isAccountTrialActive
+                ? 'Your 5-minute daily selection allowance is finished. Access resets tomorrow (UAE time).'
+                : 'Your account is awaiting admin approval.'}
+            </p>
           </div>
         </div>
       </MainLayout>
