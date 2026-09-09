@@ -389,6 +389,7 @@ type DutyRequest = {
   air_density_kg_m3?: number | null;
   altitude_m?: number | null;
   fan_size_mm?: number | null;
+  fan_size_unit?: 'mm' | 'in' | null;
   max_fan_size_mm?: number | null;
   application?: string | null;
   output?: DocOutput;
@@ -585,6 +586,11 @@ function parseDirectFanDuty(userText: string): DutyRequest | null {
     fan_type: fanType,
     ...parseManualFanParameters(userText),
     fan_size_mm: exactFanSizeMm,
+    fan_size_unit: exactSizeMatch
+      ? (exactSizeMatch[2].toLowerCase() === 'mm' ? 'mm' : 'in')
+      : maxSizeMatch
+        ? (maxSizeMatch[2].toLowerCase() === 'mm' ? 'mm' : 'in')
+        : null,
     max_fan_size_mm: maxFanSizeMm,
     application,
     output,
@@ -594,6 +600,7 @@ function parseDirectFanDuty(userText: string): DutyRequest | null {
 
 type SizeOnlyFanRequest = {
   fanSizeMm: number;
+  fanSizeUnit: 'mm' | 'in';
   seriesName: string;
   material: 'plastic' | 'metal';
   fanType: 'inline_ducted' | 'wall_mounted';
@@ -642,6 +649,7 @@ function parseSizeOnlyFanRequest(userText: string): SizeOnlyFanRequest | null {
 
   return {
     fanSizeMm,
+    fanSizeUnit: sizeMatch[2].toLowerCase() === 'mm' ? 'mm' : 'in',
     seriesName,
     material,
     fanType,
@@ -695,6 +703,7 @@ function buildSizeOnlyFanDuty(database: any, request: SizeOnlyFanRequest | null)
     fan_type: request.fanType,
     motor_poles: motorPole,
     fan_size_mm: request.fanSizeMm,
+    fan_size_unit: request.fanSizeUnit,
     tolerance_min: 0,
     tolerance_max: 1000,
     output: request.output,
@@ -1059,6 +1068,7 @@ type ScheduleItem = {
   material?: string | null;
   fan_type?: FanInstallType | null;
   fan_size_mm?: number | null;
+  fan_size_unit?: 'mm' | 'in' | null;
   max_fan_size_mm?: number | null;
   application?: string | null;
 
@@ -1100,7 +1110,7 @@ type ScheduleItem = {
 };
 
 type ScheduleSelection =
-  | { kind: 'fan'; selection: FanSelection; airflowUnit?: string; pressureUnit?: string }
+  | { kind: 'fan'; selection: FanSelection; airflowUnit?: string; pressureUnit?: string; fanSizeUnit?: 'mm' | 'in' }
   | {
       kind: 'air_curtain';
       selection: AirCurtainSelection;
@@ -1832,7 +1842,11 @@ export function AssistantChat({
           await generateDatasheetForSelection(
             selection,
             database,
-            { airflowUnit: duty?.airflow_unit, pressureUnit: duty?.pressure_unit },
+            {
+              airflowUnit: duty?.airflow_unit,
+              pressureUnit: duty?.pressure_unit,
+              fanSizeUnit: duty?.fan_size_unit ?? 'mm',
+            },
             dimensionsMap as any,
           );
           toast.success(`${selection.nomenclature} datasheet downloaded`);
@@ -2400,7 +2414,13 @@ export function AssistantChat({
             )} · ${best.operatingPoint.shaftPower.toFixed(3)} kW${
               best.noiseData?.overall ? ` · ${Math.round(best.noiseData.overall)} dB(A)` : ''
             }`,
-            selection: { kind: 'fan', selection: best, airflowUnit, pressureUnit },
+            selection: {
+              kind: 'fan',
+              selection: best,
+              airflowUnit,
+              pressureUnit,
+              fanSizeUnit: item.fan_size_unit ?? 'mm',
+            },
           };
         });
 
@@ -2421,6 +2441,7 @@ export function AssistantChat({
           await generateDatasheetForSelection(row.selection.selection, database, {
             airflowUnit: row.selection.airflowUnit,
             pressureUnit: row.selection.pressureUnit,
+            fanSizeUnit: row.selection.fanSizeUnit ?? 'mm',
           });
         } else {
           await generateAirCurtainDatasheetForSelection(
