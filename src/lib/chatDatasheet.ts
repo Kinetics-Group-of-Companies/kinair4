@@ -33,7 +33,7 @@ function outletVelocityOf(airflowCMH: number, diameterMM: number): number {
 export async function generateDatasheetForSelection(
   selection: FanSelection,
   database: FanDatabase,
-  units?: { airflowUnit?: string; pressureUnit?: string },
+  units?: { airflowUnit?: string; pressureUnit?: string; fanSizeUnit?: 'mm' | 'in' },
   dimensionsMap?: Map<string, FanDimension>,
   documentOptions?: { existingDoc?: jsPDF; skipSave?: boolean; pageLabel?: string },
 ): Promise<jsPDF> {
@@ -132,6 +132,7 @@ export async function generateDatasheetForSelection(
     database,
     airflowUnit: (units?.airflowUnit || 'CFM') as any,
     pressureUnit: (units?.pressureUnit || 'Pa') as any,
+    fanSizeUnit: units?.fanSizeUnit || 'mm',
     performanceData,
     fanRPM,
     outletVelocity,
