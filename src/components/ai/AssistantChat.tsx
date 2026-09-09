@@ -1700,6 +1700,43 @@ export function AssistantChat({
         ] as any);
         return;
       }
+      const normalizedRequest = value.toLowerCase().replace(/[^a-z0-9]/g, '');
+      const asksForCatalogue = /\b(?:catalogue|catalog|brochure|product\s*pdf)\b/i.test(value);
+      const isSeriesOnly = /^(?:kvf[\s-]?[pm]|kin[\s-]?e|ktaf|n[\s-]?cross(?:\s+flow)?|n[\s-]?centrifugal(?:\s+flow)?|xd[\s-]?centrifugal(?:\s+flow)?)$/i.test(value.trim());
+      if (asksForCatalogue || isSeriesOnly) {
+        const normalizeSeries = (name: string) => name.toLowerCase().replace(/[^a-z0-9]/g, '');
+        const fanSeries = database.series.find((series) => {
+          const token = normalizeSeries(series.name);
+          return normalizedRequest.includes(token) || token.includes(normalizedRequest);
+        });
+        const airCurtainSeries = !fanSeries
+          ? acSeries.find((series) => {
+              const token = normalizeSeries(series.name);
+              return normalizedRequest.includes(token) || token.includes(normalizedRequest);
+            })
+          : undefined;
+        const matchedSeries = fanSeries ?? airCurtainSeries;
+        if (matchedSeries) {
+          const catalogueUrl = matchedSeries.catalogueUrl;
+          const catalogueLine = catalogueUrl
+            ? `[Download ${matchedSeries.name} catalogue PDF](${catalogueUrl})`
+            : `The ${matchedSeries.name} series is recognized, but its catalogue PDF has not been uploaded yet.`;
+          const dutyHint = fanSeries
+            ? 'For model selection, send the airflow and static pressure, for example: **100 L/s @ 75 Pa KVF-P**.'
+            : 'For model selection, send the door width, mounting height and mounting type.';
+          setActiveProvider('KINAIR catalogue · instant');
+          setMessages((current) => [
+            ...current,
+            { id: crypto.randomUUID(), role: 'user', parts: [{ type: 'text', text: value }] },
+            {
+              id: crypto.randomUUID(),
+              role: 'assistant',
+              parts: [{ type: 'text', text: `**${matchedSeries.name}**\n\n${catalogueLine}\n\n${dutyHint}` }],
+            },
+          ] as any);
+          return;
+        }
+      }
       sendMessage({ text: value });
       return;
     }
