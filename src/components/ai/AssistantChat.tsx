@@ -686,8 +686,8 @@ function buildSizeOnlyFanDuty(database: any, request: SizeOnlyFanRequest | null)
 
   const motorPole = chosen.fan.referencePoles ?? chosen.fan.motorPoles?.[0] ?? null;
   return {
-    airflow: chosen.point.airflow,
-    airflow_unit: 'CMH',
+    airflow: chosen.point.airflow * AIRFLOW_UNITS.CFM.factor,
+    airflow_unit: 'CFM',
     static_pressure: chosen.point.staticPressure,
     pressure_unit: 'Pa',
     series_name: seriesName,
@@ -793,9 +793,9 @@ function formatUnitValue(value: number, maximumFractionDigits = 1): string {
 
 function formatFanAirflow(
   airflowCmh: number,
-  unit: keyof typeof AIRFLOW_UNITS = 'CMH',
+  unit: keyof typeof AIRFLOW_UNITS = 'CFM',
 ): string {
-  const selectedUnit = AIRFLOW_UNITS[unit] ? unit : 'CMH';
+  const selectedUnit = AIRFLOW_UNITS[unit] ? unit : 'CFM';
   const value = airflowCmh * AIRFLOW_UNITS[selectedUnit].factor;
   const decimals = selectedUnit === 'CMS' ? 3 : 1;
   return `${formatUnitValue(value, decimals)} ${selectedUnit}`;
@@ -823,12 +823,12 @@ function formatAirCurtainLength(lengthMm: number, unit: AcLengthUnit): string {
 function airCurtainDisplayUnit(
   unit?: string | null,
 ): 'cmh' | 'cfm' | 'ls' {
-  return unit === 'CFM' ? 'cfm' : unit === 'LPS' ? 'ls' : 'cmh';
+  return unit === 'LPS' ? 'ls' : unit === 'CMH' ? 'cmh' : 'cfm';
 }
 
 function formatAirCurtainAirflow(
   airflowCmh: number,
-  unit: 'cmh' | 'cfm' | 'ls' = 'cmh',
+  unit: 'cmh' | 'cfm' | 'ls' = 'cfm',
 ): string {
   const factor = unit === 'cfm' ? AIRFLOW_UNITS.CFM.factor : unit === 'ls' ? AIRFLOW_UNITS.LPS.factor : 1;
   const label = unit === 'cfm' ? 'CFM' : unit === 'ls' ? 'LPS' : 'CMH';
@@ -1813,7 +1813,12 @@ export function AssistantChat({
   const fanDownloadedRef = useRef<Set<string>>(new Set());
 
   const downloadDatasheet = useCallback(
-    async (key: string, selection: FanSelection, output: DocOutput = 'full') => {
+    async (
+      key: string,
+      selection: FanSelection,
+      output: DocOutput = 'full',
+      dutyOverride?: DutyRequest,
+    ) => {
       setDownloadingKey(key);
       try {
         if (output === 'drawing') {
@@ -1823,7 +1828,7 @@ export function AssistantChat({
           await downloadFanNoiseData(selection, database);
           toast.success(`${selection.nomenclature} sound data downloaded`);
         } else {
-          const duty = autoSelections[key]?.duty;
+          const duty = dutyOverride ?? autoSelections[key]?.duty;
           await generateDatasheetForSelection(
             selection,
             database,
@@ -1917,7 +1922,7 @@ export function AssistantChat({
           {
             requiredAirflow: duty.airflow,
             requiredPressure: duty.static_pressure,
-            airflowUnit: (AIRFLOW_UNITS as any)[duty.airflow_unit] ? duty.airflow_unit : 'CMH',
+            airflowUnit: (AIRFLOW_UNITS as any)[duty.airflow_unit] ? duty.airflow_unit : 'CFM',
             pressureUnit: (PRESSURE_UNITS as any)[duty.pressure_unit] ? duty.pressure_unit : 'Pa',
             seriesId: (series as any)?.id,
             motorPole: duty.motor_poles ?? undefined,
@@ -1954,7 +1959,7 @@ export function AssistantChat({
         if (ranked.length > 0) {
           if (!busy && !fanDownloadedRef.current.has(key)) {
             fanDownloadedRef.current.add(key);
-            void downloadDatasheet(key, ranked[0], duty.output ?? 'full');
+            void downloadDatasheet(key, ranked[0], duty.output ?? 'full', duty);
           }
         } else {
           const seriesLabel = (series as any)?.name ? ` in ${(series as any).name}` : '';
@@ -2122,7 +2127,7 @@ export function AssistantChat({
           ? acBrands.find((b) => b.name.toLowerCase() === brandName.toLowerCase())?.name
           : undefined;
 
-        const airflowFactor = AC_AIRFLOW_TO_CMH[duty.min_airflow_unit ?? 'CMH'] ?? 1;
+        const airflowFactor = AC_AIRFLOW_TO_CMH[duty.min_airflow_unit ?? 'CFM'] ?? AIRFLOW_UNITS.CFM.factor;
         const minAirflowCmh = duty.min_airflow ? duty.min_airflow * airflowFactor : 0;
         const minFloorVelocity = duty.min_floor_velocity ?? 2;
         const selectionBasis =
@@ -2176,7 +2181,9 @@ export function AssistantChat({
               ? 'cfm'
               : duty.min_airflow_unit === 'LPS'
                 ? 'ls'
-                : 'cmh',
+                : duty.min_airflow_unit === 'CMH'
+                  ? 'cmh'
+                  : 'cfm',
           widthUnit: duty.door_width_unit ?? 'mm',
           heightUnit: duty.door_height_unit ?? 'm',
           results: ranked,
@@ -2269,7 +2276,7 @@ export function AssistantChat({
                 ? seriesMatch
                 : undefined;
 
-            const airflowFactor = AC_AIRFLOW_TO_CMH[item.min_airflow_unit ?? 'CMH'] ?? 1;
+            const airflowFactor = AC_AIRFLOW_TO_CMH[item.min_airflow_unit ?? 'CFM'] ?? AIRFLOW_UNITS.CFM.factor;
             const minAirflowCmh = item.min_airflow ? item.min_airflow * airflowFactor : 0;
             const airflowUnit = airCurtainDisplayUnit(item.min_airflow_unit);
             const minFloorVelocity = item.min_floor_velocity ?? 2;
@@ -2334,7 +2341,7 @@ export function AssistantChat({
             };
           }
 
-          const airflowUnit = ((AIRFLOW_UNITS as any)[item.airflow_unit ?? 'CMH'] ? item.airflow_unit : 'CMH') as
+          const airflowUnit = ((AIRFLOW_UNITS as any)[item.airflow_unit ?? 'CFM'] ? item.airflow_unit : 'CFM') as
             keyof typeof AIRFLOW_UNITS;
           const pressureUnit = ((PRESSURE_UNITS as any)[item.pressure_unit ?? 'Pa'] ? item.pressure_unit : 'Pa') as
             keyof typeof PRESSURE_UNITS;
