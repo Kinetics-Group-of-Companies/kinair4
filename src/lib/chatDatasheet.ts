@@ -130,7 +130,7 @@ export async function generateDatasheetForSelection(
   return generateEnhancedDatasheet({
     selection,
     database,
-    airflowUnit: (units?.airflowUnit || 'CMH') as any,
+    airflowUnit: (units?.airflowUnit || 'CFM') as any,
     pressureUnit: (units?.pressureUnit || 'Pa') as any,
     performanceData,
     fanRPM,
