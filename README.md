@@ -7,7 +7,7 @@ Engineering selection software for KINAIR fans and air curtains.
 - Frontend: React + Vite
 - Hosting and deployments: Vercel
 - Source control: GitHub
-- Database, authentication, storage and Edge Functions: Supabase
+- Database, email-verified authentication, storage and Edge Functions: Supabase
 - AI providers: Google Gemini, OpenAI and Anthropic
 - Transactional email: Resend, with AgentMail fallback where configured
 
