@@ -8,6 +8,8 @@ interface GuestTrialContextValue {
   isGuest: boolean;
   trialActive: boolean;
   trialLoading: boolean;
+  dailyLimitApplies: boolean;
+  dailyLimitExpired: boolean;
   secondsRemaining: number;
   expiresAt: string | null;
   trialMinutes: number;
@@ -20,10 +22,7 @@ const EXPIRED_FLAG = 'kinair_guest_trial_expired';
 
 export function currentGuestTrialDay(date = new Date()): string {
   const parts = new Intl.DateTimeFormat('en-US', {
-    timeZone: 'Asia/Dubai',
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
+    timeZone: 'Asia/Dubai', year: 'numeric', month: '2-digit', day: '2-digit',
   }).formatToParts(date);
   const value = (type: Intl.DateTimeFormatPartTypes) =>
     parts.find((part) => part.type === type)?.value ?? '';
@@ -35,24 +34,28 @@ export function wasGuestTrialUsedToday(): boolean {
 }
 
 async function functionErrorMessage(error: unknown): Promise<string> {
-  const fallback = error instanceof Error ? error.message : 'Unable to start guest trial';
-  const context = (error as { context?: Response } | null)?.context;
-  if (!context) return fallback;
+  const fallback = error instanceof Error ? error.message : 'Unable to start trial';
+  const response = (error as { context?: Response } | null)?.context;
+  if (!response) return fallback;
   try {
-    const payload = await context.clone().json();
+    const payload = await response.clone().json();
     return typeof payload?.error === 'string' ? payload.error : fallback;
-  } catch {
-    return fallback;
-  }
+  } catch { return fallback; }
 }
 
 export function GuestTrialProvider({ children }: { children: ReactNode }) {
-  const { user } = useAuth();
+  const { user, isApproved, isSuperAdmin, isAccountTrialActive, subscriptionEnd } = useAuth();
   const isGuest = Boolean(user?.is_anonymous);
+  const registeredDailyTrial = Boolean(
+    user && !user.is_anonymous && !isApproved && !isSuperAdmin
+    && isAccountTrialActive && subscriptionEnd && subscriptionEnd.getTime() > Date.now()
+  );
+  const dailyLimitApplies = isGuest || registeredDailyTrial;
   const [expiresAt, setExpiresAt] = useState<string | null>(null);
   const [secondsRemaining, setSecondsRemaining] = useState(0);
   const [trialLoading, setTrialLoading] = useState(false);
   const [trialMinutes, setTrialMinutes] = useState(5);
+  const [checkedDay, setCheckedDay] = useState('');
   const endingRef = useRef(false);
   const startingRef = useRef(false);
 
@@ -63,38 +66,34 @@ export function GuestTrialProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     let cancelled = false;
-    void supabase
-      .from('guest_trial_settings')
-      .select('duration_minutes')
-      .eq('id', true)
-      .single()
+    void supabase.from('guest_trial_settings').select('duration_minutes').eq('id', true).single()
       .then(({ data }) => {
         if (!cancelled && data?.duration_minutes) setTrialMinutes(data.duration_minutes);
       });
-    return () => {
-      cancelled = true;
-    };
+    return () => { cancelled = true; };
   }, []);
 
   const finishExpiredTrial = useCallback(async () => {
     if (endingRef.current) return;
     endingRef.current = true;
-    sessionStorage.setItem(EXPIRED_FLAG, currentGuestTrialDay());
     clearTrial();
-    await supabase.auth.signOut({ scope: 'local' }).catch(() => undefined);
+    if (user?.is_anonymous) {
+      sessionStorage.setItem(EXPIRED_FLAG, currentGuestTrialDay());
+      await supabase.auth.signOut({ scope: 'local' }).catch(() => undefined);
+    }
     endingRef.current = false;
-  }, [clearTrial]);
+  }, [clearTrial, user?.is_anonymous]);
 
   const refreshStatus = useCallback(async () => {
-    if (startingRef.current) return;
-    if (!user?.is_anonymous) {
-      clearTrial();
+    if (startingRef.current || !dailyLimitApplies) {
+      if (!dailyLimitApplies) clearTrial();
       return;
     }
     setTrialLoading(true);
+    setCheckedDay(currentGuestTrialDay());
     try {
       const { data, error } = await supabase.functions.invoke('guest-trial', {
-        body: { action: 'status' },
+        body: { action: isGuest ? 'status' : 'start' },
       });
       if (error) throw error;
       if (data?.active && data?.expires_at) {
@@ -109,18 +108,15 @@ export function GuestTrialProvider({ children }: { children: ReactNode }) {
     } finally {
       setTrialLoading(false);
     }
-  }, [clearTrial, finishExpiredTrial, user?.id, user?.is_anonymous]);
+  }, [clearTrial, dailyLimitApplies, finishExpiredTrial, isGuest]);
 
   useEffect(() => {
-    if (!isGuest) {
-      clearTrial();
-      return;
-    }
+    if (!dailyLimitApplies) { clearTrial(); return; }
     void refreshStatus();
-  }, [clearTrial, isGuest, refreshStatus]);
+  }, [clearTrial, dailyLimitApplies, refreshStatus, user?.id]);
 
   useEffect(() => {
-    if (!expiresAt || !isGuest) return;
+    if (!expiresAt || !dailyLimitApplies) return;
     const tick = () => {
       const remaining = Math.max(0, Math.ceil((Date.parse(expiresAt) - Date.now()) / 1000));
       setSecondsRemaining(remaining);
@@ -129,7 +125,15 @@ export function GuestTrialProvider({ children }: { children: ReactNode }) {
     tick();
     const timer = window.setInterval(tick, 1000);
     return () => window.clearInterval(timer);
-  }, [expiresAt, finishExpiredTrial, isGuest]);
+  }, [dailyLimitApplies, expiresAt, finishExpiredTrial]);
+
+  useEffect(() => {
+    if (!dailyLimitApplies || secondsRemaining > 0) return;
+    const timer = window.setInterval(() => {
+      if (checkedDay && checkedDay !== currentGuestTrialDay()) void refreshStatus();
+    }, 30000);
+    return () => window.clearInterval(timer);
+  }, [checkedDay, dailyLimitApplies, refreshStatus, secondsRemaining]);
 
   const startTrial = useCallback(async (): Promise<StartResult> => {
     startingRef.current = true;
@@ -144,17 +148,14 @@ export function GuestTrialProvider({ children }: { children: ReactNode }) {
         }
         activeUser = signInData.user;
       }
-
-      const { data, error } = await supabase.functions.invoke('guest-trial', {
-        body: { action: 'start' },
-      });
+      const { data, error } = await supabase.functions.invoke('guest-trial', { body: { action: 'start' } });
       if (error) return { ok: false, reason: await functionErrorMessage(error) };
       if (!data?.active || !data?.expires_at) {
         return { ok: false, reason: data?.error || 'Guest access is unavailable. Please sign up.' };
       }
-
       sessionStorage.removeItem(EXPIRED_FLAG);
       setExpiresAt(data.expires_at);
+      setCheckedDay(currentGuestTrialDay());
       if (data.duration_minutes) setTrialMinutes(Number(data.duration_minutes));
       setSecondsRemaining(Math.max(0, Number(data.seconds_remaining) || trialMinutes * 60));
       return { ok: true };
@@ -173,14 +174,16 @@ export function GuestTrialProvider({ children }: { children: ReactNode }) {
 
   const value = useMemo<GuestTrialContextValue>(() => ({
     isGuest,
-    trialActive: isGuest && secondsRemaining > 0,
+    trialActive: dailyLimitApplies && secondsRemaining > 0,
     trialLoading,
+    dailyLimitApplies,
+    dailyLimitExpired: dailyLimitApplies && !trialLoading && secondsRemaining === 0,
     secondsRemaining,
     expiresAt,
     trialMinutes,
     startTrial,
     endTrialForSignup,
-  }), [endTrialForSignup, expiresAt, isGuest, secondsRemaining, startTrial, trialLoading, trialMinutes]);
+  }), [dailyLimitApplies, endTrialForSignup, expiresAt, isGuest, secondsRemaining, startTrial, trialLoading, trialMinutes]);
 
   return <GuestTrialContext.Provider value={value}>{children}</GuestTrialContext.Provider>;
 }
