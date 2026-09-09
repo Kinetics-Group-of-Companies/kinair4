@@ -389,6 +389,7 @@ type DutyRequest = {
   air_density_kg_m3?: number | null;
   altitude_m?: number | null;
   fan_size_mm?: number | null;
+  fan_size_unit?: 'mm' | 'in' | null;
   max_fan_size_mm?: number | null;
   application?: string | null;
   output?: DocOutput;
@@ -585,6 +586,11 @@ function parseDirectFanDuty(userText: string): DutyRequest | null {
     fan_type: fanType,
     ...parseManualFanParameters(userText),
     fan_size_mm: exactFanSizeMm,
+    fan_size_unit: exactSizeMatch
+      ? (exactSizeMatch[2].toLowerCase() === 'mm' ? 'mm' : 'in')
+      : maxSizeMatch
+        ? (maxSizeMatch[2].toLowerCase() === 'mm' ? 'mm' : 'in')
+        : null,
     max_fan_size_mm: maxFanSizeMm,
     application,
     output,
@@ -594,6 +600,7 @@ function parseDirectFanDuty(userText: string): DutyRequest | null {
 
 type SizeOnlyFanRequest = {
   fanSizeMm: number;
+  fanSizeUnit: 'mm' | 'in';
   seriesName: string;
   material: 'plastic' | 'metal';
   fanType: 'inline_ducted' | 'wall_mounted';
@@ -642,6 +649,7 @@ function parseSizeOnlyFanRequest(userText: string): SizeOnlyFanRequest | null {
 
   return {
     fanSizeMm,
+    fanSizeUnit: sizeMatch[2].toLowerCase() === 'mm' ? 'mm' : 'in',
     seriesName,
     material,
     fanType,
@@ -686,8 +694,8 @@ function buildSizeOnlyFanDuty(database: any, request: SizeOnlyFanRequest | null)
 
   const motorPole = chosen.fan.referencePoles ?? chosen.fan.motorPoles?.[0] ?? null;
   return {
-    airflow: chosen.point.airflow,
-    airflow_unit: 'CMH',
+    airflow: chosen.point.airflow * AIRFLOW_UNITS.CFM.factor,
+    airflow_unit: 'CFM',
     static_pressure: chosen.point.staticPressure,
     pressure_unit: 'Pa',
     series_name: seriesName,
@@ -695,6 +703,7 @@ function buildSizeOnlyFanDuty(database: any, request: SizeOnlyFanRequest | null)
     fan_type: request.fanType,
     motor_poles: motorPole,
     fan_size_mm: request.fanSizeMm,
+    fan_size_unit: request.fanSizeUnit,
     tolerance_min: 0,
     tolerance_max: 1000,
     output: request.output,
@@ -793,9 +802,9 @@ function formatUnitValue(value: number, maximumFractionDigits = 1): string {
 
 function formatFanAirflow(
   airflowCmh: number,
-  unit: keyof typeof AIRFLOW_UNITS = 'CMH',
+  unit: keyof typeof AIRFLOW_UNITS = 'CFM',
 ): string {
-  const selectedUnit = AIRFLOW_UNITS[unit] ? unit : 'CMH';
+  const selectedUnit = AIRFLOW_UNITS[unit] ? unit : 'CFM';
   const value = airflowCmh * AIRFLOW_UNITS[selectedUnit].factor;
   const decimals = selectedUnit === 'CMS' ? 3 : 1;
   return `${formatUnitValue(value, decimals)} ${selectedUnit}`;
@@ -823,12 +832,12 @@ function formatAirCurtainLength(lengthMm: number, unit: AcLengthUnit): string {
 function airCurtainDisplayUnit(
   unit?: string | null,
 ): 'cmh' | 'cfm' | 'ls' {
-  return unit === 'CFM' ? 'cfm' : unit === 'LPS' ? 'ls' : 'cmh';
+  return unit === 'LPS' ? 'ls' : unit === 'CMH' ? 'cmh' : 'cfm';
 }
 
 function formatAirCurtainAirflow(
   airflowCmh: number,
-  unit: 'cmh' | 'cfm' | 'ls' = 'cmh',
+  unit: 'cmh' | 'cfm' | 'ls' = 'cfm',
 ): string {
   const factor = unit === 'cfm' ? AIRFLOW_UNITS.CFM.factor : unit === 'ls' ? AIRFLOW_UNITS.LPS.factor : 1;
   const label = unit === 'cfm' ? 'CFM' : unit === 'ls' ? 'LPS' : 'CMH';
@@ -1059,6 +1068,7 @@ type ScheduleItem = {
   material?: string | null;
   fan_type?: FanInstallType | null;
   fan_size_mm?: number | null;
+  fan_size_unit?: 'mm' | 'in' | null;
   max_fan_size_mm?: number | null;
   application?: string | null;
 
@@ -1100,7 +1110,7 @@ type ScheduleItem = {
 };
 
 type ScheduleSelection =
-  | { kind: 'fan'; selection: FanSelection; airflowUnit?: string; pressureUnit?: string }
+  | { kind: 'fan'; selection: FanSelection; airflowUnit?: string; pressureUnit?: string; fanSizeUnit?: 'mm' | 'in' }
   | {
       kind: 'air_curtain';
       selection: AirCurtainSelection;
@@ -1813,7 +1823,12 @@ export function AssistantChat({
   const fanDownloadedRef = useRef<Set<string>>(new Set());
 
   const downloadDatasheet = useCallback(
-    async (key: string, selection: FanSelection, output: DocOutput = 'full') => {
+    async (
+      key: string,
+      selection: FanSelection,
+      output: DocOutput = 'full',
+      dutyOverride?: DutyRequest,
+    ) => {
       setDownloadingKey(key);
       try {
         if (output === 'drawing') {
@@ -1823,11 +1838,15 @@ export function AssistantChat({
           await downloadFanNoiseData(selection, database);
           toast.success(`${selection.nomenclature} sound data downloaded`);
         } else {
-          const duty = autoSelections[key]?.duty;
+          const duty = dutyOverride ?? autoSelections[key]?.duty;
           await generateDatasheetForSelection(
             selection,
             database,
-            { airflowUnit: duty?.airflow_unit, pressureUnit: duty?.pressure_unit },
+            {
+              airflowUnit: duty?.airflow_unit,
+              pressureUnit: duty?.pressure_unit,
+              fanSizeUnit: duty?.fan_size_unit ?? 'mm',
+            },
             dimensionsMap as any,
           );
           toast.success(`${selection.nomenclature} datasheet downloaded`);
@@ -1917,7 +1936,7 @@ export function AssistantChat({
           {
             requiredAirflow: duty.airflow,
             requiredPressure: duty.static_pressure,
-            airflowUnit: (AIRFLOW_UNITS as any)[duty.airflow_unit] ? duty.airflow_unit : 'CMH',
+            airflowUnit: (AIRFLOW_UNITS as any)[duty.airflow_unit] ? duty.airflow_unit : 'CFM',
             pressureUnit: (PRESSURE_UNITS as any)[duty.pressure_unit] ? duty.pressure_unit : 'Pa',
             seriesId: (series as any)?.id,
             motorPole: duty.motor_poles ?? undefined,
@@ -1954,7 +1973,7 @@ export function AssistantChat({
         if (ranked.length > 0) {
           if (!busy && !fanDownloadedRef.current.has(key)) {
             fanDownloadedRef.current.add(key);
-            void downloadDatasheet(key, ranked[0], duty.output ?? 'full');
+            void downloadDatasheet(key, ranked[0], duty.output ?? 'full', duty);
           }
         } else {
           const seriesLabel = (series as any)?.name ? ` in ${(series as any).name}` : '';
@@ -2122,7 +2141,7 @@ export function AssistantChat({
           ? acBrands.find((b) => b.name.toLowerCase() === brandName.toLowerCase())?.name
           : undefined;
 
-        const airflowFactor = AC_AIRFLOW_TO_CMH[duty.min_airflow_unit ?? 'CMH'] ?? 1;
+        const airflowFactor = AC_AIRFLOW_TO_CMH[duty.min_airflow_unit ?? 'CFM'] ?? AIRFLOW_UNITS.CFM.factor;
         const minAirflowCmh = duty.min_airflow ? duty.min_airflow * airflowFactor : 0;
         const minFloorVelocity = duty.min_floor_velocity ?? 2;
         const selectionBasis =
@@ -2176,7 +2195,9 @@ export function AssistantChat({
               ? 'cfm'
               : duty.min_airflow_unit === 'LPS'
                 ? 'ls'
-                : 'cmh',
+                : duty.min_airflow_unit === 'CMH'
+                  ? 'cmh'
+                  : 'cfm',
           widthUnit: duty.door_width_unit ?? 'mm',
           heightUnit: duty.door_height_unit ?? 'm',
           results: ranked,
@@ -2269,7 +2290,7 @@ export function AssistantChat({
                 ? seriesMatch
                 : undefined;
 
-            const airflowFactor = AC_AIRFLOW_TO_CMH[item.min_airflow_unit ?? 'CMH'] ?? 1;
+            const airflowFactor = AC_AIRFLOW_TO_CMH[item.min_airflow_unit ?? 'CFM'] ?? AIRFLOW_UNITS.CFM.factor;
             const minAirflowCmh = item.min_airflow ? item.min_airflow * airflowFactor : 0;
             const airflowUnit = airCurtainDisplayUnit(item.min_airflow_unit);
             const minFloorVelocity = item.min_floor_velocity ?? 2;
@@ -2334,7 +2355,7 @@ export function AssistantChat({
             };
           }
 
-          const airflowUnit = ((AIRFLOW_UNITS as any)[item.airflow_unit ?? 'CMH'] ? item.airflow_unit : 'CMH') as
+          const airflowUnit = ((AIRFLOW_UNITS as any)[item.airflow_unit ?? 'CFM'] ? item.airflow_unit : 'CFM') as
             keyof typeof AIRFLOW_UNITS;
           const pressureUnit = ((PRESSURE_UNITS as any)[item.pressure_unit ?? 'Pa'] ? item.pressure_unit : 'Pa') as
             keyof typeof PRESSURE_UNITS;
@@ -2393,7 +2414,13 @@ export function AssistantChat({
             )} · ${best.operatingPoint.shaftPower.toFixed(3)} kW${
               best.noiseData?.overall ? ` · ${Math.round(best.noiseData.overall)} dB(A)` : ''
             }`,
-            selection: { kind: 'fan', selection: best, airflowUnit, pressureUnit },
+            selection: {
+              kind: 'fan',
+              selection: best,
+              airflowUnit,
+              pressureUnit,
+              fanSizeUnit: item.fan_size_unit ?? 'mm',
+            },
           };
         });
 
@@ -2414,6 +2441,7 @@ export function AssistantChat({
           await generateDatasheetForSelection(row.selection.selection, database, {
             airflowUnit: row.selection.airflowUnit,
             pressureUnit: row.selection.pressureUnit,
+            fanSizeUnit: row.selection.fanSizeUnit ?? 'mm',
           });
         } else {
           await generateAirCurtainDatasheetForSelection(

@@ -26,6 +26,7 @@ export interface DatasheetOptions {
   database: FanDatabase;
   airflowUnit: keyof typeof AIRFLOW_UNITS;
   pressureUnit: keyof typeof PRESSURE_UNITS;
+  fanSizeUnit?: 'mm' | 'in';
   performanceData: FanPerformancePoint[];
   fanRPM: number;
   outletVelocity: number;
@@ -1692,7 +1693,12 @@ export async function generateEnhancedDatasheet(options: DatasheetOptions): Prom
     const showBladeCount = (config as any)?.show_blade_count !== false;
     const showBladeAngle = (config as any)?.show_blade_angle !== false;
     const constructionItems: [string, string][] = [
-      [constructionLabels.diameter || 'Diameter', `${selection.diameter} mm`],
+      [
+        constructionLabels.diameter || 'Diameter',
+        options.fanSizeUnit === 'in'
+          ? `${Number((selection.diameter / 25.4).toFixed(2))} in`
+          : `${selection.diameter} mm`,
+      ],
     ];
     if (showBladeCount) {
       constructionItems.push([constructionLabels.blades || 'Blade Count', `${selection.bladeCount}`]);
