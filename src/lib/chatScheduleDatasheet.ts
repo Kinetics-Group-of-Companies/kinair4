@@ -31,8 +31,8 @@ export interface ChatScheduleAirCurtainRow {
   minFloorVelocity: number;
   noiseMode?: 'dba' | 'octave';
   airflowUnit?: 'cmh' | 'cfm' | 'ls';
-  widthUnit?: 'mm' | 'cm' | 'm' | 'in';
-  heightUnit?: 'mm' | 'cm' | 'm' | 'in';
+  widthUnit?: 'mm' | 'cm' | 'm' | 'in' | 'ft';
+  heightUnit?: 'mm' | 'cm' | 'm' | 'in' | 'ft';
 }
 
 export interface ChatScheduleAirCurtainContext {
@@ -193,8 +193,8 @@ export async function downloadCombinedScheduleDatasheet({
     const airflowUnitLabel = airflowUnit === 'cfm' ? 'CFM' : airflowUnit === 'ls' ? 'LPS' : 'CMH';
     const widthUnit = row.widthUnit ?? 'mm';
     const heightUnit = row.heightUnit ?? 'm';
-    const lengthFactors = { mm: 1, cm: 10, m: 1000, in: 25.4 } as const;
-    const lengthLabels = { mm: 'mm', cm: 'cm', m: 'm', in: 'inch' } as const;
+    const lengthFactors = { mm: 1, cm: 10, m: 1000, in: 25.4, ft: 304.8 } as const;
+    const lengthLabels = { mm: 'mm', cm: 'cm', m: 'm', in: 'in', ft: 'ft' } as const;
     await generateAirCurtainDatasheet({
       selection,
       doorWidthMm: row.doorWidthMm,
