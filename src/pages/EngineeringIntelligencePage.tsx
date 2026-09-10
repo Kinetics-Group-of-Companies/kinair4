@@ -249,6 +249,18 @@ export default function EngineeringIntelligencePage() {
       : [...current, id]);
   };
 
+  const jetGradients = curtainResult.pass
+    ? [
+        'linear-gradient(to bottom, rgba(34,211,238,.78), rgba(103,232,249,.42), rgba(207,250,254,.16))',
+        'linear-gradient(to bottom, rgba(59,130,246,.72), rgba(96,165,250,.38), rgba(219,234,254,.14))',
+        'linear-gradient(to bottom, rgba(139,92,246,.66), rgba(167,139,250,.34), rgba(237,233,254,.13))',
+        'linear-gradient(to bottom, rgba(16,185,129,.66), rgba(52,211,153,.34), rgba(209,250,229,.13))',
+      ]
+    : [
+        'linear-gradient(to bottom, rgba(251,191,36,.76), rgba(252,211,77,.38), rgba(254,243,199,.12))',
+        'linear-gradient(to bottom, rgba(249,115,22,.66), rgba(251,146,60,.34), rgba(255,237,213,.12))',
+      ];
+
   return (
     <MainLayout>
       <style>{`
@@ -256,7 +268,7 @@ export default function EngineeringIntelligencePage() {
           0% { transform: translate3d(0, -18px, 0); opacity: 0; }
           12% { opacity: .9; }
           82% { opacity: .55; }
-          100% { transform: translate3d(var(--wind-shift, 0px), 205px, 0); opacity: 0; }
+          100% { transform: translate3d(0, 205px, 0); opacity: 0; }
         }
         @keyframes kinairFlowRight {
           0% { transform: translateX(-7px); opacity: .25; }
@@ -391,24 +403,42 @@ export default function EngineeringIntelligencePage() {
                     )}
                     <div className={`absolute bottom-6 left-[10%] right-[10%] overflow-hidden rounded-b-lg border-x-4 border-slate-500 bg-white/55 ${mountingType === 'recessed' ? 'top-[72px]' : 'top-[68px]'}`}>
                       <div
-                        className={`relative mx-auto h-full origin-top overflow-hidden bg-gradient-to-b ${curtainResult.pass ? 'from-cyan-400/75 via-cyan-300/35 to-cyan-100/5' : 'from-amber-400/70 via-amber-300/30 to-transparent'}`}
-                        style={{
-                          width: `${Math.min(100, curtainResult.coverage)}%`,
-                          clipPath: `polygon(${8 + Math.min(16, windSpeed * 2)}% 0, 92% 0, ${70 + Math.min(15, windSpeed * 2)}% 100%, ${30 + Math.min(15, windSpeed * 2)}% 100%)`,
-                        }}
+                        className="relative mx-auto flex h-full overflow-hidden"
+                        style={{ width: `${Math.min(100, curtainResult.coverage)}%` }}
                       >
-                        {Array.from({ length: 14 }, (_, index) => (
-                          <span
-                            key={index}
-                            className="kinair-jet-particle absolute top-0 h-7 w-1 rounded-full bg-white/80 shadow-[0_0_8px_rgba(255,255,255,0.9)]"
+                        {curtainResult.combination.map((unitWidth, unitIndex) => (
+                          <div
+                            key={`airflow-${unitWidth}-${unitIndex}`}
+                            className="relative h-full overflow-visible border-r border-white/40 last:border-r-0"
                             style={{
-                              left: `${12 + (index * 76) / 13}%`,
-                              animation: `kinairJetFall ${1.15 + (index % 4) * 0.16}s linear infinite`,
-                              animationDelay: `${-(index % 7) * 0.2}s`,
-                              '--wind-shift': `${Math.min(55, windSpeed * 8)}px`,
-                            } as React.CSSProperties}
-                          />
+                              flexGrow: unitWidth,
+                              flexBasis: 0,
+                              background: jetGradients[unitIndex % jetGradients.length],
+                            }}
+                          >
+                            {Array.from({ length: 5 }, (_, particleIndex) => (
+                              <span
+                                key={particleIndex}
+                                className="kinair-jet-particle absolute top-0 h-7 w-1 rounded-full bg-white/85 shadow-[0_0_8px_rgba(255,255,255,0.9)]"
+                                style={{
+                                  left: `${14 + particleIndex * 18}%`,
+                                  animation: `kinairJetFall ${1.15 + ((unitIndex + particleIndex) % 4) * 0.16}s linear infinite`,
+                                  animationDelay: `${-((unitIndex * 2 + particleIndex) % 7) * 0.2}s`,
+                                }}
+                              />
+                            ))}
+                            {unitIndex < curtainResult.combination.length - 1 && (
+                              <span className="absolute -right-2 top-0 z-10 h-full w-4 bg-gradient-to-r from-transparent via-white/45 to-transparent blur-[3px]" />
+                            )}
+                          </div>
                         ))}
+                        {curtainResult.combination.length > 1 && (
+                          <div className="pointer-events-none absolute inset-x-0 bottom-0 h-1/3 bg-gradient-to-b from-transparent to-cyan-100/25">
+                            <span className="absolute bottom-2 left-1/2 -translate-x-1/2 rounded-full bg-white/75 px-2 py-0.5 text-[9px] font-medium text-slate-600 shadow-sm">
+                              Combined air barrier
+                            </span>
+                          </div>
+                        )}
                       </div>
                     </div>
                     <div className="absolute bottom-1 left-0 right-0 text-center text-xs text-slate-600">
