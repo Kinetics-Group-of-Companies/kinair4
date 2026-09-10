@@ -159,6 +159,7 @@ export default function EngineeringIntelligencePage() {
         <div className="mb-6 rounded-lg border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">
           Results are engineering estimates for comparison. Use measured site data and approved KINAIR product performance for investment decisions.
         </div>
+        <div className="grid gap-6 lg:grid-cols-[1fr_1.25fr]">
           <Card>
             <CardHeader>
               <CardTitle>Lifecycle inputs</CardTitle>
