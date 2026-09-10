@@ -171,7 +171,7 @@ export async function generateAirCurtainDatasheet(input: AirCurtainDatasheetInpu
     }
   };
 
-  const TOTAL_PAGES = 3;
+  const TOTAL_PAGES = 4;
   const drawFooter = (page: number) => {
     const footerY = pageH - 7;
     doc.setDrawColor(...COLORS.border);
@@ -700,6 +700,160 @@ doc.setDrawColor(242, 163, 60);
     { maxWidth: pageW - margin * 2 },
   );
   drawFooter(3);
+
+  // ===================== PAGE 4 — ACTUAL-MODEL DOOR DIGITAL TWIN =====================
+  doc.addPage();
+  drawHeader();
+  y = 32;
+
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(11);
+  doc.setTextColor(...COLORS.text);
+  doc.text('Actual-model Door Digital Twin', margin, y);
+  y += 6;
+
+  doc.setFont('helvetica', 'normal');
+  doc.setFontSize(7.5);
+  doc.setTextColor(...COLORS.textLight);
+  doc.text(
+    `${seriesInfo?.name ?? selection.model.brand} | ${CATEGORY_LABELS[selection.model.category]} | ${selection.arrangement}`,
+    margin,
+    y,
+  );
+  y += 6;
+
+  const expandedUnits = selection.units.flatMap((unit) =>
+    Array.from({ length: unit.qty }, () => unit.model),
+  );
+
+  if (seriesPhoto) {
+    const size = fit(seriesPhoto, 48, 32);
+    doc.addImage(seriesPhoto.base64, fmt(seriesPhoto.base64), pageW - margin - size.w, 31, size.w, size.h, undefined, 'NONE');
+  }
+
+  const doorX = 24;
+  const doorY = 72;
+  const doorW = pageW - 48;
+  const doorH = 132;
+  const installedW = doorW * Math.min(1, selection.totalLengthMm / Math.max(doorWidthMm, 1));
+  const unitStartX = doorX + (doorW - installedW) / 2;
+  const unitY = doorY - 12;
+  const unitH = selection.model.category === 'recessed' ? 3.5 : 12;
+
+  // Door frame
+  doc.setFillColor(246, 249, 252);
+  doc.rect(doorX, doorY, doorW, doorH, 'F');
+  doc.setDrawColor(80, 95, 115);
+  doc.setLineWidth(1.2);
+  doc.line(doorX, doorY, doorX, doorY + doorH);
+  doc.line(doorX + doorW, doorY, doorX + doorW, doorY + doorH);
+
+  if (selection.model.category === 'recessed') {
+    doc.setFillColor(255, 255, 255);
+    doc.rect(doorX - 5, unitY - 8, doorW + 10, 8, 'F');
+    doc.setDrawColor(185, 190, 198);
+    doc.line(doorX - 5, unitY, doorX + doorW + 5, unitY);
+    doc.setFontSize(6);
+    doc.setTextColor(...COLORS.textLight);
+    doc.text('CEILING - UNITS CONCEALED ABOVE / DISCHARGE GRILLES FLUSH', pageW / 2, unitY - 2.5, { align: 'center' });
+  }
+
+  const jetColours: [number, number, number][] = [
+    [52, 211, 235],
+    [80, 145, 235],
+    [145, 105, 225],
+    [45, 185, 145],
+  ];
+
+  let unitX = unitStartX;
+  expandedUnits.forEach((model, index) => {
+    const uw = installedW * model.lengthMm / Math.max(selection.totalLengthMm, 1);
+    const colour = jetColours[index % jetColours.length];
+
+    if (selection.model.category === 'recessed') {
+      doc.setFillColor(225, 229, 234);
+      doc.rect(unitX, unitY, uw, unitH, 'F');
+      doc.setDrawColor(80, 88, 98);
+      doc.setLineWidth(0.35);
+      doc.rect(unitX, unitY, uw, unitH);
+      doc.line(unitX + 1, unitY + unitH / 2, unitX + uw - 1, unitY + unitH / 2);
+    } else {
+      doc.setFillColor(255, 255, 255);
+      doc.roundedRect(unitX, unitY, uw, unitH, 1.5, 1.5, 'F');
+      doc.setDrawColor(190, 196, 204);
+      doc.setLineWidth(0.35);
+      doc.rect(unitX, unitY, uw, unitH);
+      doc.setFillColor(232, 236, 240);
+      doc.roundedRect(unitX + 2, unitY + 2, Math.max(2, uw - 4), 2, 0.5, 0.5, 'F');
+    }
+
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(Math.min(6.5, Math.max(4.2, uw / 6)));
+    doc.setTextColor(...COLORS.text);
+    doc.text(model.model, unitX + uw / 2, unitY + unitH + 4, { align: 'center', maxWidth: Math.max(8, uw - 1) });
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(5.5);
+    doc.text(`${model.lengthMm} mm`, unitX + uw / 2, unitY + unitH + 7, { align: 'center' });
+
+    // Straight, proportional airflow column with a light fade toward the floor.
+    const jetTop = doorY;
+    const jetHeight = doorH - 3;
+    const bands = 24;
+    for (let band = 0; band < bands; band += 1) {
+      const t = band / bands;
+      const blend = 0.28 + t * 0.62;
+      const r = Math.round(colour[0] + (255 - colour[0]) * blend);
+      const g = Math.round(colour[1] + (255 - colour[1]) * blend);
+      const b = Math.round(colour[2] + (255 - colour[2]) * blend);
+      doc.setFillColor(r, g, b);
+      doc.rect(unitX, jetTop + jetHeight * t, uw, jetHeight / bands + 0.2, 'F');
+    }
+
+    if (index < expandedUnits.length - 1) {
+      doc.setFillColor(235, 245, 250);
+      doc.rect(unitX + uw - 0.8, doorY, 1.6, doorH - 3, 'F');
+    }
+
+    unitX += uw;
+  });
+
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(7);
+  doc.setTextColor(...COLORS.text);
+  doc.text(
+    `Door ${lenMm(doorWidthMm)} W x ${lenM(doorHeightM)} H | Actual models shown proportionally`,
+    pageW / 2,
+    doorY + doorH + 7,
+    { align: 'center' },
+  );
+
+  autoTable(doc, {
+    startY: doorY + doorH + 12,
+    theme: 'grid',
+    headStyles: { fillColor: COLORS.head, fontSize: 7.5, textColor: [255, 255, 255], fontStyle: 'bold' },
+    styles: { fontSize: 7.5, cellPadding: 1.5, lineColor: COLORS.border, textColor: COLORS.text },
+    head: [['Actual arrangement', 'Installed', 'Coverage', 'Outlet velocity', 'Floor velocity', 'Height']],
+    body: [[
+      selection.arrangement,
+      lenMm(selection.totalLengthMm),
+      `${Math.round(selection.coverage * 100)}%`,
+      `${selection.outletVelocity.toFixed(1)} m/s`,
+      `${selection.floorVelocity.toFixed(2)} m/s`,
+      selection.heightSuitable ? 'Suitable' : 'Check',
+    ]],
+    margin: { left: margin, right: margin },
+  });
+
+  doc.setFont('helvetica', 'italic');
+  doc.setFontSize(5.5);
+  doc.setTextColor(...COLORS.textLight);
+  doc.text(
+    'Diagram uses the selected catalogue model names, quantities and unit lengths. Confirm final installation clearances against the approved technical drawing.',
+    margin,
+    pageH - 14,
+    { maxWidth: pageW - margin * 2 },
+  );
+  drawFooter(4);
 
   return doc;
 }
