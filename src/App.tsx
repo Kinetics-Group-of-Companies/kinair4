@@ -102,8 +102,8 @@ const App = () => {
                   <CalculatorPage /></>} />
                 <Route path="/engineering-intelligence" element={<>
                   <Seo path="/engineering-intelligence"
-                    title="Engineering Intelligence | KINAIR"
-                    description="Advanced air curtain door analysis, fan installation risk prediction, and energy, carbon and payback calculations." />
+                    title="Energy & Payback Calculator | KINAIR"
+                    description="Compare fan and air curtain energy use, annual operating cost, carbon savings and simple project payback." />
                   <EngineeringIntelligencePage /></>} />
                 <Route path="/documentation" element={<>
                   <Seo path="/documentation"
