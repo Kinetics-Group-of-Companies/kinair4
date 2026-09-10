@@ -921,10 +921,6 @@ doc.setDrawColor(242, 163, 60);
       doc.line(streamX, streamBottom, streamX + 1, streamBottom - 1.8);
     }
 
-    if (index < expandedUnits.length - 1) {
-      doc.setFillColor(236, 246, 251);
-      doc.rect(unitX + uw - 0.45, doorY, 0.9, doorH, 'F');
-    }
     unitX += uw;
   });
 

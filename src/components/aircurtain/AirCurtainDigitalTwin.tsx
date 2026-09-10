@@ -153,7 +153,7 @@ export function AirCurtainDigitalTwin({
               {installedUnits.map(({ model, index }, unitIndex) => (
                 <div
                   key={`${model.id}-jet-${index}`}
-                  className="relative h-full overflow-visible border-r border-white/40 last:border-0"
+                  className="relative h-full overflow-visible"
                   style={{
                     flexGrow: model.lengthMm,
                     flexBasis: 0,
@@ -169,9 +169,6 @@ export function AirCurtainDigitalTwin({
                       <span className="absolute -bottom-0.5 -left-[3px] h-2 w-2 rotate-45 border-b-2 border-r-2 border-white/90" />
                     </span>
                   ))}
-                  {unitIndex < installedUnits.length - 1 && (
-                    <span className="absolute -right-px top-0 h-full w-[2px] bg-white/70" />
-                  )}
                 </div>
               ))}
               {installedUnits.length > 1 && (
