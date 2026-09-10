@@ -29,6 +29,8 @@ export interface DatasheetOptions {
   fanSizeUnit?: 'mm' | 'in';
   performanceData: FanPerformancePoint[];
   fanRPM: number;
+  multiFanQuantity?: number;
+  multiFanArrangement?: 'parallel' | 'series';
   outletVelocity: number;
   dynamicPressure: number;
   totalPressure: number;
@@ -1203,7 +1205,9 @@ export async function generateEnhancedDatasheet(options: DatasheetOptions): Prom
     airflowUnit, 
     pressureUnit, 
     performanceData, 
-    fanRPM, 
+    fanRPM,
+    multiFanQuantity = 1,
+    multiFanArrangement = 'parallel',
     outletVelocity, 
     dynamicPressure, 
     totalPressure, 
@@ -1247,6 +1251,7 @@ export async function generateEnhancedDatasheet(options: DatasheetOptions): Prom
     skipSave = false,
     pageLabel,
   } = options;
+  const totalDatasheetPages = multiFanQuantity > 1 ? 4 : 3;
   
   // Fetch datasheet config from database if not provided
   // CRITICAL: Use seriesId (UUID) not series (name) for database lookup
@@ -2349,7 +2354,7 @@ export async function generateEnhancedDatasheet(options: DatasheetOptions): Prom
   // Date-based revision format: Rev YYYY-MM-DD
   const revisionDate = new Date().toISOString().split('T')[0];
   doc.text(`Rev ${revisionDate}`, pageWidth / 2, footerY, { align: 'center' });
-  const page1Text = pageLabel ? `${pageLabel} (1/3)` : 'Page 1/3';
+  const page1Text = pageLabel ? `${pageLabel} (1/${totalDatasheetPages})` : `Page 1/${totalDatasheetPages}`;
   doc.text(page1Text, pageWidth - 10, footerY, { align: 'right' });
   
   // ===== PAGE 2 =====
@@ -2819,7 +2824,7 @@ export async function generateEnhancedDatasheet(options: DatasheetOptions): Prom
   doc.text(footerItems.join(' | ') || database.companyName, 10, footerY);
   doc.text(`Rev ${revisionDate}`, pageWidth / 2, footerY, { align: 'center' });
   // Page numbering - use pageLabel if in project mode, otherwise standard 2/3
-  const pageNumText = pageLabel ? `${pageLabel} (2/3)` : 'Page 2/3';
+  const pageNumText = pageLabel ? `${pageLabel} (2/${totalDatasheetPages})` : `Page 2/${totalDatasheetPages}`;
   doc.text(pageNumText, pageWidth - 10, footerY, { align: 'right' });
 
   // ===== PAGE 3 - ACTUAL-MODEL FAN AIRFLOW DIGITAL TWIN =====
@@ -3003,8 +3008,186 @@ export async function generateEnhancedDatasheet(options: DatasheetOptions): Prom
   doc.setFont('helvetica', 'normal');
   doc.text(footerItems.join(' | ') || database.companyName, 10, footerY);
   doc.text(`Rev ${revisionDate}`, pageWidth / 2, footerY, { align: 'center' });
-  const page3Text = pageLabel ? `${pageLabel} (3/3)` : 'Page 3/3';
+  const page3Text = pageLabel ? `${pageLabel} (3/${totalDatasheetPages})` : `Page 3/${totalDatasheetPages}`;
   doc.text(page3Text, pageWidth - 10, footerY, { align: 'right' });
+
+  if (multiFanQuantity > 1) {
+    const isParallelSystem = multiFanArrangement === 'parallel';
+    const combinedFlowCmh = selection.operatingPoint.airflow * (isParallelSystem ? multiFanQuantity : 1);
+    const combinedStaticPa = selection.operatingPoint.staticPressure * (isParallelSystem ? 1 : multiFanQuantity);
+    const combinedTotalPa = totalPressure * (isParallelSystem ? 1 : multiFanQuantity);
+    const combinedPowerKw = selection.operatingPoint.shaftPower * multiFanQuantity;
+    const sourceNoise = selection.noiseData?.overall || 0;
+    const combinedNoise = sourceNoise > 0 ? sourceNoise + 10 * Math.log10(multiFanQuantity) : 0;
+    const combinedAreaM2 = fanAreaM2 * (isParallelSystem ? multiFanQuantity : 1);
+    const arrangementTitle = isParallelSystem ? 'Parallel Fan System' : 'Series Fan System';
+    const lawText = isParallelSystem
+      ? `Qtotal = ${multiFanQuantity} x Qfan; pressure = one-fan pressure`
+      : `Pressure total = ${multiFanQuantity} x fan pressure; airflow = one-fan airflow`;
+
+    doc.addPage();
+    doc.setFillColor(255, 255, 255);
+    doc.rect(0, 0, pageWidth, 26, 'F');
+    doc.setDrawColor(...COLORS.border);
+    doc.setLineWidth(0.5);
+    doc.line(0, 26, pageWidth, 26);
+
+    if (database.logoUrl) {
+      try {
+        const logoData = await loadImageAsBase64(database.logoUrl);
+        if (logoData) doc.addImage(logoData.base64, 'PNG', 6, 4, 40, 18);
+      } catch {}
+    }
+    doc.setFontSize(18);
+    doc.setFont('helvetica', 'bold');
+    doc.setTextColor(...COLORS.text);
+    doc.text('Combined Fan System Datasheet', pageWidth / 2, 14, { align: 'center' });
+    doc.setFontSize(8);
+    doc.setFont('helvetica', 'normal');
+    doc.setTextColor(...COLORS.textLight);
+    doc.text(`${selection.nomenclature} | ${multiFanQuantity} identical fans | ${multiFanArrangement}`, pageWidth / 2, 20, { align: 'center' });
+
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(12);
+    doc.setTextColor(...COLORS.text);
+    doc.text(arrangementTitle, 10, 35);
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(8);
+    doc.setTextColor(...COLORS.textLight);
+    doc.text(lawText, 10, 41);
+
+    // Repeated actual selected models, kept in dedicated equal-width cells.
+    const systemY = 48;
+    const systemH = 43;
+    doc.setFillColor(242, 248, 252);
+    doc.roundedRect(10, systemY, pageWidth - 20, systemH, 3, 3, 'F');
+    const cellGap = 2;
+    const availableW = pageWidth - 30 - cellGap * (multiFanQuantity - 1);
+    const cellW = Math.min(29, availableW / multiFanQuantity);
+    const systemStartX = (pageWidth - (cellW * multiFanQuantity + cellGap * (multiFanQuantity - 1))) / 2;
+    const multiProductData = selectedProductUrl ? await loadImageAsBase64(selectedProductUrl) : null;
+    for (let fanIndex = 0; fanIndex < multiFanQuantity; fanIndex += 1) {
+      const cellX = systemStartX + fanIndex * (cellW + cellGap);
+      doc.setFillColor(255, 255, 255);
+      doc.setDrawColor(180, 192, 204);
+      doc.roundedRect(cellX, systemY + 7, cellW, 27, 1.5, 1.5, 'FD');
+      if (multiProductData) {
+        const imageFormat = multiProductData.base64.includes('image/png') ? 'PNG' : 'JPEG';
+        const ratio = Math.min((cellW - 3) / multiProductData.width, 17 / multiProductData.height);
+        const imageW = multiProductData.width * ratio;
+        const imageH = multiProductData.height * ratio;
+        doc.addImage(multiProductData.base64, imageFormat, cellX + (cellW - imageW) / 2, systemY + 10 + (17 - imageH) / 2, imageW, imageH, undefined, 'NONE');
+      }
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(5.5);
+      doc.setTextColor(...COLORS.text);
+      doc.text(`F${fanIndex + 1}`, cellX + cellW / 2, systemY + 32, { align: 'center' });
+      if (fanIndex < multiFanQuantity - 1) {
+        doc.setDrawColor(40, 120, 220);
+        doc.setLineWidth(0.5);
+        doc.line(cellX + cellW, systemY + 20.5, cellX + cellW + cellGap, systemY + 20.5);
+      }
+    }
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(6.5);
+    doc.setTextColor(isParallelSystem ? 0 : 140, isParallelSystem ? 125 : 75, isParallelSystem ? 205 : 190);
+    doc.text(`INLET -> ${multiFanQuantity} x ${selection.nomenclature} -> COMBINED OUTLET`, pageWidth / 2, systemY + 39, { align: 'center' });
+
+    // Single-fan and combined-system curves.
+    const curveX = 23;
+    const curveY = 106;
+    const curveW = 164;
+    const curveH = 68;
+    const validCurve = performanceData.filter((point) => point.airflow >= 0 && point.staticPressure >= 0);
+    const systemCurve = validCurve.map((point) => ({
+      airflow: point.airflow * (isParallelSystem ? multiFanQuantity : 1),
+      pressure: point.staticPressure * (isParallelSystem ? 1 : multiFanQuantity),
+    }));
+    const curveMaxFlow = Math.max(1, ...validCurve.map((point) => point.airflow), ...systemCurve.map((point) => point.airflow));
+    const curveMaxPressure = Math.max(1, ...validCurve.map((point) => point.staticPressure), ...systemCurve.map((point) => point.pressure));
+    const curvePoint = (airflow: number, pressure: number) => ({
+      x: curveX + airflow / curveMaxFlow * curveW,
+      y: curveY + curveH - pressure / curveMaxPressure * curveH,
+    });
+
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(9);
+    doc.setTextColor(...COLORS.text);
+    doc.text('System effect on performance curve', 10, 101);
+    doc.setDrawColor(150, 160, 170);
+    doc.setLineWidth(0.35);
+    doc.line(curveX, curveY, curveX, curveY + curveH);
+    doc.line(curveX, curveY + curveH, curveX + curveW, curveY + curveH);
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(6);
+    doc.setTextColor(...COLORS.textLight);
+    doc.text(`Static pressure (${PRESSURE_UNITS[pressureUnit].label})`, curveX - 8, curveY + curveH / 2, { angle: 90, align: 'center' });
+    doc.text(`Airflow (${AIRFLOW_UNITS[airflowUnit].label})`, curveX + curveW / 2, curveY + curveH + 7, { align: 'center' });
+
+    if (validCurve.length > 1) {
+      doc.setDrawColor(105, 115, 125);
+      doc.setLineWidth(0.45);
+      doc.setLineDashPattern([2, 1.4], 0);
+      for (let pointIndex = 1; pointIndex < validCurve.length; pointIndex += 1) {
+        const previous = curvePoint(validCurve[pointIndex - 1].airflow, validCurve[pointIndex - 1].staticPressure);
+        const current = curvePoint(validCurve[pointIndex].airflow, validCurve[pointIndex].staticPressure);
+        doc.line(previous.x, previous.y, current.x, current.y);
+      }
+      doc.setLineDashPattern([], 0);
+      doc.setDrawColor(30, 105, 220);
+      doc.setLineWidth(0.9);
+      for (let pointIndex = 1; pointIndex < systemCurve.length; pointIndex += 1) {
+        const previous = curvePoint(systemCurve[pointIndex - 1].airflow, systemCurve[pointIndex - 1].pressure);
+        const current = curvePoint(systemCurve[pointIndex].airflow, systemCurve[pointIndex].pressure);
+        doc.line(previous.x, previous.y, current.x, current.y);
+      }
+    }
+    doc.setFontSize(6);
+    doc.setTextColor(105, 115, 125);
+    doc.text('Dashed: single fan', curveX + 4, curveY + 5);
+    doc.setTextColor(30, 105, 220);
+    doc.text(`Blue: ${multiFanQuantity}-fan ${multiFanArrangement} system`, curveX + 39, curveY + 5);
+
+    const singleAirflowDisplay = selection.operatingPoint.airflow * AIRFLOW_UNITS[airflowUnit].factor;
+    const combinedAirflowDisplay = combinedFlowCmh * AIRFLOW_UNITS[airflowUnit].factor;
+    const singlePressureDisplay = selection.operatingPoint.staticPressure * PRESSURE_UNITS[pressureUnit].factor;
+    const combinedPressureDisplay = combinedStaticPa * PRESSURE_UNITS[pressureUnit].factor;
+    autoTable(doc, {
+      startY: 186,
+      theme: 'grid',
+      headStyles: { fillColor: COLORS.primary, textColor: [255, 255, 255], fontSize: 7, fontStyle: 'bold' },
+      styles: { fontSize: 7, cellPadding: 1.6, lineColor: COLORS.border, textColor: COLORS.text },
+      head: [['Parameter', 'One fan', `${multiFanQuantity}-fan ${multiFanArrangement}`, 'System effect']],
+      body: [
+        ['Airflow', `${singleAirflowDisplay.toFixed(1)} ${AIRFLOW_UNITS[airflowUnit].label}`, `${combinedAirflowDisplay.toFixed(1)} ${AIRFLOW_UNITS[airflowUnit].label}`, isParallelSystem ? `x ${multiFanQuantity}` : 'Unchanged'],
+        ['Static pressure', `${singlePressureDisplay.toFixed(1)} ${PRESSURE_UNITS[pressureUnit].label}`, `${combinedPressureDisplay.toFixed(1)} ${PRESSURE_UNITS[pressureUnit].label}`, isParallelSystem ? 'Unchanged' : `x ${multiFanQuantity}`],
+        ['Total pressure', `${totalPressure.toFixed(1)} Pa`, `${combinedTotalPa.toFixed(1)} Pa`, isParallelSystem ? 'Unchanged' : `x ${multiFanQuantity}`],
+        ['Input power', `${selection.operatingPoint.shaftPower.toFixed(2)} kW`, `${combinedPowerKw.toFixed(2)} kW`, `x ${multiFanQuantity}`],
+        ['Sound level', sourceNoise > 0 ? `${sourceNoise.toFixed(1)} dB(A)` : '-', combinedNoise > 0 ? `${combinedNoise.toFixed(1)} dB(A)` : '-', `+${(10 * Math.log10(multiFanQuantity)).toFixed(1)} dB`],
+        ['Outlet area', `${fanAreaM2.toFixed(3)} m2`, `${combinedAreaM2.toFixed(3)} m2`, isParallelSystem ? `x ${multiFanQuantity}` : 'Unchanged'],
+      ],
+      margin: { left: 10, right: 10 },
+    });
+
+    doc.setFont('helvetica', 'italic');
+    doc.setFontSize(5.5);
+    doc.setTextColor(...COLORS.textLight);
+    doc.text(
+      'Ideal identical-fan combination. Verify the actual combined curve against system resistance, branch pressure losses, isolation/non-return dampers and control sequence.',
+      10,
+      pageHeight - 14,
+      { maxWidth: pageWidth - 20 },
+    );
+    doc.setDrawColor(...COLORS.border);
+    doc.setLineWidth(0.25);
+    doc.line(10, footerY - 3, pageWidth - 10, footerY - 3);
+    doc.setFontSize(5.5);
+    doc.setFont('helvetica', 'normal');
+    doc.text(footerItems.join(' | ') || database.companyName, 10, footerY);
+    doc.text(`Rev ${revisionDate}`, pageWidth / 2, footerY, { align: 'center' });
+    const page4Text = pageLabel ? `${pageLabel} (4/4)` : 'Page 4/4';
+    doc.text(page4Text, pageWidth - 10, footerY, { align: 'right' });
+  }
   
   // Save only if not in append mode
   if (!skipSave) {
