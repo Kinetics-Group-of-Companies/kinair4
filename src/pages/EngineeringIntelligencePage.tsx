@@ -340,10 +340,10 @@ export default function EngineeringIntelligencePage() {
                             className={`relative flex h-12 items-center justify-center border-y border-r border-slate-300 bg-gradient-to-b from-white to-slate-100 text-[10px] font-semibold text-slate-700 shadow-md first:border-l first:rounded-l-lg last:rounded-r-lg`}
                             style={{ flexGrow: width, flexBasis: 0 }}
                           >
-                            <span className="absolute left-2 right-2 top-2 h-2 rounded-sm bg-slate-200" />
-                            <span className="absolute bottom-1 left-2 text-[8px] font-bold text-sky-700">KINAIR</span>
-                            <span className="absolute bottom-1 right-2">{width.toFixed(1)} m</span>
-                            <span className="absolute -bottom-1 left-1 right-1 h-1 bg-slate-700" />
+                            <span className="absolute left-2 right-2 top-1.5 h-2 rounded-sm bg-slate-200" />
+                            <span className="absolute left-0 right-0 top-[17px] text-center text-[7px] font-bold leading-none tracking-wide text-sky-700">KINAIR</span>
+                            <span className="absolute bottom-0.5 left-0 right-0 text-center text-[9px] font-semibold leading-none">{width.toFixed(1)} m</span>
+                            <span className="absolute -bottom-1 left-0 right-0 h-1 bg-slate-700" />
                           </div>
                         ))}
                       </div>
