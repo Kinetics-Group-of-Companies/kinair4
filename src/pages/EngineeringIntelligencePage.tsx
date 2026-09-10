@@ -20,7 +20,7 @@ import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 
-type AirCurtainSeries = 'FM35' | 'FM55';
+type AirCurtainSeries = 'FM35' | 'FM45' | 'FM55';
 type EnergyMode = 'fan' | 'air-curtain';
 
 const CURTAIN_PROFILES: Record<AirCurtainSeries, {
@@ -30,6 +30,7 @@ const CURTAIN_PROFILES: Record<AirCurtainSeries, {
   label: string;
 }> = {
   FM35: { maxHeight: 3.5, outletVelocity: 11, widths: [0.9, 1, 1.2, 1.5], label: 'FM35 Standard Velocity' },
+  FM45: { maxHeight: 4.5, outletVelocity: 13, widths: [0.9, 1, 1.2, 1.5], label: 'FM45 Medium-High Velocity' },
   FM55: { maxHeight: 5.5, outletVelocity: 15, widths: [0.9, 1, 1.2, 1.5], label: 'FM55 High Velocity' },
 };
 
@@ -43,26 +44,22 @@ const SYSTEM_EFFECTS = [
   { id: 'transition', label: 'Abrupt transition / reducer', k: 0.35 },
 ];
 
-function bestWidthCombination(requiredWidth: number, widths: number[], maxUnits = 6) {
-  let best: number[] = [];
+function bestEqualWidthCombination(requiredWidth: number, widths: number[], maxUnits = 8) {
+  const candidates = widths
+    .map((unitWidth) => {
+      const qty = Math.max(1, Math.min(maxUnits, Math.ceil(requiredWidth / unitWidth)));
+      const items = Array.from({ length: qty }, () => unitWidth);
+      const total = qty * unitWidth;
+      const shortfall = Math.max(0, requiredWidth - total);
+      const overhang = Math.max(0, total - requiredWidth);
+      return { items, shortfall, overhang, qty };
+    })
+    .sort((a, b) =>
+      (a.shortfall * 10000 + a.overhang * 100 + a.qty) -
+      (b.shortfall * 10000 + b.overhang * 100 + b.qty),
+    );
 
-  const score = (items: number[]) => {
-    const total = items.reduce((sum, item) => sum + item, 0);
-    const shortfall = Math.max(0, requiredWidth - total);
-    const overhang = Math.max(0, total - requiredWidth);
-    return shortfall * 10000 + overhang * 100 + items.length;
-  };
-
-  const visit = (items: number[], startIndex: number) => {
-    if (items.length > 0 && (best.length === 0 || score(items) < score(best))) best = [...items];
-    if (items.length === maxUnits) return;
-    for (let index = startIndex; index < widths.length; index += 1) {
-      visit([...items, widths[index]], index);
-    }
-  };
-
-  visit([], 0);
-  return best;
+  return candidates[0]?.items ?? [];
 }
 
 function NumberField({
@@ -132,12 +129,12 @@ export default function EngineeringIntelligencePage() {
 
   const curtainResult = useMemo(() => {
     const profile = CURTAIN_PROFILES[curtainSeries];
-    const combination = bestWidthCombination(doorWidth, profile.widths);
+    const combination = bestEqualWidthCombination(doorWidth, profile.widths);
     const installedWidth = combination.reduce((sum, width) => sum + width, 0);
     const effectiveWidth = Math.max(0, installedWidth - Math.max(0, combination.length - 1) * 0.03);
     const coverage = doorWidth > 0 ? Math.min(120, (effectiveWidth / doorWidth) * 100) : 0;
     const disturbance = windSpeed * 0.18 + Math.abs(pressureDifference) * 0.015;
-    const decayLength = curtainSeries === 'FM55' ? 3.4 : 2.8;
+    const decayLength = curtainSeries === 'FM55' ? 3.4 : curtainSeries === 'FM45' ? 3.1 : 2.8;
     const floorVelocity = profile.outletVelocity * Math.exp(-(doorHeight + disturbance) / decayLength);
     const heightPass = doorHeight <= profile.maxHeight;
     const coveragePass = coverage >= 100;
@@ -310,7 +307,8 @@ export default function EngineeringIntelligencePage() {
                       <SelectTrigger className="mt-1"><SelectValue /></SelectTrigger>
                       <SelectContent>
                         <SelectItem value="FM35">FM35 — up to 3.5 m</SelectItem>
-                        <SelectItem value="FM55">FM55 — up to 5.5 m</SelectItem>
+                        <SelectItem value="FM45">FM45 — 3.5 to 4.5 m</SelectItem>
+                        <SelectItem value="FM55">FM55 — 4.5 to 5.5 m</SelectItem>
                       </SelectContent>
                     </Select>
                   </div>
