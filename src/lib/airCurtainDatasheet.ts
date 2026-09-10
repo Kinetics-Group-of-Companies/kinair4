@@ -739,28 +739,59 @@ doc.setDrawColor(242, 163, 60);
       ? `Up to ${lenM(suitableHeightMax)}`
       : 'Refer to model data';
 
-  doc.setFont('helvetica', 'bold');
-  doc.setFontSize(8);
-  doc.setTextColor(...COLORS.text);
-  doc.text(`Selected door height: ${lenM(doorHeightM)}`, margin, 49);
-  doc.text(`Suitable mounting height: ${suitableHeightLabel}`, margin, 54);
-  doc.setTextColor(...(selection.heightSuitable ? [20, 145, 95] as [number, number, number] : [210, 120, 0] as [number, number, number]));
-  doc.text(`Height status: ${selection.heightSuitable ? 'SUITABLE' : 'CHECK'}`, margin, 59);
+  const modelSummary = selection.units
+    .map(({ model, qty }) => `${qty} x ${model.model}`)
+    .join(' + ');
+  const unitSizeSummary = selection.units
+    .map(({ model, qty }) => `${qty} x ${lenMm(model.lengthMm)}`)
+    .join(' + ');
+  const heightStatus = selection.heightSuitable ? 'SUITABLE' : 'CHECK';
+
+  autoTable(doc, {
+    startY: 44,
+    tableWidth: 135,
+    margin: { left: margin },
+    theme: 'grid',
+    styles: {
+      fontSize: 7.2,
+      cellPadding: 1.45,
+      lineColor: COLORS.border,
+      textColor: COLORS.text,
+      overflow: 'linebreak',
+    },
+    columnStyles: {
+      0: { cellWidth: 42, fontStyle: 'bold', fillColor: [245, 248, 252] },
+      1: { cellWidth: 93 },
+    },
+    body: [
+      ['Series / type', `${seriesInfo?.name ?? selection.model.brand} / ${CATEGORY_LABELS[selection.model.category]}`],
+      ['Exact model name', modelSummary],
+      ['Individual unit size', unitSizeSummary],
+      ['Total installed width', lenMm(selection.totalLengthMm)],
+      ['Selected door size', `${lenMm(doorWidthMm)} W x ${lenM(doorHeightM)} H`],
+      ['Suitable mounting height', `${suitableHeightLabel} / ${heightStatus}`],
+    ],
+  });
 
   if (seriesPhoto) {
-    const size = fit(seriesPhoto, 42, 28);
+    const size = fit(seriesPhoto, 40, 25);
     const photoX = pageW - margin - size.w;
-    const photoY = 31;
+    const photoY = 46;
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(6.5);
+    doc.setTextColor(...COLORS.textLight);
+    doc.text('ACTUAL SELECTED PRODUCT', photoX + size.w / 2, 43, { align: 'center' });
     doc.setDrawColor(...COLORS.border);
     doc.setLineWidth(0.25);
     doc.rect(photoX - 2, photoY - 1, size.w + 4, size.h + 4);
     doc.addImage(seriesPhoto.base64, fmt(seriesPhoto.base64), photoX, photoY, size.w, size.h, undefined, 'NONE');
   }
 
+  const selectionSummaryBottom = lastY();
   const doorX = 24;
-  const doorY = 84;
+  const doorY = Math.max(98, selectionSummaryBottom + 15);
   const doorW = pageW - 48;
-  const doorH = 118;
+  const doorH = 205 - doorY;
   const installedW = doorW * Math.min(1, selection.totalLengthMm / Math.max(doorWidthMm, 1));
   const unitStartX = doorX + (doorW - installedW) / 2;
   const unitY = doorY - 12;
