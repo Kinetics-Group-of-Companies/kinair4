@@ -43,7 +43,7 @@ export function Header() {
             
             <Link to="/compare" className={navClass('/compare')}>Compare</Link>
             <Link to="/calculator" className={navClass('/calculator')}>Calculator</Link>
-            <Link to="/engineering-intelligence" className={navClass('/engineering-intelligence')}>Intelligence</Link>
+            <Link to="/engineering-intelligence" className={navClass('/engineering-intelligence')}>Energy &amp; Payback</Link>
             {isAuthenticated && (
               <Link to="/projects" className={navClass('/projects')}>Projects</Link>
             )}
@@ -133,7 +133,7 @@ export function Header() {
                 onClick={() => setIsMobileMenuOpen(false)}
               >
                 <Activity className="w-4 h-4" />
-                Engineering Intelligence
+                Energy & Payback Calculator
               </Link>
               {isAuthenticated && (
                 <Link 
