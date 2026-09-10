@@ -31,7 +31,7 @@ export function Header() {
       <div className="container mx-auto px-4">
         <div className="flex items-center justify-between h-20">
           {/* Logo */}
-          <Link to="/" className="flex items-center">
+          <Link to="/" className="flex shrink-0 items-center lg:mr-8 xl:mr-10">
             <KinairLogo size="lg" />
           </Link>
 
