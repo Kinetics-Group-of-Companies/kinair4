@@ -41,6 +41,12 @@ export function AirCurtainDigitalTwin({
     : suitableHeightMax !== null
       ? `Up to ${suitableHeightMax.toFixed(1)} m`
       : 'Refer to model data';
+  const modelSummary = selection.units
+    .map(({ model, qty }) => `${qty} × ${model.model}`)
+    .join(' + ');
+  const unitSizeSummary = selection.units
+    .map(({ model, qty }) => `${qty} × ${model.lengthMm} mm`)
+    .join(' + ');
 
   return (
     <div className="kinair-card overflow-hidden p-4 md:p-6">
@@ -75,6 +81,35 @@ export function AirCurtainDigitalTwin({
         <span className={`rounded-full px-3 py-1 text-xs font-semibold ${pass ? 'bg-emerald-100 text-emerald-700' : 'bg-amber-100 text-amber-800'}`}>
           {pass ? 'PASS' : 'CHECK INSTALLATION'}
         </span>
+      </div>
+
+      <div className="mb-5 grid grid-cols-1 overflow-hidden rounded-xl border bg-white sm:grid-cols-2 lg:grid-cols-3">
+        <div className="border-b p-3 sm:border-r lg:border-b">
+          <span className="block text-sm text-muted-foreground">Series / type</span>
+          <b className="mt-1 block text-sm">{seriesName || selection.model.brand} • {isRecessed ? 'Ceiling recessed' : 'Wall mounted'}</b>
+        </div>
+        <div className="border-b p-3 lg:border-r">
+          <span className="block text-sm text-muted-foreground">Exact model name</span>
+          <b className="mt-1 block break-words text-sm">{modelSummary}</b>
+        </div>
+        <div className="border-b p-3 sm:border-r lg:border-r-0">
+          <span className="block text-sm text-muted-foreground">Individual unit size</span>
+          <b className="mt-1 block text-sm">{unitSizeSummary}</b>
+        </div>
+        <div className="border-b p-3 lg:border-b-0 lg:border-r">
+          <span className="block text-sm text-muted-foreground">Total installed width</span>
+          <b className="mt-1 block text-sm">{selection.totalLengthMm} mm</b>
+        </div>
+        <div className="border-b p-3 sm:border-b-0 sm:border-r">
+          <span className="block text-sm text-muted-foreground">Selected door size</span>
+          <b className="mt-1 block text-sm">{doorWidthMm} mm W × {doorHeightM.toFixed(2)} m H</b>
+        </div>
+        <div className="p-3">
+          <span className="block text-sm text-muted-foreground">Suitable mounting height</span>
+          <b className={`mt-1 block text-sm ${selection.heightSuitable ? 'text-emerald-600' : 'text-amber-600'}`}>
+            {suitableHeight} • {selection.heightSuitable ? 'Suitable' : 'Check'}
+          </b>
+        </div>
       </div>
 
       <div className={`grid gap-5 ${productImageUrl ? 'lg:grid-cols-[180px_1fr]' : ''}`}>
