@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { Link, useNavigate, useLocation } from 'react-router-dom';
-import { Wind, Menu, X, Settings, LogIn, LogOut, User, FolderKanban, Scale, FileText, Building2, Truck } from 'lucide-react';
+import { Wind, Menu, X, Settings, LogIn, LogOut, User, FolderKanban, Scale, FileText, Building2, Truck, Activity } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { KinairLogo } from '@/components/KinairLogo';
 import { useAuth } from '@/lib/authContext';
@@ -43,6 +43,7 @@ export function Header() {
             
             <Link to="/compare" className={navClass('/compare')}>Compare</Link>
             <Link to="/calculator" className={navClass('/calculator')}>Calculator</Link>
+            <Link to="/engineering-intelligence" className={navClass('/engineering-intelligence')}>Intelligence</Link>
             {isAuthenticated && (
               <Link to="/projects" className={navClass('/projects')}>Projects</Link>
             )}
@@ -125,6 +126,14 @@ export function Header() {
               </Link>
               <Link to="/calculator" className={mobileNavClass('/calculator')} onClick={() => setIsMobileMenuOpen(false)}>
                 Calculator
+              </Link>
+              <Link
+                to="/engineering-intelligence"
+                className={`${mobileNavClass('/engineering-intelligence')} flex items-center gap-2`}
+                onClick={() => setIsMobileMenuOpen(false)}
+              >
+                <Activity className="w-4 h-4" />
+                Engineering Intelligence
               </Link>
               {isAuthenticated && (
                 <Link 
