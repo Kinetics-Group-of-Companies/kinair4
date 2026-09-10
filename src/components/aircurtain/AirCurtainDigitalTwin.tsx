@@ -130,7 +130,7 @@ export function AirCurtainDigitalTwin({
               <div className="absolute left-[4%] right-[4%] top-0 z-10 h-14 border-b-4 border-slate-300 bg-white shadow-sm">
                 <div className="pt-1 text-center text-[10px] font-medium text-slate-500">CEILING — ACTUAL UNITS CONCEALED ABOVE</div>
               </div>
-              <div className="absolute left-[8%] right-[8%] top-11 z-20 flex">
+              <div className="absolute left-[10%] right-[10%] top-11 z-20 flex">
                 {installedUnits.map(({ model, index }, unitIndex) => (
                   <div
                     key={`${model.id}-grille-${index}`}
@@ -143,7 +143,7 @@ export function AirCurtainDigitalTwin({
                   </div>
                 ))}
               </div>
-              <div className="absolute left-[8%] right-[8%] top-[59px] z-20 flex text-[8px] font-medium text-slate-600">
+              <div className="absolute left-[10%] right-[10%] top-[59px] z-20 flex text-[8px] font-medium text-slate-600">
                 {installedUnits.map(({ model, index }) => (
                   <span key={`${model.id}-label-${index}`} className="truncate px-1 text-center" style={{ flexGrow: model.lengthMm, flexBasis: 0 }}>
                     {model.model} • {model.lengthMm} mm
@@ -152,7 +152,7 @@ export function AirCurtainDigitalTwin({
               </div>
             </>
           ) : (
-            <div className="absolute left-[8%] right-[8%] top-5 z-20 flex">
+            <div className="absolute left-[10%] right-[10%] top-5 z-20 flex">
               {installedUnits.map(({ model, index }) => (
                 <div
                   key={`${model.id}-body-${index}`}
