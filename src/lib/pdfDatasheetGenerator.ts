@@ -2349,7 +2349,7 @@ export async function generateEnhancedDatasheet(options: DatasheetOptions): Prom
   // Date-based revision format: Rev YYYY-MM-DD
   const revisionDate = new Date().toISOString().split('T')[0];
   doc.text(`Rev ${revisionDate}`, pageWidth / 2, footerY, { align: 'center' });
-  const page1Text = pageLabel ? `${pageLabel} (1/2)` : 'Page 1/2';
+  const page1Text = pageLabel ? `${pageLabel} (1/3)` : 'Page 1/3';
   doc.text(page1Text, pageWidth - 10, footerY, { align: 'right' });
   
   // ===== PAGE 2 =====
@@ -2818,9 +2818,193 @@ export async function generateEnhancedDatasheet(options: DatasheetOptions): Prom
   doc.setFont('helvetica', 'normal');
   doc.text(footerItems.join(' | ') || database.companyName, 10, footerY);
   doc.text(`Rev ${revisionDate}`, pageWidth / 2, footerY, { align: 'center' });
-  // Page numbering - use pageLabel if in project mode, otherwise standard 2/2
-  const pageNumText = pageLabel ? `${pageLabel} (2/2)` : 'Page 2/2';
+  // Page numbering - use pageLabel if in project mode, otherwise standard 2/3
+  const pageNumText = pageLabel ? `${pageLabel} (2/3)` : 'Page 2/3';
   doc.text(pageNumText, pageWidth - 10, footerY, { align: 'right' });
+
+  // ===== PAGE 3 - ACTUAL-MODEL FAN AIRFLOW DIGITAL TWIN =====
+  doc.addPage();
+  doc.setFillColor(255, 255, 255);
+  doc.rect(0, 0, pageWidth, 26, 'F');
+  doc.setDrawColor(...COLORS.border);
+  doc.setLineWidth(0.5);
+  doc.line(0, 26, pageWidth, 26);
+
+  if (database.logoUrl) {
+    try {
+      const logoData = await loadImageAsBase64(database.logoUrl);
+      if (logoData) doc.addImage(logoData.base64, 'PNG', 6, 4, 40, 18);
+    } catch {}
+  } else {
+    doc.setFontSize(8);
+    doc.setFont('helvetica', 'bold');
+    doc.setTextColor(...COLORS.primary);
+    doc.text(database.companyName || 'Fan Selector', 21, 13, { align: 'center' });
+  }
+
+  doc.setFontSize(18);
+  doc.setFont('helvetica', 'bold');
+  doc.setTextColor(...COLORS.text);
+  doc.text('Technical Datasheet', pageWidth / 2, 14, { align: 'center' });
+  doc.setFontSize(8);
+  doc.setFont('helvetica', 'normal');
+  doc.setTextColor(...COLORS.textLight);
+  doc.text(`${selection.nomenclature} | ${seriesName}`, pageWidth / 2, 20, { align: 'center' });
+
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(12);
+  doc.setTextColor(...COLORS.text);
+  doc.text('Actual-model Fan Airflow Digital Twin', 10, 35);
+  doc.setFont('helvetica', 'normal');
+  doc.setFontSize(7.5);
+  doc.setTextColor(...COLORS.textLight);
+  doc.text('Engineering airflow direction: inlet -> selected fan -> uniform outlet discharge', 10, 41);
+
+  const fanDiameterM = selection.diameter / 1000;
+  const fanAreaM2 = Math.PI * Math.pow(fanDiameterM / 2, 2);
+  const flowM3s = selection.operatingPoint.airflow / 3600;
+  const tipSpeed = Math.PI * fanDiameterM * fanRPM / 60;
+  const specificFanPower = flowM3s > 0 ? selection.operatingPoint.shaftPower * 1000 / flowM3s : 0;
+  const airPower = totalPressure * flowM3s / 1000;
+  const selectedAirflow = selection.operatingPoint.airflow * AIRFLOW_UNITS[airflowUnit].factor;
+  const selectedStaticPressure = selection.operatingPoint.staticPressure * PRESSURE_UNITS[pressureUnit].factor;
+  const selectedDynamicPressure = dynamicPressure * PRESSURE_UNITS[pressureUnit].factor;
+  const selectedTotalPressure = totalPressure * PRESSURE_UNITS[pressureUnit].factor;
+  const operatingStatus = selection.dutyPointMatch >= 95 ? 'PASS' : 'CHECK';
+
+  const twinY = 49;
+  const twinH = 86;
+  doc.setFillColor(241, 249, 252);
+  doc.roundedRect(10, twinY, pageWidth - 20, twinH, 3, 3, 'F');
+  doc.setDrawColor(205, 218, 230);
+  doc.setLineWidth(0.35);
+  doc.roundedRect(10, twinY, pageWidth - 20, twinH, 3, 3);
+
+  // Inlet air field - lighter cyan.
+  doc.setFillColor(214, 247, 252);
+  doc.rect(15, twinY + 8, 58, twinH - 16, 'F');
+  // Outlet air field - stronger blue and the same height for uniform discharge.
+  doc.setFillColor(205, 226, 252);
+  doc.rect(pageWidth - 73, twinY + 8, 58, twinH - 16, 'F');
+
+  const strandYs = [twinY + 20, twinY + 31, twinY + 42, twinY + 53, twinY + 64];
+  strandYs.forEach((strandY, index) => {
+    doc.setDrawColor(35, 190, 215);
+    doc.setLineWidth(0.65);
+    doc.line(19, strandY, 70, strandY);
+    doc.setFillColor(35, 190, 215);
+    doc.triangle(70, strandY, 66.5, strandY - 1.8, 66.5, strandY + 1.8, 'F');
+
+    doc.setDrawColor(55, 125 + index * 5, 225);
+    doc.setLineWidth(0.8);
+    doc.line(pageWidth - 70, strandY, pageWidth - 19, strandY);
+    doc.setFillColor(55, 125 + index * 5, 225);
+    doc.triangle(pageWidth - 19, strandY, pageWidth - 22.5, strandY - 1.8, pageWidth - 22.5, strandY + 1.8, 'F');
+  });
+
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(7);
+  doc.setTextColor(0, 120, 145);
+  doc.text('INLET AIR', 44, twinY + 5, { align: 'center' });
+  doc.setTextColor(35, 95, 185);
+  doc.text('OUTLET AIR', pageWidth - 44, twinY + 5, { align: 'center' });
+
+  // A dedicated centre product box keeps the selected photo clear of both air fields.
+  const productX = 75;
+  const productW = pageWidth - 150;
+  doc.setFillColor(255, 255, 255);
+  doc.roundedRect(productX, twinY + 5, productW, twinH - 10, 2, 2, 'F');
+  doc.setDrawColor(185, 195, 205);
+  doc.roundedRect(productX, twinY + 5, productW, twinH - 10, 2, 2);
+  const selectedProductUrl = seriesInfo?.imageUrl || options.seriesImageUrl;
+  if (selectedProductUrl) {
+    const productData = await loadImageAsBase64(selectedProductUrl);
+    if (productData) {
+      const productFormat = productData.base64.includes('image/png') ? 'PNG' : 'JPEG';
+      const ratio = Math.min((productW - 8) / productData.width, 49 / productData.height);
+      const productImgW = productData.width * ratio;
+      const productImgH = productData.height * ratio;
+      doc.addImage(
+        productData.base64,
+        productFormat,
+        productX + (productW - productImgW) / 2,
+        twinY + 14 + (49 - productImgH) / 2,
+        productImgW,
+        productImgH,
+        undefined,
+        'NONE',
+      );
+    }
+  }
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(6.5);
+  doc.setTextColor(...COLORS.text);
+  doc.text(selection.nomenclature, pageWidth / 2, twinY + twinH - 10, { align: 'center', maxWidth: productW - 4 });
+  doc.setFont('helvetica', 'normal');
+  doc.setFontSize(6);
+  doc.setTextColor(...COLORS.textLight);
+  doc.text(`Inlet -> Ø${selection.diameter} mm fan -> Outlet`, pageWidth / 2, twinY + twinH - 6, { align: 'center' });
+
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(9);
+  doc.setTextColor(...COLORS.text);
+  doc.text('Airflow and pressure intelligence', 10, 146);
+  autoTable(doc, {
+    startY: 149,
+    theme: 'grid',
+    headStyles: { fillColor: COLORS.primary, textColor: [255, 255, 255], fontSize: 7, fontStyle: 'bold' },
+    styles: { fontSize: 7, cellPadding: 1.6, lineColor: COLORS.border, textColor: COLORS.text },
+    head: [['Metric', 'Value', 'Metric', 'Value']],
+    body: [
+      ['Airflow', `${selectedAirflow < 100 ? selectedAirflow.toFixed(1) : Math.round(selectedAirflow)} ${AIRFLOW_UNITS[airflowUnit].label}`, 'Outlet velocity', `${outletVelocity.toFixed(2)} m/s`],
+      ['Static pressure', `${selectedStaticPressure.toFixed(1)} ${PRESSURE_UNITS[pressureUnit].label}`, 'Velocity pressure', `${selectedDynamicPressure.toFixed(1)} ${PRESSURE_UNITS[pressureUnit].label}`],
+      ['Total pressure', `${selectedTotalPressure.toFixed(1)} ${PRESSURE_UNITS[pressureUnit].label}`, 'Duct area', `${fanAreaM2.toFixed(3)} m2`],
+      ['Fan speed', `${fanRPM} RPM`, 'Tip speed', `${tipSpeed.toFixed(1)} m/s`],
+      ['Specific fan power', `${specificFanPower.toFixed(0)} W/(m3/s)`, 'Air power', `${airPower.toFixed(2)} kW`],
+      ['Efficiency', `${selection.operatingPoint.efficiency}%`, 'Duty point match', `${selection.dutyPointMatch.toFixed(1)}% - ${operatingStatus}`],
+    ],
+    margin: { left: 10, right: 10 },
+  });
+
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(9);
+  doc.setTextColor(...COLORS.text);
+  doc.text('Engineering checks', 10, 201);
+  autoTable(doc, {
+    startY: 204,
+    theme: 'grid',
+    headStyles: { fillColor: COLORS.primary, textColor: [255, 255, 255], fontSize: 7, fontStyle: 'bold' },
+    styles: { fontSize: 7, cellPadding: 1.6, lineColor: COLORS.border, textColor: COLORS.text },
+    head: [['Air path', 'Selected size', 'Operating point', 'Result']],
+    body: [[
+      'Inlet -> Fan -> Outlet',
+      `Ø${selection.diameter} mm`,
+      `${selection.operatingPoint.airflow.toFixed(0)} m3/h @ ${selection.operatingPoint.staticPressure.toFixed(0)} Pa`,
+      operatingStatus,
+    ]],
+    margin: { left: 10, right: 10 },
+  });
+
+  doc.setFont('helvetica', 'italic');
+  doc.setFontSize(5.5);
+  doc.setTextColor(...COLORS.textLight);
+  doc.text(
+    'Airflow colours identify inlet and outlet zones. Values use the selected catalogue operating point and calculated fan outlet area.',
+    10,
+    pageHeight - 14,
+    { maxWidth: pageWidth - 20 },
+  );
+
+  doc.setDrawColor(...COLORS.border);
+  doc.setLineWidth(0.25);
+  doc.line(10, footerY - 3, pageWidth - 10, footerY - 3);
+  doc.setFontSize(5.5);
+  doc.setTextColor(...COLORS.textLight);
+  doc.setFont('helvetica', 'normal');
+  doc.text(footerItems.join(' | ') || database.companyName, 10, footerY);
+  doc.text(`Rev ${revisionDate}`, pageWidth / 2, footerY, { align: 'center' });
+  const page3Text = pageLabel ? `${pageLabel} (3/3)` : 'Page 3/3';
+  doc.text(page3Text, pageWidth - 10, footerY, { align: 'right' });
   
   // Save only if not in append mode
   if (!skipSave) {
