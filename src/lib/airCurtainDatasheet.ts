@@ -867,6 +867,15 @@ doc.setDrawColor(242, 163, 60);
     doc.setDrawColor(202, 213, 225);
     doc.setLineWidth(0.25);
     doc.roundedRect(unitX, visualY, uw, unitH, 1.5, 1.5, 'FD');
+    // Keep only the top corners rounded. A square, flush lower edge removes
+    // the notch where the model card meets the dark opening frame.
+    doc.setFillColor(255, 255, 255);
+    doc.rect(unitX, visualY + unitH - 2, uw, 2.05, 'F');
+    doc.setDrawColor(202, 213, 225);
+    doc.setLineWidth(0.25);
+    doc.line(unitX, visualY + unitH - 2, unitX, doorY);
+    doc.line(unitX + uw, visualY + unitH - 2, unitX + uw, doorY);
+
     doc.setFillColor(229, 235, 242);
     doc.roundedRect(unitX + 1.5, visualY + 1.5, Math.max(2, uw - 3), 1.7, 0.6, 0.6, 'F');
 
@@ -919,21 +928,22 @@ doc.setDrawColor(242, 163, 60);
     unitX += uw;
   });
 
-  // Redraw the complete structural frame after the airflow fills. Drawing it
-  // before the gradients allowed the fill bands to hide the top/header line.
+  // Draw the two sides and header as one continuous U-shaped path.
+  // Rounded joins/caps eliminate protruding T-joints at both upper edges.
   doc.setDrawColor(69, 91, 119);
   doc.setLineWidth(0.9);
-  doc.line(doorX, doorY, doorX + doorW, doorY);
-  doc.line(doorX, doorY, doorX, doorY + doorH);
-  doc.line(doorX + doorW, doorY, doorX + doorW, doorY + doorH);
-
-  // Reinforce the joint between each unit card and its airflow zone.
-  unitX = unitStartX;
-  expandedUnits.forEach((model) => {
-    const uw = installedW * model.lengthMm / Math.max(selection.totalLengthMm, 1);
-    doc.line(unitX, doorY, unitX + uw, doorY);
-    unitX += uw;
-  });
+  doc.setLineJoin('round');
+  doc.setLineCap('round');
+  doc.lines(
+    [[0, -doorH], [doorW, 0], [0, doorH]],
+    doorX,
+    doorY + doorH,
+    [1, 1],
+    'S',
+    false,
+  );
+  doc.setLineJoin('miter');
+  doc.setLineCap('butt');
 
   const barrierText = 'Combined air barrier';
   doc.setFont('helvetica', 'normal');
