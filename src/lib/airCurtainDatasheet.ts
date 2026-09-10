@@ -171,7 +171,8 @@ export async function generateAirCurtainDatasheet(input: AirCurtainDatasheetInpu
     }
   };
 
-  const TOTAL_PAGES = 4;
+  const hasCombination = selection.unitsRequired > 1;
+  const TOTAL_PAGES = hasCombination ? 4 : 3;
   const drawFooter = (page: number) => {
     const footerY = pageH - 7;
     doc.setDrawColor(...COLORS.border);
@@ -701,7 +702,8 @@ doc.setDrawColor(242, 163, 60);
   );
   drawFooter(3);
 
-  // ===================== PAGE 4 — ACTUAL-MODEL DOOR DIGITAL TWIN =====================
+  if (hasCombination) {
+  // ===================== PAGE 4 - COMBINATION DOOR DIGITAL TWIN =====================
   doc.addPage();
   drawHeader();
   y = 32;
@@ -709,7 +711,7 @@ doc.setDrawColor(242, 163, 60);
   doc.setFont('helvetica', 'bold');
   doc.setFontSize(11);
   doc.setTextColor(...COLORS.text);
-  doc.text('Actual-model Door Digital Twin', margin, y);
+  doc.text('Combination Air Curtain - Door Digital Twin', margin, y);
   y += 6;
 
   doc.setFont('helvetica', 'normal');
@@ -869,6 +871,26 @@ doc.setDrawColor(242, 163, 60);
       doc.rect(unitX, jetTop + jetHeight * t, uw, jetHeight / bands + 0.2, 'F');
     }
 
+    // A PDF is static, so repeated wave paths and arrows represent the live
+    // downward animation used on the website.
+    doc.setDrawColor(Math.max(0, colour[0] - 35), Math.max(0, colour[1] - 35), Math.max(0, colour[2] - 35));
+    doc.setLineWidth(0.35);
+    const waveCount = Math.max(2, Math.min(4, Math.round(uw / 18)));
+    for (let waveIndex = 0; waveIndex < waveCount; waveIndex += 1) {
+      const waveX = unitX + uw * (waveIndex + 1) / (waveCount + 1);
+      let previousX = waveX;
+      let previousY = jetTop + 5;
+      for (let step = 1; step <= 18; step += 1) {
+        const waveY = jetTop + 5 + (jetHeight - 14) * step / 18;
+        const nextX = waveX + Math.sin(step * 0.9 + index) * Math.min(1.7, uw * 0.025);
+        doc.line(previousX, previousY, nextX, waveY);
+        previousX = nextX;
+        previousY = waveY;
+      }
+      doc.line(previousX, previousY, previousX - 1.1, previousY - 2.1);
+      doc.line(previousX, previousY, previousX + 1.1, previousY - 2.1);
+    }
+
     if (index < expandedUnits.length - 1) {
       doc.setFillColor(235, 245, 250);
       doc.rect(unitX + uw - 0.8, doorY, 1.6, doorH - 3, 'F');
@@ -910,12 +932,13 @@ doc.setDrawColor(242, 163, 60);
   doc.setFontSize(5.5);
   doc.setTextColor(...COLORS.textLight);
   doc.text(
-    'Diagram uses the selected catalogue model names, quantities and unit lengths. Confirm final installation clearances against the approved technical drawing.',
+    'Static PDF airflow representation; live airflow animation is available on the website. Models and unit widths are shown proportionally to the selected door opening.',
     margin,
     pageH - 14,
     { maxWidth: pageW - margin * 2 },
   );
   drawFooter(4);
+  }
 
   return doc;
 }
