@@ -28,6 +28,19 @@ export function AirCurtainDigitalTwin({
   const isRecessed = selection.model.category === 'recessed';
   const pass = selection.heightSuitable && selection.coverage >= 1;
   const coveragePercent = doorWidthMm > 0 ? selection.totalLengthMm / doorWidthMm * 100 : 0;
+  const mountingMinimums = installedUnits
+    .map(({ model }) => model.mountingHeightMin)
+    .filter((value): value is number => typeof value === 'number' && value > 0);
+  const mountingMaximums = installedUnits
+    .map(({ model }) => model.mountingHeightMax)
+    .filter((value): value is number => typeof value === 'number' && value > 0);
+  const suitableHeightMin = mountingMinimums.length ? Math.max(...mountingMinimums) : null;
+  const suitableHeightMax = mountingMaximums.length ? Math.min(...mountingMaximums) : null;
+  const suitableHeight = suitableHeightMin !== null && suitableHeightMax !== null
+    ? `${suitableHeightMin.toFixed(1)}-${suitableHeightMax.toFixed(1)} m`
+    : suitableHeightMax !== null
+      ? `Up to ${suitableHeightMax.toFixed(1)} m`
+      : 'Refer to model data';
 
   return (
     <div className="kinair-card overflow-hidden p-4 md:p-6">
@@ -177,9 +190,11 @@ export function AirCurtainDigitalTwin({
         </div>
       </div>
 
-      <div className="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-5">
+      <div className="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-4 xl:grid-cols-7">
         <div className="rounded-lg border p-3"><span className="block text-xs text-muted-foreground">Installed</span><b>{selection.totalLengthMm} mm</b></div>
         <div className="rounded-lg border p-3"><span className="block text-xs text-muted-foreground">Door coverage</span><b>{coveragePercent.toFixed(0)}%</b></div>
+        <div className="rounded-lg border p-3"><span className="block text-xs text-muted-foreground">Selected door height</span><b>{doorHeightM.toFixed(2)} m</b></div>
+        <div className="rounded-lg border p-3"><span className="block text-xs text-muted-foreground">Suitable height</span><b>{suitableHeight}</b></div>
         <div className="rounded-lg border p-3"><span className="block text-xs text-muted-foreground">Outlet velocity</span><b>{selection.outletVelocity.toFixed(1)} m/s</b></div>
         <div className="rounded-lg border p-3"><span className="block text-xs text-muted-foreground">Floor velocity</span><b>{selection.floorVelocity.toFixed(2)} m/s</b></div>
         <div className="rounded-lg border p-3"><span className="block text-xs text-muted-foreground">Height status</span><b className={selection.heightSuitable ? 'text-emerald-600' : 'text-amber-600'}>{selection.heightSuitable ? 'Suitable' : 'Check'}</b></div>
