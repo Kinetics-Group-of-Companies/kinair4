@@ -251,6 +251,23 @@ export default function EngineeringIntelligencePage() {
 
   return (
     <MainLayout>
+      <style>{`
+        @keyframes kinairJetFall {
+          0% { transform: translate3d(0, -18px, 0); opacity: 0; }
+          12% { opacity: .9; }
+          82% { opacity: .55; }
+          100% { transform: translate3d(var(--wind-shift, 0px), 205px, 0); opacity: 0; }
+        }
+        @keyframes kinairFlowRight {
+          0% { transform: translateX(-7px); opacity: .25; }
+          50% { opacity: 1; }
+          100% { transform: translateX(7px); opacity: .25; }
+        }
+        .kinair-flow-arrow { animation: kinairFlowRight .9s ease-in-out infinite; }
+        @media (prefers-reduced-motion: reduce) {
+          .kinair-jet-particle, .kinair-flow-arrow { animation: none !important; }
+        }
+      `}</style>
       <section className="bg-gradient-primary py-10 text-primary-foreground print:bg-white print:text-black">
         <div className="container mx-auto px-4">
           <div className="flex flex-wrap items-center justify-between gap-4">
@@ -374,12 +391,25 @@ export default function EngineeringIntelligencePage() {
                     )}
                     <div className={`absolute bottom-6 left-[10%] right-[10%] overflow-hidden rounded-b-lg border-x-4 border-slate-500 bg-white/55 ${mountingType === 'recessed' ? 'top-[72px]' : 'top-[68px]'}`}>
                       <div
-                        className={`mx-auto h-full origin-top bg-gradient-to-b ${curtainResult.pass ? 'from-cyan-400/75 via-cyan-300/35 to-cyan-100/5' : 'from-amber-400/70 via-amber-300/30 to-transparent'}`}
+                        className={`relative mx-auto h-full origin-top overflow-hidden bg-gradient-to-b ${curtainResult.pass ? 'from-cyan-400/75 via-cyan-300/35 to-cyan-100/5' : 'from-amber-400/70 via-amber-300/30 to-transparent'}`}
                         style={{
                           width: `${Math.min(100, curtainResult.coverage)}%`,
                           clipPath: `polygon(${8 + Math.min(16, windSpeed * 2)}% 0, 92% 0, ${70 + Math.min(15, windSpeed * 2)}% 100%, ${30 + Math.min(15, windSpeed * 2)}% 100%)`,
                         }}
-                      />
+                      >
+                        {Array.from({ length: 14 }, (_, index) => (
+                          <span
+                            key={index}
+                            className="kinair-jet-particle absolute top-0 h-7 w-1 rounded-full bg-white/80 shadow-[0_0_8px_rgba(255,255,255,0.9)]"
+                            style={{
+                              left: `${12 + (index * 76) / 13}%`,
+                              animation: `kinairJetFall ${1.15 + (index % 4) * 0.16}s linear infinite`,
+                              animationDelay: `${-(index % 7) * 0.2}s`,
+                              '--wind-shift': `${Math.min(55, windSpeed * 8)}px`,
+                            } as React.CSSProperties}
+                          />
+                        ))}
+                      </div>
                     </div>
                     <div className="absolute bottom-1 left-0 right-0 text-center text-xs text-slate-600">
                       Door {doorWidth.toFixed(2)} m W × {doorHeight.toFixed(2)} m H • units installed edge-to-edge
@@ -457,7 +487,7 @@ export default function EngineeringIntelligencePage() {
                         <div className="flex items-center justify-end gap-1">
                           <Wind className="h-5 w-5 text-sky-500" />
                           <div className="h-8 w-20 rounded-l-full border-2 border-slate-400 bg-white" />
-                          <span className="text-2xl text-sky-600">→</span>
+                          <span className="kinair-flow-arrow text-2xl text-sky-600">→</span>
                         </div>
                         <div className="mt-3 flex flex-wrap justify-center gap-1">
                           {SYSTEM_EFFECTS.filter((effect) => effect.side === 'inlet' && selectedEffects.includes(effect.id)).map((effect) => (
@@ -497,7 +527,7 @@ export default function EngineeringIntelligencePage() {
                       <div className="text-center">
                         <div className="mb-2 text-xs font-bold text-orange-700">OUTLET / DISCHARGE</div>
                         <div className="flex items-center justify-start gap-1">
-                          <span className="text-2xl text-orange-600">→</span>
+                          <span className="kinair-flow-arrow text-2xl text-orange-600">→</span>
                           <div className="h-8 w-20 rounded-r-full border-2 border-slate-400 bg-white" />
                           <Wind className="h-5 w-5 text-orange-500" />
                         </div>
