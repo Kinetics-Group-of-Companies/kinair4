@@ -793,33 +793,62 @@ doc.setDrawColor(242, 163, 60);
   }
 
   const selectionSummaryBottom = lastY();
-  const doorX = 24;
-  const doorY = Math.max(98, selectionSummaryBottom + 15);
-  const doorW = pageW - 48;
-  const doorH = 205 - doorY;
+
+  // Website-matched landscape visualization, scaled cleanly onto the portrait PDF.
+  // The earlier version stretched the door vertically and lost the website proportions.
+  const panelX = margin;
+  const panelY = Math.max(96, selectionSummaryBottom + 10);
+  const panelW = pageW - margin * 2;
+  const panelH = 76;
+  const productCardW = 30;
+  const panelGap = 4;
+  const visualX = panelX + productCardW + panelGap;
+  const visualY = panelY + 4;
+  const visualW = panelW - productCardW - panelGap - 4;
+  const visualH = panelH - 8;
+  const unitH = 13;
+  const doorX = visualX;
+  const doorY = visualY + unitH;
+  const doorW = visualW;
+  const doorH = visualH - unitH - 7;
   const installedW = doorW * Math.min(1, selection.totalLengthMm / Math.max(doorWidthMm, 1));
   const unitStartX = doorX + (doorW - installedW) / 2;
-  const unitY = doorY - 12;
-  // Keep a full website-style header card for every unit, including recessed models.
-  const unitH = 12;
 
-  // Door frame
+  // Pale blue website panel.
+  doc.setFillColor(232, 242, 251);
+  doc.setDrawColor(211, 224, 236);
+  doc.setLineWidth(0.25);
+  doc.roundedRect(panelX, panelY, panelW, panelH, 2.5, 2.5, 'FD');
+
+  // Selected-product card at the left, matching the website.
+  doc.setFillColor(255, 255, 255);
+  doc.setDrawColor(204, 216, 229);
+  doc.roundedRect(panelX + 2, panelY + 2, productCardW - 4, panelH - 4, 2, 2, 'FD');
+  doc.setFont('helvetica', 'normal');
+  doc.setFontSize(6.5);
+  doc.setTextColor(75, 96, 120);
+  doc.text('Selected product', panelX + 4, panelY + 7);
+  if (seriesPhoto) {
+    const productSize = fit(seriesPhoto, productCardW - 8, 28);
+    doc.addImage(
+      seriesPhoto.base64,
+      fmt(seriesPhoto.base64),
+      panelX + productCardW / 2 - productSize.w / 2,
+      panelY + 18 + (28 - productSize.h) / 2,
+      productSize.w,
+      productSize.h,
+      undefined,
+      'NONE',
+    );
+  }
+
+  // Door opening: deliberately wide and shallow, identical to the website composition.
   doc.setFillColor(246, 249, 252);
   doc.rect(doorX, doorY, doorW, doorH, 'F');
   doc.setDrawColor(80, 95, 115);
-  doc.setLineWidth(1.2);
+  doc.setLineWidth(0.75);
   doc.line(doorX, doorY, doorX, doorY + doorH);
   doc.line(doorX + doorW, doorY, doorX + doorW, doorY + doorH);
-
-  if (selection.model.category === 'recessed') {
-    doc.setFillColor(255, 255, 255);
-    doc.rect(doorX - 5, unitY - 8, doorW + 10, 8, 'F');
-    doc.setDrawColor(185, 190, 198);
-    doc.line(doorX - 5, unitY, doorX + doorW + 5, unitY);
-    doc.setFontSize(6);
-    doc.setTextColor(...COLORS.textLight);
-    doc.text('CEILING - UNITS CONCEALED ABOVE / DISCHARGE GRILLES FLUSH', pageW / 2, unitY - 2.5, { align: 'center' });
-  }
 
   const jetColours: [number, number, number][] = [
     [52, 211, 235],
@@ -833,101 +862,94 @@ doc.setDrawColor(242, 163, 60);
     const uw = installedW * model.lengthMm / Math.max(selection.totalLengthMm, 1);
     const colour = jetColours[index % jetColours.length];
 
-    if (selection.model.category === 'recessed') {
-      doc.setFillColor(225, 229, 234);
-      doc.rect(unitX, unitY, uw, unitH, 'F');
-      doc.setDrawColor(80, 88, 98);
-      doc.setLineWidth(0.35);
-      doc.rect(unitX, unitY, uw, unitH);
-      doc.line(unitX + 1, unitY + unitH / 2, unitX + uw - 1, unitY + unitH / 2);
-    } else {
-      doc.setFillColor(255, 255, 255);
-      doc.roundedRect(unitX, unitY, uw, unitH, 1.5, 1.5, 'F');
-      doc.setDrawColor(190, 196, 204);
-      doc.setLineWidth(0.35);
-      doc.rect(unitX, unitY, uw, unitH);
-      doc.setFillColor(232, 236, 240);
-      doc.roundedRect(unitX + 2, unitY + 2, Math.max(2, uw - 4), 2, 0.5, 0.5, 'F');
-    }
+    // Full unit card above each proportional airflow zone.
+    doc.setFillColor(255, 255, 255);
+    doc.setDrawColor(202, 213, 225);
+    doc.setLineWidth(0.25);
+    doc.roundedRect(unitX, visualY, uw, unitH, 1.5, 1.5, 'FD');
+    doc.setFillColor(229, 235, 242);
+    doc.roundedRect(unitX + 1.5, visualY + 1.5, Math.max(2, uw - 3), 1.7, 0.6, 0.6, 'F');
 
-    // Website-style labels stay inside the header. Previously these were
-    // placed in the airflow area and then painted over by the gradient.
     doc.setFont('helvetica', 'bold');
-    doc.setFontSize(Math.min(6.2, Math.max(4.2, uw / 7)));
+    doc.setFontSize(Math.min(5.8, Math.max(4.5, uw / 9)));
     doc.setTextColor(0, 91, 150);
-    doc.text(model.model, unitX + uw / 2, unitY + 7.1, {
+    doc.text(model.model, unitX + uw / 2, visualY + 7.1, {
       align: 'center',
       maxWidth: Math.max(8, uw - 3),
     });
     doc.setFont('helvetica', 'normal');
-    doc.setFontSize(5.5);
+    doc.setFontSize(5.2);
     doc.setTextColor(...COLORS.text);
-    doc.text(`${model.lengthMm} mm`, unitX + uw / 2, unitY + 10.4, { align: 'center' });
+    doc.text(`${model.lengthMm} mm`, unitX + uw / 2, visualY + 10.5, { align: 'center' });
 
-    // Straight, proportional airflow column with a light fade toward the floor.
-    const jetTop = doorY;
-    const jetHeight = doorH - 3;
-    const bands = 24;
+    // Smooth vector gradient, retained as vectors for sharp zoom/printing.
+    const bands = 32;
     for (let band = 0; band < bands; band += 1) {
       const t = band / bands;
-      const blend = 0.28 + t * 0.62;
-      const r = Math.round(colour[0] + (255 - colour[0]) * blend);
-      const g = Math.round(colour[1] + (255 - colour[1]) * blend);
-      const b = Math.round(colour[2] + (255 - colour[2]) * blend);
-      doc.setFillColor(r, g, b);
-      doc.rect(unitX, jetTop + jetHeight * t, uw, jetHeight / bands + 0.2, 'F');
+      const blend = 0.25 + t * 0.68;
+      doc.setFillColor(
+        Math.round(colour[0] + (255 - colour[0]) * blend),
+        Math.round(colour[1] + (255 - colour[1]) * blend),
+        Math.round(colour[2] + (255 - colour[2]) * blend),
+      );
+      doc.rect(unitX, doorY + doorH * t, uw, doorH / bands + 0.12, 'F');
     }
 
-    // Static uniform airflow, matching the website visualization.
-    doc.setDrawColor(Math.max(0, colour[0] - 35), Math.max(0, colour[1] - 35), Math.max(0, colour[2] - 35));
-    doc.setLineWidth(0.35);
-    const streamCount = Math.max(2, Math.min(4, Math.round(uw / 18)));
+    doc.setDrawColor(255, 255, 255);
+    doc.setLineWidth(0.25);
+    const streamCount = Math.max(3, Math.min(5, Math.round(uw / 15)));
     for (let streamIndex = 0; streamIndex < streamCount; streamIndex += 1) {
       const streamX = unitX + uw * (streamIndex + 1) / (streamCount + 1);
-      const streamTop = jetTop + 6;
-      const streamBottom = jetTop + jetHeight - 7;
+      const streamTop = doorY + 3;
+      const streamBottom = doorY + doorH - 4;
       doc.line(streamX, streamTop, streamX, streamBottom);
-      doc.line(streamX, streamBottom, streamX - 1.2, streamBottom - 2.2);
-      doc.line(streamX, streamBottom, streamX + 1.2, streamBottom - 2.2);
+      doc.line(streamX, streamBottom, streamX - 1, streamBottom - 1.8);
+      doc.line(streamX, streamBottom, streamX + 1, streamBottom - 1.8);
     }
 
     if (index < expandedUnits.length - 1) {
-      doc.setFillColor(235, 245, 250);
-      doc.rect(unitX + uw - 0.8, doorY, 1.6, doorH - 3, 'F');
+      doc.setFillColor(236, 246, 251);
+      doc.rect(unitX + uw - 0.45, doorY, 0.9, doorH, 'F');
     }
-
     unitX += uw;
   });
 
-  // Same combined-barrier marker used by the website visualization.
   const barrierText = 'Combined air barrier';
   doc.setFont('helvetica', 'normal');
-  doc.setFontSize(5.5);
-  const barrierW = doc.getTextWidth(barrierText) + 8;
-  const barrierX = pageW / 2 - barrierW / 2;
-  const barrierY = doorY + doorH * 0.55;
+  doc.setFontSize(5.2);
+  const barrierW = doc.getTextWidth(barrierText) + 7;
+  const barrierY = doorY + doorH * 0.62;
   doc.setFillColor(255, 255, 255);
   doc.setDrawColor(220, 226, 234);
-  doc.setLineWidth(0.2);
-  doc.roundedRect(barrierX, barrierY - 4, barrierW, 7, 3.5, 3.5, 'FD');
+  doc.roundedRect(pageW / 2 - barrierW / 2 + productCardW / 2, barrierY - 3.5, barrierW, 6, 3, 3, 'FD');
   doc.setTextColor(...COLORS.text);
-  doc.text(barrierText, pageW / 2, barrierY + 0.5, { align: 'center' });
+  doc.text(barrierText, pageW / 2 + productCardW / 2, barrierY + 0.3, { align: 'center' });
 
-  doc.setFont('helvetica', 'bold');
-  doc.setFontSize(7);
-  doc.setTextColor(...COLORS.text);
+  doc.setFont('helvetica', 'normal');
+  doc.setFontSize(6.5);
+  doc.setTextColor(45, 72, 104);
   doc.text(
-    `Door ${lenMm(doorWidthMm)} W x ${lenM(doorHeightM)} H | Actual models shown proportionally`,
-    pageW / 2,
-    doorY + doorH + 7,
+    `Door ${lenMm(doorWidthMm)} W x ${lenM(doorHeightM)} H - actual models shown proportionally`,
+    visualX + visualW / 2,
+    panelY + panelH - 2.5,
     { align: 'center' },
   );
 
   autoTable(doc, {
-    startY: doorY + doorH + 12,
+    startY: panelY + panelH + 7,
     theme: 'grid',
-    headStyles: { fillColor: COLORS.head, fontSize: 6.2, textColor: [255, 255, 255], fontStyle: 'bold' },
-    styles: { fontSize: 6.2, cellPadding: 1.3, lineColor: COLORS.border, textColor: COLORS.text },
+    headStyles: { fillColor: COLORS.head, fontSize: 6.5, textColor: [255, 255, 255], fontStyle: 'bold', halign: 'center' },
+    styles: { fontSize: 6.5, cellPadding: 1.6, lineColor: COLORS.border, textColor: COLORS.text, valign: 'middle' },
+    columnStyles: {
+      0: { cellWidth: 48 },
+      1: { cellWidth: 22, halign: 'center' },
+      2: { cellWidth: 18, halign: 'center' },
+      3: { cellWidth: 21, halign: 'center' },
+      4: { cellWidth: 25, halign: 'center' },
+      5: { cellWidth: 22, halign: 'center' },
+      6: { cellWidth: 22, halign: 'center' },
+      7: { cellWidth: 12, halign: 'center' },
+    },
     head: [['Exact model arrangement', 'Installed', 'Coverage', 'Door height', 'Suitable range', 'Outlet velocity', 'Floor velocity', 'Status']],
     body: [[
       selection.arrangement,
