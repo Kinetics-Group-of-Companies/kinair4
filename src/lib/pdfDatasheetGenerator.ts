@@ -1251,7 +1251,13 @@ export async function generateEnhancedDatasheet(options: DatasheetOptions): Prom
     skipSave = false,
     pageLabel,
   } = options;
-  const totalDatasheetPages = multiFanQuantity > 1 ? 4 : 3;
+  // The airflow-twin and combined-system pages are optional engineering pages.
+  // A normal single-fan datasheet remains two pages; these pages appear only
+  // after the user selects two or more fans in series or parallel.
+  const hasActivatedMultiFanSystem =
+    multiFanQuantity > 1 &&
+    (multiFanArrangement === 'series' || multiFanArrangement === 'parallel');
+  const totalDatasheetPages = hasActivatedMultiFanSystem ? 4 : 2;
   
   // Fetch datasheet config from database if not provided
   // CRITICAL: Use seriesId (UUID) not series (name) for database lookup
@@ -2827,7 +2833,8 @@ export async function generateEnhancedDatasheet(options: DatasheetOptions): Prom
   const pageNumText = pageLabel ? `${pageLabel} (2/${totalDatasheetPages})` : `Page 2/${totalDatasheetPages}`;
   doc.text(pageNumText, pageWidth - 10, footerY, { align: 'right' });
 
-  // ===== PAGE 3 - ACTUAL-MODEL FAN AIRFLOW DIGITAL TWIN =====
+  if (hasActivatedMultiFanSystem) {
+  // ===== PAGE 3 - ACTUAL-MODEL MULTI-FAN AIRFLOW DIGITAL TWIN =====
   doc.addPage();
   doc.setFillColor(255, 255, 255);
   doc.rect(0, 0, pageWidth, 26, 'F');
@@ -3011,7 +3018,7 @@ export async function generateEnhancedDatasheet(options: DatasheetOptions): Prom
   const page3Text = pageLabel ? `${pageLabel} (3/${totalDatasheetPages})` : `Page 3/${totalDatasheetPages}`;
   doc.text(page3Text, pageWidth - 10, footerY, { align: 'right' });
 
-  if (multiFanQuantity > 1) {
+  if (hasActivatedMultiFanSystem) {
     const isParallelSystem = multiFanArrangement === 'parallel';
     const combinedFlowCmh = selection.operatingPoint.airflow * (isParallelSystem ? multiFanQuantity : 1);
     const combinedStaticPa = selection.operatingPoint.staticPressure * (isParallelSystem ? 1 : multiFanQuantity);
@@ -3187,6 +3194,7 @@ export async function generateEnhancedDatasheet(options: DatasheetOptions): Prom
     doc.text(`Rev ${revisionDate}`, pageWidth / 2, footerY, { align: 'center' });
     const page4Text = pageLabel ? `${pageLabel} (4/4)` : 'Page 4/4';
     doc.text(page4Text, pageWidth - 10, footerY, { align: 'right' });
+  }
   }
   
   // Save only if not in append mode
