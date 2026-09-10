@@ -44,22 +44,26 @@ const SYSTEM_EFFECTS = [
   { id: 'transition', label: 'Abrupt transition / reducer', k: 0.35, side: 'outlet' as const },
 ];
 
-function bestEqualWidthCombination(requiredWidth: number, widths: number[], maxUnits = 8) {
-  const candidates = widths
-    .map((unitWidth) => {
-      const qty = Math.max(1, Math.min(maxUnits, Math.ceil(requiredWidth / unitWidth)));
-      const items = Array.from({ length: qty }, () => unitWidth);
-      const total = qty * unitWidth;
-      const shortfall = Math.max(0, requiredWidth - total);
-      const overhang = Math.max(0, total - requiredWidth);
-      return { items, shortfall, overhang, qty };
-    })
-    .sort((a, b) =>
-      (a.shortfall * 10000 + a.overhang * 100 + a.qty) -
-      (b.shortfall * 10000 + b.overhang * 100 + b.qty),
-    );
+function bestWidthCombination(requiredWidth: number, widths: number[], maxUnits = 8) {
+  let best: number[] = [];
 
-  return candidates[0]?.items ?? [];
+  const score = (items: number[]) => {
+    const total = items.reduce((sum, item) => sum + item, 0);
+    const shortfall = Math.max(0, requiredWidth - total);
+    const overhang = Math.max(0, total - requiredWidth);
+    return shortfall * 10000 + overhang * 100 + items.length;
+  };
+
+  const visit = (items: number[], startIndex: number) => {
+    if (items.length > 0 && (best.length === 0 || score(items) < score(best))) best = [...items];
+    if (items.length === maxUnits) return;
+    for (let index = startIndex; index < widths.length; index += 1) {
+      visit([...items, widths[index]], index);
+    }
+  };
+
+  visit([], 0);
+  return best;
 }
 
 function NumberField({
@@ -129,7 +133,7 @@ export default function EngineeringIntelligencePage() {
 
   const curtainResult = useMemo(() => {
     const profile = CURTAIN_PROFILES[curtainSeries];
-    const combination = bestEqualWidthCombination(doorWidth, profile.widths);
+    const combination = bestWidthCombination(doorWidth, profile.widths);
     const installedWidth = combination.reduce((sum, width) => sum + width, 0);
     const effectiveWidth = Math.max(0, installedWidth - Math.max(0, combination.length - 1) * 0.03);
     const coverage = doorWidth > 0 ? Math.min(120, (effectiveWidth / doorWidth) * 100) : 0;
@@ -284,7 +288,7 @@ export default function EngineeringIntelligencePage() {
               <Card>
                 <CardHeader>
                   <CardTitle>Door and site conditions</CardTitle>
-                  <CardDescription>Models are combined only within the same series.</CardDescription>
+                  <CardDescription>Different lengths may be combined, but different product series are never mixed.</CardDescription>
                 </CardHeader>
                 <CardContent className="grid grid-cols-2 gap-4">
                   <NumberField label="Door width" value={doorWidth} onChange={setDoorWidth} unit="m" min={0.5} step={0.1} />
@@ -361,7 +365,7 @@ export default function EngineeringIntelligencePage() {
                       />
                     </div>
                     <div className="absolute bottom-1 left-0 right-0 text-center text-xs text-slate-600">
-                      Door {doorWidth.toFixed(2)} m W × {doorHeight.toFixed(2)} m H • equal {curtainResult.combination[0]?.toFixed(1) ?? '—'} m units
+                      Door {doorWidth.toFixed(2)} m W × {doorHeight.toFixed(2)} m H • proportional unit widths shown
                     </div>
                   </div>
                   <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border bg-slate-50 p-3 text-sm">
