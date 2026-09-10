@@ -800,7 +800,8 @@ doc.setDrawColor(242, 163, 60);
   const installedW = doorW * Math.min(1, selection.totalLengthMm / Math.max(doorWidthMm, 1));
   const unitStartX = doorX + (doorW - installedW) / 2;
   const unitY = doorY - 12;
-  const unitH = selection.model.category === 'recessed' ? 3.5 : 12;
+  // Keep a full website-style header card for every unit, including recessed models.
+  const unitH = 12;
 
   // Door frame
   doc.setFillColor(246, 249, 252);
@@ -849,13 +850,19 @@ doc.setDrawColor(242, 163, 60);
       doc.roundedRect(unitX + 2, unitY + 2, Math.max(2, uw - 4), 2, 0.5, 0.5, 'F');
     }
 
+    // Website-style labels stay inside the header. Previously these were
+    // placed in the airflow area and then painted over by the gradient.
     doc.setFont('helvetica', 'bold');
-    doc.setFontSize(Math.min(6.5, Math.max(4.2, uw / 6)));
-    doc.setTextColor(...COLORS.text);
-    doc.text(model.model, unitX + uw / 2, unitY + unitH + 4, { align: 'center', maxWidth: Math.max(8, uw - 1) });
+    doc.setFontSize(Math.min(6.2, Math.max(4.2, uw / 7)));
+    doc.setTextColor(0, 91, 150);
+    doc.text(model.model, unitX + uw / 2, unitY + 7.1, {
+      align: 'center',
+      maxWidth: Math.max(8, uw - 3),
+    });
     doc.setFont('helvetica', 'normal');
     doc.setFontSize(5.5);
-    doc.text(`${model.lengthMm} mm`, unitX + uw / 2, unitY + unitH + 7, { align: 'center' });
+    doc.setTextColor(...COLORS.text);
+    doc.text(`${model.lengthMm} mm`, unitX + uw / 2, unitY + 10.4, { align: 'center' });
 
     // Straight, proportional airflow column with a light fade toward the floor.
     const jetTop = doorY;
@@ -891,6 +898,20 @@ doc.setDrawColor(242, 163, 60);
 
     unitX += uw;
   });
+
+  // Same combined-barrier marker used by the website visualization.
+  const barrierText = 'Combined air barrier';
+  doc.setFont('helvetica', 'normal');
+  doc.setFontSize(5.5);
+  const barrierW = doc.getTextWidth(barrierText) + 8;
+  const barrierX = pageW / 2 - barrierW / 2;
+  const barrierY = doorY + doorH * 0.55;
+  doc.setFillColor(255, 255, 255);
+  doc.setDrawColor(220, 226, 234);
+  doc.setLineWidth(0.2);
+  doc.roundedRect(barrierX, barrierY - 4, barrierW, 7, 3.5, 3.5, 'FD');
+  doc.setTextColor(...COLORS.text);
+  doc.text(barrierText, pageW / 2, barrierY + 0.5, { align: 'center' });
 
   doc.setFont('helvetica', 'bold');
   doc.setFontSize(7);
