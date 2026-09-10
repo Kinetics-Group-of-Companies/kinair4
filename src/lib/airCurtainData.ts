@@ -290,6 +290,17 @@ function speedValues(model: AirCurtainModel, speed: AirCurtainSpeed, supplyFrequ
 
 type Candidate = { model: AirCurtainModel; vals: ReturnType<typeof speedValues> };
 
+/**
+ * Stable catalogue family key used when creating mixed-length banks.
+ * FM-4510 / FM-4515 / FM-4520 belong to FM-45, while FM-55 is a separate
+ * performance series even if imported rows have a missing or incorrect seriesId.
+ */
+function catalogueSeriesKey(model: AirCurtainModel): string {
+  const normalized = model.model.toUpperCase().replace(/[^A-Z0-9]/g, '');
+  const match = normalized.match(/^([A-Z]+)(\d{2})/);
+  return match ? `${match[1]}-${match[2]}` : (model.seriesId || normalized);
+}
+
 function buildSelection(
   units: AirCurtainUnit[],
   candidates: Candidate[],
@@ -551,7 +562,10 @@ export function selectAirCurtains(
         const a = candidates[i].model;
         const b = candidates[j].model;
         if (a.category !== b.category) continue;
+        // "Allow mixed lengths" means different lengths from ONE product
+        // series. Never combine FM-45 with FM-55 (or any other family).
         if (a.seriesId && b.seriesId && a.seriesId !== b.seriesId) continue;
+        if (catalogueSeriesKey(a) !== catalogueSeriesKey(b)) continue;
         if (a.brand !== b.brand) continue;
         if (b.lengthMm >= a.lengthMm) continue;
 
@@ -575,13 +589,23 @@ export function selectAirCurtains(
     }
   }
 
-  // Full-coverage matches (>= 100%) always rank first; under-coverage results
-  // come last, each group sorted by its score.
+  // Ranking priority for door-width selection:
+  // 1. full coverage, 2. closest width to 100%, 3. fewer physical units,
+  // 4. fewer distinct model lengths, then engineering score.
+  // This prevents 3 x 900 mm (108%) outranking an exact 1500 + 1000 mm
+  // two-unit solution for a 2500 mm opening.
   return results
     .sort((x, y) => {
       const fx = x.matchPercent >= 100 ? 0 : 1;
       const fy = y.matchPercent >= 100 ? 0 : 1;
-      return fx - fy || x.score - y.score;
+      const widthDifference = Math.abs(x.matchPercent - 100) - Math.abs(y.matchPercent - 100);
+      return (
+        fx - fy ||
+        widthDifference ||
+        x.unitsRequired - y.unitsRequired ||
+        x.units.length - y.units.length ||
+        x.score - y.score
+      );
     })
     .slice(0, limit);
 }
