@@ -265,10 +265,20 @@ export default function EngineeringIntelligencePage() {
     <MainLayout>
       <style>{`
         @keyframes kinairJetFall {
-          0% { transform: translate3d(0, -18px, 0); opacity: 0; }
+          0% { transform: translate3d(-2px, -24px, 0) rotate(-3deg); opacity: 0; }
           12% { opacity: .9; }
-          82% { opacity: .55; }
-          100% { transform: translate3d(0, 205px, 0); opacity: 0; }
+          30% { transform: translate3d(4px, 55px, 0) rotate(2deg); }
+          58% { transform: translate3d(-5px, 120px, 0) rotate(-2deg); opacity: .7; }
+          82% { transform: translate3d(4px, 175px, 0) rotate(2deg); opacity: .45; }
+          100% { transform: translate3d(-2px, 225px, 0) rotate(-2deg); opacity: 0; }
+        }
+        @keyframes kinairJetSway {
+          0%, 100% { transform: translateX(-7px) skewX(-3deg) scaleX(.94); opacity: .18; }
+          50% { transform: translateX(8px) skewX(4deg) scaleX(1.08); opacity: .38; }
+        }
+        @keyframes kinairMixSway {
+          0%, 100% { transform: translateX(-3px) scaleX(.75); opacity: .35; }
+          50% { transform: translateX(3px) scaleX(1.25); opacity: .7; }
         }
         @keyframes kinairFlowRight {
           0% { transform: translateX(-7px); opacity: .25; }
@@ -277,7 +287,7 @@ export default function EngineeringIntelligencePage() {
         }
         .kinair-flow-arrow { animation: kinairFlowRight .9s ease-in-out infinite; }
         @media (prefers-reduced-motion: reduce) {
-          .kinair-jet-particle, .kinair-flow-arrow { animation: none !important; }
+          .kinair-jet-particle, .kinair-jet-wave, .kinair-mix-wave, .kinair-flow-arrow { animation: none !important; }
         }
       `}</style>
       <section className="bg-gradient-primary py-10 text-primary-foreground print:bg-white print:text-black">
@@ -416,6 +426,18 @@ export default function EngineeringIntelligencePage() {
                               background: jetGradients[unitIndex % jetGradients.length],
                             }}
                           >
+                            {Array.from({ length: 3 }, (_, waveIndex) => (
+                              <span
+                                key={`wave-${waveIndex}`}
+                                className="kinair-jet-wave pointer-events-none absolute -top-[8%] h-[116%] rounded-[48%] bg-gradient-to-b from-white/5 via-white/35 to-transparent blur-xl"
+                                style={{
+                                  left: `${5 + waveIndex * 31}%`,
+                                  width: '34%',
+                                  animation: `kinairJetSway ${2.4 + waveIndex * 0.55}s ease-in-out infinite`,
+                                  animationDelay: `${-waveIndex * 0.7}s`,
+                                }}
+                              />
+                            ))}
                             {Array.from({ length: 5 }, (_, particleIndex) => (
                               <span
                                 key={particleIndex}
@@ -428,7 +450,10 @@ export default function EngineeringIntelligencePage() {
                               />
                             ))}
                             {unitIndex < curtainResult.combination.length - 1 && (
-                              <span className="absolute -right-2 top-0 z-10 h-full w-4 bg-gradient-to-r from-transparent via-white/45 to-transparent blur-[3px]" />
+                              <span
+                                className="kinair-mix-wave absolute -right-2 top-0 z-10 h-full w-4 bg-gradient-to-r from-transparent via-white/55 to-transparent blur-[3px]"
+                                style={{ animation: 'kinairMixSway 2.2s ease-in-out infinite' }}
+                              />
                             )}
                           </div>
                         ))}
