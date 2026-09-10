@@ -29,6 +29,7 @@ import {
 import { useTenantData } from '@/hooks/useFanDatabase';
 import { downloadAirCurtainDatasheet } from '@/lib/airCurtainDatasheet';
 import { StreamRangeChart, type StreamSpeed } from '@/components/aircurtain/StreamRangeChart';
+import { AirCurtainDigitalTwin } from '@/components/aircurtain/AirCurtainDigitalTwin';
 
 
 import {
@@ -617,7 +618,18 @@ export default function AirCurtainSelectorPage() {
 
           {/* Detail + velocity projection */}
           {selected && (
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+            <div className="space-y-4">
+              <AirCurtainDigitalTwin
+                selection={selected}
+                doorWidthMm={doorWidthMm}
+                doorHeightM={doorHeightM}
+                seriesName={seriesRecords.find((series) => series.id === selected.model.seriesId)?.name}
+                productImageUrl={
+                  seriesRecords.find((series) => series.id === selected.model.seriesId)?.imageUrl
+                  || selected.model.drawingUrl
+                }
+              />
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
               <div className="kinair-card p-4 md:p-6">
                 <div className="flex items-center justify-between gap-3 mb-3">
                   <h3 className="text-base font-bold">{selected.model.model}</h3>
@@ -750,6 +762,7 @@ export default function AirCurtainSelectorPage() {
                 </p>
               </div>
 
+            </div>
             </div>
           )}
         </div>
