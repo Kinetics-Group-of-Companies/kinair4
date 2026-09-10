@@ -50,30 +50,10 @@ export function AirCurtainDigitalTwin({
 
   return (
     <div className="kinair-card overflow-hidden p-4 md:p-6">
-      <style>{`
-        @keyframes actualCurtainFall {
-          0% { transform: translate3d(-2px,-24px,0) rotate(-2deg); opacity: 0; }
-          12% { opacity: .9; }
-          32% { transform: translate3d(4px,62px,0) rotate(2deg); }
-          62% { transform: translate3d(-4px,132px,0) rotate(-2deg); opacity: .65; }
-          100% { transform: translate3d(2px,235px,0) rotate(2deg); opacity: 0; }
-        }
-        @keyframes actualCurtainWave {
-          0%,100% { transform: translateX(-6px) skewX(-3deg) scaleX(.94); opacity: .16; }
-          50% { transform: translateX(7px) skewX(4deg) scaleX(1.08); opacity: .36; }
-        }
-        @keyframes actualCurtainMix {
-          0%,100% { transform: translateX(-3px) scaleX(.75); opacity: .35; }
-          50% { transform: translateX(3px) scaleX(1.25); opacity: .75; }
-        }
-        @media (prefers-reduced-motion:reduce) {
-          .actual-curtain-particle,.actual-curtain-wave,.actual-curtain-mix { animation:none!important; }
-        }
-      `}</style>
 
       <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
         <div>
-          <h3 className="text-lg font-bold">Actual-model Door Digital Twin</h3>
+          <h3 className="text-lg font-bold">Static Combination Coverage</h3>
           <p className="text-sm text-muted-foreground">
             {seriesName || selection.model.brand} • {isRecessed ? 'Ceiling recessed' : 'Wall mounted'} • {selection.arrangement}
           </p>
@@ -180,34 +160,17 @@ export function AirCurtainDigitalTwin({
                     background: JET_GRADIENTS[unitIndex % JET_GRADIENTS.length],
                   }}
                 >
-                  {Array.from({ length: 3 }, (_, waveIndex) => (
+                  {[18, 38, 58, 78].map((left) => (
                     <span
-                      key={waveIndex}
-                      className="actual-curtain-wave pointer-events-none absolute -top-[8%] h-[116%] rounded-[48%] bg-gradient-to-b from-white/5 via-white/35 to-transparent blur-xl"
-                      style={{
-                        left: `${5 + waveIndex * 31}%`,
-                        width: '34%',
-                        animation: `actualCurtainWave ${2.4 + waveIndex * .55}s ease-in-out infinite`,
-                        animationDelay: `${-waveIndex * .7}s`,
-                      }}
-                    />
-                  ))}
-                  {Array.from({ length: 5 }, (_, particleIndex) => (
-                    <span
-                      key={particleIndex}
-                      className="actual-curtain-particle absolute top-0 h-7 w-1 rounded-full bg-white/85 shadow-[0_0_8px_rgba(255,255,255,.9)]"
-                      style={{
-                        left: `${14 + particleIndex * 18}%`,
-                        animation: `actualCurtainFall ${1.2 + ((unitIndex + particleIndex) % 4) * .16}s linear infinite`,
-                        animationDelay: `${-((unitIndex * 2 + particleIndex) % 7) * .2}s`,
-                      }}
-                    />
+                      key={left}
+                      className="pointer-events-none absolute bottom-5 top-4 w-px bg-white/75"
+                      style={{ left: `${left}%` }}
+                    >
+                      <span className="absolute -bottom-0.5 -left-[3px] h-2 w-2 rotate-45 border-b-2 border-r-2 border-white/90" />
+                    </span>
                   ))}
                   {unitIndex < installedUnits.length - 1 && (
-                    <span
-                      className="actual-curtain-mix absolute -right-2 top-0 z-10 h-full w-4 bg-gradient-to-r from-transparent via-white/55 to-transparent blur-[3px]"
-                      style={{ animation: 'actualCurtainMix 2.2s ease-in-out infinite' }}
-                    />
+                    <span className="absolute -right-px top-0 h-full w-[2px] bg-white/70" />
                   )}
                 </div>
               ))}
