@@ -3121,15 +3121,36 @@ export async function generateEnhancedDatasheet(options: DatasheetOptions): Prom
     doc.setFontSize(9);
     doc.setTextColor(...COLORS.text);
     doc.text('System effect on performance curve', 10, 101);
-    doc.setDrawColor(150, 160, 170);
-    doc.setLineWidth(0.35);
+    // Professional engineering plot: framed plot area, major grid, scaled
+    // engineering-unit ticks and identified operating points.
+    doc.setFillColor(250, 252, 255);
+    doc.setDrawColor(205, 214, 224);
+    doc.setLineWidth(0.25);
+    doc.rect(curveX, curveY, curveW, curveH, 'FD');
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(5.2);
+    for (let tick = 0; tick <= 5; tick += 1) {
+      const gridX = curveX + curveW * tick / 5;
+      const gridY = curveY + curveH - curveH * tick / 5;
+      doc.setDrawColor(222, 229, 237);
+      doc.setLineWidth(0.18);
+      doc.line(gridX, curveY, gridX, curveY + curveH);
+      doc.line(curveX, gridY, curveX + curveW, gridY);
+      doc.setTextColor(...COLORS.textLight);
+      const flowTick = curveMaxFlow * tick / 5 * AIRFLOW_UNITS[airflowUnit].factor;
+      const pressureTick = curveMaxPressure * tick / 5 * PRESSURE_UNITS[pressureUnit].factor;
+      doc.text(flowTick >= 100 ? Math.round(flowTick).toString() : flowTick.toFixed(1), gridX, curveY + curveH + 3.8, { align: 'center' });
+      doc.text(pressureTick >= 100 ? Math.round(pressureTick).toString() : pressureTick.toFixed(1), curveX - 2, gridY + 1.5, { align: 'right' });
+    }
+    doc.setDrawColor(65, 78, 94);
+    doc.setLineWidth(0.55);
     doc.line(curveX, curveY, curveX, curveY + curveH);
     doc.line(curveX, curveY + curveH, curveX + curveW, curveY + curveH);
-    doc.setFont('helvetica', 'normal');
+    doc.setFont('helvetica', 'bold');
     doc.setFontSize(6);
-    doc.setTextColor(...COLORS.textLight);
-    doc.text(`Static pressure (${PRESSURE_UNITS[pressureUnit].label})`, curveX - 8, curveY + curveH / 2, { angle: 90, align: 'center' });
-    doc.text(`Airflow (${AIRFLOW_UNITS[airflowUnit].label})`, curveX + curveW / 2, curveY + curveH + 7, { align: 'center' });
+    doc.setTextColor(...COLORS.text);
+    doc.text(`Static pressure (${PRESSURE_UNITS[pressureUnit].label})`, curveX - 11, curveY + curveH / 2, { angle: 90, align: 'center' });
+    doc.text(`Airflow (${AIRFLOW_UNITS[airflowUnit].label})`, curveX + curveW / 2, curveY + curveH + 8, { align: 'center' });
 
     if (validCurve.length > 1) {
       doc.setDrawColor(105, 115, 125);
@@ -3149,11 +3170,34 @@ export async function generateEnhancedDatasheet(options: DatasheetOptions): Prom
         doc.line(previous.x, previous.y, current.x, current.y);
       }
     }
-    doc.setFontSize(6);
+    const singleDutyPoint = curvePoint(selection.operatingPoint.airflow, selection.operatingPoint.staticPressure);
+    const systemDutyPoint = curvePoint(combinedFlowCmh, combinedStaticPa);
+    doc.setFillColor(100, 116, 139);
+    doc.setDrawColor(255, 255, 255);
+    doc.circle(singleDutyPoint.x, singleDutyPoint.y, 1.6, 'FD');
+    doc.setFillColor(245, 112, 20);
+    doc.circle(systemDutyPoint.x, systemDutyPoint.y, 2, 'FD');
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(5.5);
+    doc.setTextColor(194, 65, 12);
+    doc.text('SYSTEM DUTY', Math.min(curveX + curveW - 2, systemDutyPoint.x + 3), Math.max(curveY + 5, systemDutyPoint.y - 2), { align: systemDutyPoint.x > curveX + curveW - 28 ? 'right' : 'left' });
+    doc.setFillColor(255, 255, 255);
+    doc.setDrawColor(196, 205, 215);
+    doc.roundedRect(curveX + 4, curveY + 3, 76, 10, 1.2, 1.2, 'FD');
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(5.5);
+    doc.setDrawColor(105, 115, 125);
+    doc.setLineWidth(0.45);
+    doc.setLineDashPattern([2, 1.4], 0);
+    doc.line(curveX + 8, curveY + 7, curveX + 20, curveY + 7);
+    doc.setLineDashPattern([], 0);
     doc.setTextColor(105, 115, 125);
-    doc.text('Dashed: single fan', curveX + 4, curveY + 5);
+    doc.text('Single fan', curveX + 23, curveY + 8.5);
+    doc.setDrawColor(30, 105, 220);
+    doc.setLineWidth(0.9);
+    doc.line(curveX + 45, curveY + 7, curveX + 57, curveY + 7);
     doc.setTextColor(30, 105, 220);
-    doc.text(`Blue: ${multiFanQuantity}-fan ${multiFanArrangement} system`, curveX + 39, curveY + 5);
+    doc.text(`${multiFanQuantity}-fan ${multiFanArrangement}`, curveX + 60, curveY + 8.5);
 
     const singleAirflowDisplay = selection.operatingPoint.airflow * AIRFLOW_UNITS[airflowUnit].factor;
     const combinedAirflowDisplay = combinedFlowCmh * AIRFLOW_UNITS[airflowUnit].factor;
