@@ -15,6 +15,7 @@ import { useDimensionSchema, useDimensionValues } from '@/hooks/useFlexibleDimen
 import { InteractivePerformanceChart } from './InteractivePerformanceChart';
 import { NoiseDataTable } from './NoiseDataTable';
 import { FanDrawing } from './FanDrawing';
+import { FanAirflowTwin } from './FanAirflowTwin';
 import { AddToProjectDialog } from '@/components/projects/AddToProjectDialog';
 import { useAuth } from '@/lib/authContext';
 import { toast } from 'sonner';
@@ -1291,6 +1292,18 @@ export function FanDetailsPanel({ selection, airflowUnit, pressureUnit, airDensi
           <div className="kinair-stat-label text-xs">Weight (kg)</div>
         </div>
       </div>
+
+      <FanAirflowTwin
+        selection={exportSelection}
+        operatingPoint={currentOperatingPoint}
+        airflowUnit={airflowUnit}
+        outletVelocity={outletVelocity}
+        dynamicPressure={dynamicPressure}
+        totalPressure={totalPressure}
+        fanRPM={fanRPM}
+        imageUrl={seriesInfo?.imageUrl}
+        fanType={seriesInfo?.fanType}
+      />
 
       {/* Motor Details Section */}
       <div className="bg-muted/30 rounded-lg p-4 border border-border/50 mb-6">
