@@ -9,17 +9,6 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 
 type EnergyMode = 'fan' | 'air-curtain';
 
-    if (items.length > 0 && (best.length === 0 || score(items) < score(best))) best = [...items];
-    if (items.length === maxUnits) return;
-    for (let index = startIndex; index < widths.length; index += 1) {
-      visit([...items, widths[index]], index);
-    }
-  };
-
-  visit([], 0);
-  return best;
-}
-
 function NumberField({
   label,
   value,
