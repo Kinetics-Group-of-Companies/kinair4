@@ -35,13 +35,13 @@ const CURTAIN_PROFILES: Record<AirCurtainSeries, {
 };
 
 const SYSTEM_EFFECTS = [
-  { id: 'inlet-elbow', label: 'Elbow close to fan inlet', k: 0.45 },
-  { id: 'outlet-elbow', label: 'Elbow close to fan outlet', k: 0.75 },
-  { id: 'abrupt-inlet', label: 'Abrupt or obstructed inlet', k: 0.5 },
-  { id: 'damper', label: 'Damper close to discharge', k: 0.4 },
-  { id: 'grille', label: 'Grille / louvre at discharge', k: 0.25 },
-  { id: 'flexible', label: 'Flexible duct connection', k: 0.2 },
-  { id: 'transition', label: 'Abrupt transition / reducer', k: 0.35 },
+  { id: 'inlet-elbow', label: 'Elbow close to fan inlet', k: 0.45, side: 'inlet' as const },
+  { id: 'outlet-elbow', label: 'Elbow close to fan outlet', k: 0.75, side: 'outlet' as const },
+  { id: 'abrupt-inlet', label: 'Abrupt or obstructed inlet', k: 0.5, side: 'inlet' as const },
+  { id: 'damper', label: 'Damper close to discharge', k: 0.4, side: 'outlet' as const },
+  { id: 'grille', label: 'Grille / louvre at discharge', k: 0.25, side: 'outlet' as const },
+  { id: 'flexible', label: 'Flexible duct connection', k: 0.2, side: 'inlet' as const },
+  { id: 'transition', label: 'Abrupt transition / reducer', k: 0.35, side: 'outlet' as const },
 ];
 
 function bestEqualWidthCombination(requiredWidth: number, widths: number[], maxUnits = 8) {
@@ -140,6 +140,7 @@ export default function EngineeringIntelligencePage() {
     const coveragePass = coverage >= 100;
     const velocityPass = floorVelocity >= 2;
     const pass = heightPass && coveragePass && velocityPass;
+    const recommendedSeries: AirCurtainSeries = doorHeight <= 3.5 ? 'FM35' : doorHeight <= 4.5 ? 'FM45' : 'FM55';
     const risk = !heightPass
       ? `Door height exceeds the ${profile.maxHeight} m series limit`
       : !coveragePass
@@ -148,7 +149,7 @@ export default function EngineeringIntelligencePage() {
           ? 'Estimated floor velocity is below the 2.0 m/s design target'
           : 'Door coverage and estimated jet reach are acceptable';
 
-    return { profile, combination, installedWidth, effectiveWidth, coverage, floorVelocity, pass, risk };
+    return { profile, combination, installedWidth, effectiveWidth, coverage, floorVelocity, pass, risk, recommendedSeries };
   }, [curtainSeries, doorHeight, doorWidth, pressureDifference, windSpeed]);
 
   const [fanAirflow, setFanAirflow] = useState(5000);
@@ -296,8 +297,8 @@ export default function EngineeringIntelligencePage() {
                     <Select value={mountingType} onValueChange={setMountingType}>
                       <SelectTrigger className="mt-1"><SelectValue /></SelectTrigger>
                       <SelectContent>
-                        <SelectItem value="wall">Wall mounted</SelectItem>
-                        <SelectItem value="recessed">Recessed</SelectItem>
+                        <SelectItem value="wall">White wall mounted</SelectItem>
+                        <SelectItem value="recessed">White ceiling recessed</SelectItem>
                       </SelectContent>
                     </Select>
                   </div>
@@ -323,24 +324,51 @@ export default function EngineeringIntelligencePage() {
                       ? <span className="flex items-center gap-1 text-sm text-emerald-600"><CheckCircle2 className="h-4 w-4" />PASS</span>
                       : <span className="flex items-center gap-1 text-sm text-amber-600"><AlertTriangle className="h-4 w-4" />CHECK</span>}
                   </CardTitle>
-                  <CardDescription>{curtainResult.profile.label} • {mountingType === 'wall' ? 'Wall mounted' : 'Recessed'}</CardDescription>
+                  <CardDescription>{curtainResult.profile.label} • {mountingType === 'wall' ? 'White wall mounted' : 'White ceiling recessed'}</CardDescription>
                 </CardHeader>
                 <CardContent className="space-y-5">
-                  <div className="relative h-64 overflow-hidden rounded-xl border bg-gradient-to-b from-sky-100 via-slate-50 to-slate-200">
-                    <div className="absolute left-[12%] right-[12%] top-5 flex h-9 items-center justify-center rounded-md bg-slate-700 text-xs font-semibold text-white shadow-lg">
+                  <div className="relative h-72 overflow-hidden rounded-xl border bg-gradient-to-b from-sky-100 via-slate-50 to-slate-200">
+                    {mountingType === 'recessed' && (
+                      <div className="absolute left-[5%] right-[5%] top-0 h-12 border-b-4 border-slate-300 bg-white shadow-sm">
+                        <div className="pt-1 text-center text-[10px] font-medium text-slate-500">CEILING — RECESSED INSTALLATION</div>
+                      </div>
+                    )}
+                    <div className={`absolute left-[8%] right-[8%] z-10 flex gap-1 ${mountingType === 'recessed' ? 'top-8' : 'top-5'}`}>
                       {curtainResult.combination.map((width, index) => (
-                        <span key={`${width}-${index}`} className="border-r border-white/30 px-3 last:border-0">{width.toFixed(1)} m</span>
+                        <div
+                          key={`${width}-${index}`}
+                          className={`relative flex h-12 items-center justify-center border border-slate-300 bg-gradient-to-b from-white to-slate-100 text-[10px] font-semibold text-slate-700 shadow-md ${mountingType === 'recessed' ? 'rounded-sm border-b-4' : 'rounded-lg'}`}
+                          style={{ flexGrow: width, flexBasis: 0 }}
+                        >
+                          {mountingType === 'wall' && (
+                            <>
+                              <span className="absolute left-2 right-2 top-2 h-2 rounded-sm bg-slate-200" />
+                              <span className="absolute bottom-1 left-2 text-[8px] font-bold text-sky-700">KINAIR</span>
+                            </>
+                          )}
+                          <span className="absolute bottom-1 right-2">{width.toFixed(1)} m</span>
+                          <span className="absolute -bottom-1 left-3 right-3 h-1 rounded-full bg-slate-700" />
+                        </div>
                       ))}
                     </div>
-                    <div className="absolute bottom-5 left-[14%] right-[14%] top-14 overflow-hidden rounded-b-lg border-x-4 border-slate-500 bg-white/60">
+                    <div className={`absolute bottom-6 left-[10%] right-[10%] overflow-hidden rounded-b-lg border-x-4 border-slate-500 bg-white/55 ${mountingType === 'recessed' ? 'top-20' : 'top-17'}`}>
                       <div
-                        className={`mx-auto h-full origin-top bg-gradient-to-b ${curtainResult.pass ? 'from-cyan-400/70 via-cyan-300/35 to-cyan-200/10' : 'from-amber-400/70 via-amber-300/30 to-transparent'}`}
-                        style={{ width: `${Math.min(100, curtainResult.coverage)}%`, clipPath: 'polygon(8% 0, 92% 0, 70% 100%, 30% 100%)' }}
+                        className={`mx-auto h-full origin-top bg-gradient-to-b ${curtainResult.pass ? 'from-cyan-400/75 via-cyan-300/35 to-cyan-100/5' : 'from-amber-400/70 via-amber-300/30 to-transparent'}`}
+                        style={{
+                          width: `${Math.min(100, curtainResult.coverage)}%`,
+                          clipPath: `polygon(${8 + Math.min(16, windSpeed * 2)}% 0, 92% 0, ${70 + Math.min(15, windSpeed * 2)}% 100%, ${30 + Math.min(15, windSpeed * 2)}% 100%)`,
+                        }}
                       />
                     </div>
                     <div className="absolute bottom-1 left-0 right-0 text-center text-xs text-slate-600">
-                      Door {doorWidth.toFixed(2)} m W × {doorHeight.toFixed(2)} m H
+                      Door {doorWidth.toFixed(2)} m W × {doorHeight.toFixed(2)} m H • equal {curtainResult.combination[0]?.toFixed(1) ?? '—'} m units
                     </div>
+                  </div>
+                  <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border bg-slate-50 p-3 text-sm">
+                    <span>Automatic height recommendation</span>
+                    <span className={`font-semibold ${curtainSeries === curtainResult.recommendedSeries ? 'text-emerald-600' : 'text-amber-600'}`}>
+                      {curtainResult.recommendedSeries} for {doorHeight.toFixed(1)} m door
+                    </span>
                   </div>
                   <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
                     <Metric label="Combination" value={curtainResult.combination.length ? curtainResult.combination.map((v) => v.toFixed(1)).join(' + ') : '—'} />
@@ -401,6 +429,69 @@ export default function EngineeringIntelligencePage() {
                   <CardDescription>Estimated additional pressure caused by non-ideal installation.</CardDescription>
                 </CardHeader>
                 <CardContent className="space-y-5">
+                  <div className="overflow-hidden rounded-xl border bg-gradient-to-b from-slate-50 to-slate-200 p-4">
+                    <div className="grid grid-cols-[1fr_auto_1fr] items-center gap-2">
+                      <div className="text-center">
+                        <div className="mb-2 text-xs font-bold text-sky-700">INLET / SUCTION</div>
+                        <div className="flex items-center justify-end gap-1">
+                          <Wind className="h-5 w-5 text-sky-500" />
+                          <div className="h-8 w-20 rounded-l-full border-2 border-slate-400 bg-white" />
+                          <span className="text-2xl text-sky-600">→</span>
+                        </div>
+                        <div className="mt-3 flex flex-wrap justify-center gap-1">
+                          {SYSTEM_EFFECTS.filter((effect) => effect.side === 'inlet' && selectedEffects.includes(effect.id)).map((effect) => (
+                            <span key={effect.id} className="rounded-full bg-amber-100 px-2 py-1 text-[10px] text-amber-900">{effect.label}</span>
+                          ))}
+                          {!SYSTEM_EFFECTS.some((effect) => effect.side === 'inlet' && selectedEffects.includes(effect.id)) && (
+                            <span className="rounded-full bg-emerald-100 px-2 py-1 text-[10px] text-emerald-800">Clear inlet</span>
+                          )}
+                        </div>
+                      </div>
+
+                      <svg viewBox="0 0 180 170" className="h-36 w-36 drop-shadow-xl" aria-label="Inline fan showing correct inlet and outlet direction">
+                        <defs>
+                          <linearGradient id="fanBodyReality" x1="0" x2="1">
+                            <stop offset="0" stopColor="#e2e8f0" />
+                            <stop offset=".45" stopColor="#ffffff" />
+                            <stop offset="1" stopColor="#94a3b8" />
+                          </linearGradient>
+                        </defs>
+                        <path d="M38 42 L139 42 L158 61 L158 111 L139 130 L38 130 L20 111 L20 61 Z" fill="url(#fanBodyReality)" stroke="#475569" strokeWidth="4" />
+                        <ellipse cx="31" cy="86" rx="25" ry="43" fill="#cbd5e1" stroke="#475569" strokeWidth="4" />
+                        <ellipse cx="31" cy="86" rx="17" ry="31" fill="#334155" />
+                        <ellipse cx="147" cy="86" rx="25" ry="43" fill="#e2e8f0" stroke="#475569" strokeWidth="4" />
+                        <ellipse cx="147" cy="86" rx="17" ry="31" fill="#334155" />
+                        <g transform="translate(147 86)" fill="#cbd5e1">
+                          <path d="M0 0 C5 -21 15 -23 20 -17 C13 -7 8 -2 0 0Z" />
+                          <path d="M0 0 C21 5 23 15 17 20 C7 13 2 8 0 0Z" />
+                          <path d="M0 0 C-5 21 -15 23 -20 17 C-13 7 -8 2 0 0Z" />
+                          <path d="M0 0 C-21 -5 -23 -15 -17 -20 C-7 -13 -2 -8 0 0Z" />
+                          <circle r="6" fill="#f8fafc" />
+                        </g>
+                        <rect x="65" y="24" width="54" height="28" rx="6" fill="#e2e8f0" stroke="#475569" strokeWidth="3" />
+                        <path d="M55 130 L122 130 L132 150 L45 150 Z" fill="#94a3b8" stroke="#475569" strokeWidth="3" />
+                        <text x="89" y="93" textAnchor="middle" fill="#0369a1" fontSize="15" fontWeight="700">KINAIR</text>
+                      </svg>
+
+                      <div className="text-center">
+                        <div className="mb-2 text-xs font-bold text-orange-700">OUTLET / DISCHARGE</div>
+                        <div className="flex items-center justify-start gap-1">
+                          <span className="text-2xl text-orange-600">→</span>
+                          <div className="h-8 w-20 rounded-r-full border-2 border-slate-400 bg-white" />
+                          <Wind className="h-5 w-5 text-orange-500" />
+                        </div>
+                        <div className="mt-3 flex flex-wrap justify-center gap-1">
+                          {SYSTEM_EFFECTS.filter((effect) => effect.side === 'outlet' && selectedEffects.includes(effect.id)).map((effect) => (
+                            <span key={effect.id} className="rounded-full bg-amber-100 px-2 py-1 text-[10px] text-amber-900">{effect.label}</span>
+                          ))}
+                          {!SYSTEM_EFFECTS.some((effect) => effect.side === 'outlet' && selectedEffects.includes(effect.id)) && (
+                            <span className="rounded-full bg-emerald-100 px-2 py-1 text-[10px] text-emerald-800">Clear discharge</span>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                    <div className="mt-2 text-center text-xs text-slate-500">Airflow direction: inlet → fan → outlet</div>
+                  </div>
                   <div className="grid grid-cols-2 gap-3">
                     <Metric label="Duct velocity" value={`${fanReality.velocity.toFixed(1)} m/s`} />
                     <Metric label="Velocity pressure" value={`${fanReality.velocityPressure.toFixed(0)} Pa`} />
