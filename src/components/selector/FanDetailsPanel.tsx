@@ -15,7 +15,7 @@ import { useDimensionSchema, useDimensionValues } from '@/hooks/useFlexibleDimen
 import { InteractivePerformanceChart } from './InteractivePerformanceChart';
 import { NoiseDataTable } from './NoiseDataTable';
 import { FanDrawing } from './FanDrawing';
-import { FanAirflowTwin } from './FanAirflowTwin';
+import { FanAirflowTwin, type MultiFanArrangement } from './FanAirflowTwin';
 import { AddToProjectDialog } from '@/components/projects/AddToProjectDialog';
 import { useAuth } from '@/lib/authContext';
 import { toast } from 'sonner';
@@ -101,6 +101,8 @@ export function FanDetailsPanel({ selection, airflowUnit, pressureUnit, airDensi
   const { data: flexDimensionValues = [] } = useDimensionValues(selection.seriesId || null);
   
   const [activeTab, setActiveTab] = useState('curves');
+  const [multiFanQuantity, setMultiFanQuantity] = useState(1);
+  const [multiFanArrangement, setMultiFanArrangement] = useState<MultiFanArrangement>('parallel');
   const [interactiveMode, setInteractiveMode] = useState(false);
   const [showSystemCurve, setShowSystemCurve] = useState(true);
   const [showFamilyCurve, setShowFamilyCurve] = useState(false);
@@ -815,6 +817,8 @@ export function FanDetailsPanel({ selection, airflowUnit, pressureUnit, airDensi
         pressureUnit,
         performanceData,
         fanRPM,
+        multiFanQuantity,
+        multiFanArrangement,
         outletVelocity,
         dynamicPressure,
         totalPressure,
@@ -942,6 +946,8 @@ export function FanDetailsPanel({ selection, airflowUnit, pressureUnit, airDensi
         pressureUnit,
         performanceData,
         fanRPM,
+        multiFanQuantity,
+        multiFanArrangement,
         outletVelocity,
         dynamicPressure,
         totalPressure,
@@ -1296,6 +1302,7 @@ export function FanDetailsPanel({ selection, airflowUnit, pressureUnit, airDensi
       <FanAirflowTwin
         selection={exportSelection}
         operatingPoint={currentOperatingPoint}
+        performanceData={performanceData}
         airflowUnit={airflowUnit}
         outletVelocity={outletVelocity}
         dynamicPressure={dynamicPressure}
@@ -1303,6 +1310,10 @@ export function FanDetailsPanel({ selection, airflowUnit, pressureUnit, airDensi
         fanRPM={fanRPM}
         imageUrl={seriesInfo?.imageUrl}
         fanType={seriesInfo?.fanType}
+        quantity={multiFanQuantity}
+        arrangement={multiFanArrangement}
+        onQuantityChange={setMultiFanQuantity}
+        onArrangementChange={setMultiFanArrangement}
       />
 
       {/* Motor Details Section */}
