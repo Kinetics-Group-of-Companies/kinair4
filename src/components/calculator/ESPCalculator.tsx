@@ -11,7 +11,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 
 type Shape='rectangular'|'circular';
-type Kind='duct'|'flex'|'elbow90'|'elbow45'|'transition'|'tee-straight'|'tee-branch'|'damper'|'filter'|'coil'|'silencer'|'grille'|'louvre'|'custom';
+type Kind='duct'|'flex'|'elbow90'|'elbow90-vaned'|'elbow90-mitered'|'elbow45'|'transition'|'reducer'|'diffuser'|'tee-straight'|'tee-branch'|'wye-straight'|'wye-branch'|'takeoff'|'cross-straight'|'cross-branch'|'entry'|'exit'|'damper'|'fire-damper'|'backdraft-damper'|'vav'|'fan-inlet'|'fan-outlet'|'filter'|'coil'|'silencer'|'grille'|'louvre'|'custom';
 type Item={id:string;name:string;kind:Kind;shape:Shape;flow:number;width:number;height:number;diameter:number;length:number;qty:number;k:number;fixed:number};
 type Path={id:string;name:string;items:Item[]};
 type FlowUnit='m3h'|'ls'|'cfm'|'m3s';
@@ -22,12 +22,28 @@ type Material=keyof typeof MATERIALS;
 const FITTING_SOURCES:Record<Kind,{code:string;basis:string;document:string}>={
  duct:{code:'KINAIR METHOD',basis:'Straight round / rectangular duct',document:'KINAIR Darcy-Weisbach duct friction calculation basis'},
  flex:{code:'MANUFACTURER DATA',basis:'Flexible duct construction and compression dependent',document:'Use tested manufacturer friction data; default multiplier is an estimate'},
- elbow90:{code:'KINAIR METHOD',basis:'Round die-stamped r/D=1.5 / rectangular smooth-radius without vanes',document:'KINAIR fitting geometry and dynamic-loss calculation basis'},
+ elbow90:{code:'KINAIR METHOD',basis:'Smooth-radius 90° elbow without turning vanes',document:'Geometry-dependent K; confirm radius ratio and aspect ratio'},
+ 'elbow90-vaned':{code:'KINAIR METHOD',basis:'Rectangular 90° elbow with turning vanes',document:'Confirm vane type, spacing and throat geometry'},
+ 'elbow90-mitered':{code:'KINAIR METHOD',basis:'Mitered square 90° elbow without vanes',document:'High-loss geometry; confirm construction before issue'},
  elbow45:{code:'KINAIR METHOD',basis:'Round die-stamped 45 degree, r/D=1.5',document:'KINAIR fitting geometry and dynamic-loss calculation basis'},
- transition:{code:'KINAIR METHOD',basis:'Supply round transition / symmetrical rectangular transition',document:'KINAIR transition geometry and dynamic-loss calculation basis'},
+ transition:{code:'KINAIR METHOD',basis:'Generic area transition',document:'Confirm inlet/outlet areas, included angle and flow direction'},
+ reducer:{code:'KINAIR METHOD',basis:'Converging reducer',document:'Coefficient depends on area ratio and included angle'},
+ diffuser:{code:'KINAIR METHOD',basis:'Diverging expander / diffuser',document:'Coefficient depends on area ratio, included angle and downstream condition'},
  'tee-straight':{code:'KINAIR METHOD',basis:'90 degree diverging tee, straight-path coefficient Cs',document:'KINAIR junction calculation basis; coefficient varies with area and airflow ratios'},
- 'tee-branch':{code:'KINAIR METHOD',basis:'90 degree diverging tee, branch-path coefficient Cb',document:'KINAIR junction calculation basis; coefficient varies with area and airflow ratios'},
- damper:{code:'KINAIR METHOD',basis:'Rectangular opposed-blade damper',document:'KINAIR damper calculation basis; blade angle/opening required'},
+ 'tee-branch':{code:'KINAIR METHOD',basis:'90° tee branch path',document:'Enter path-specific coefficient using area and airflow ratios'},
+ 'wye-straight':{code:'KINAIR METHOD',basis:'30°/45° wye straight path',document:'Enter path-specific coefficient using area and airflow ratios'},
+ 'wye-branch':{code:'KINAIR METHOD',basis:'30°/45° wye branch path',document:'Enter path-specific coefficient using area and airflow ratios'},
+ takeoff:{code:'KINAIR METHOD',basis:'Conical / bellmouth branch take-off',document:'Confirm take-off geometry, branch flow ratio and reference velocity'},
+ 'cross-straight':{code:'KINAIR METHOD',basis:'Diverging cross straight path',document:'Enter path-specific coefficient for the selected outlet path'},
+ 'cross-branch':{code:'KINAIR METHOD',basis:'Diverging cross branch path',document:'Enter path-specific coefficient for the selected outlet path'},
+ entry:{code:'KINAIR METHOD',basis:'Duct entry / intake hood',document:'Confirm bellmouth, sharp-edge or hood geometry'},
+ exit:{code:'KINAIR METHOD',basis:'Abrupt exit / free discharge',document:'Uses actual outlet velocity pressure reference'},
+ damper:{code:'KINAIR METHOD',basis:'Opposed-blade volume-control damper',document:'Coefficient changes sharply with blade angle/opening'},
+ 'fire-damper':{code:'MANUFACTURER DATA',basis:'Curtain or multi-blade fire damper',document:'Use certified pressure drop for exact tested model and size'},
+ 'backdraft-damper':{code:'MANUFACTURER DATA',basis:'Gravity / counterbalanced backdraft damper',document:'Use manufacturer loss at selected face velocity'},
+ vav:{code:'MANUFACTURER DATA',basis:'VAV terminal box',document:'Use minimum inlet static pressure from certified selection'},
+ 'fan-inlet':{code:'SYSTEM EFFECT',basis:'Fan inlet connection / inlet obstruction',document:'Enter project-specific system-effect loss for actual inlet geometry'},
+ 'fan-outlet':{code:'SYSTEM EFFECT',basis:'Fan outlet connection / discharge elbow',document:'Enter project-specific system-effect loss for actual outlet geometry'},
  filter:{code:'MANUFACTURER DATA',basis:'Clean/design/final pressure drop',document:'Filter manufacturer certified data'},
  coil:{code:'MANUFACTURER DATA',basis:'Coil selection pressure drop at selected face velocity',document:'Coil manufacturer certified data'},
  silencer:{code:'MANUFACTURER DATA',basis:'Insertion-loss selection pressure drop',document:'Sound attenuator manufacturer certified data'},
@@ -36,7 +52,18 @@ const FITTING_SOURCES:Record<Kind,{code:string;basis:string;document:string}>={
  custom:{code:'USER DATA',basis:'User-defined K or fixed pressure drop',document:'Attach project-specific test or manufacturer evidence'}
 };
 
-const LIB:Record<Kind,{label:string;k:number;fixed?:number}>={duct:{label:'Straight duct',k:0},flex:{label:'Flexible duct',k:0},elbow90:{label:'90° elbow',k:.25},elbow45:{label:'45° elbow',k:.12},transition:{label:'Transition',k:.2},'tee-straight':{label:'Tee — straight path',k:.2},'tee-branch':{label:'Tee — branch path',k:.9},damper:{label:'Volume damper',k:.5},filter:{label:'Filter — manufacturer loss',k:0,fixed:75},coil:{label:'Coil — manufacturer loss',k:0,fixed:100},silencer:{label:'Sound attenuator',k:0,fixed:50},grille:{label:'Grille / diffuser',k:0,fixed:25},louvre:{label:'Louvre',k:0,fixed:35},custom:{label:'Custom component',k:0}};
+const LIB:Record<Kind,{label:string;k:number;fixed?:number}>={
+ duct:{label:'Straight duct',k:0},flex:{label:'Flexible duct',k:0},
+ elbow90:{label:'90° radius elbow',k:.25},'elbow90-vaned':{label:'90° elbow with vanes',k:.15},'elbow90-mitered':{label:'90° mitered elbow',k:1.1},elbow45:{label:'45° elbow',k:.12},
+ transition:{label:'Generic transition',k:.2},reducer:{label:'Reducer',k:.12},diffuser:{label:'Expander / diffuser',k:.3},
+ 'tee-straight':{label:'Tee - straight path',k:.2},'tee-branch':{label:'Tee - branch path',k:.9},
+ 'wye-straight':{label:'Wye - straight path',k:.15},'wye-branch':{label:'Wye - branch path',k:.55},takeoff:{label:'Conical branch take-off',k:.75},
+ 'cross-straight':{label:'Cross - straight path',k:.25},'cross-branch':{label:'Cross - branch path',k:1},
+ entry:{label:'Duct entry / intake',k:.5},exit:{label:'Duct exit / discharge',k:1},
+ damper:{label:'Volume-control damper',k:.5},'fire-damper':{label:'Fire damper',k:0},'backdraft-damper':{label:'Backdraft damper',k:0},vav:{label:'VAV terminal',k:0},
+ 'fan-inlet':{label:'Fan inlet system effect',k:.25},'fan-outlet':{label:'Fan outlet system effect',k:.35},
+ filter:{label:'Filter - manufacturer loss',k:0,fixed:75},coil:{label:'Coil - manufacturer loss',k:0,fixed:100},silencer:{label:'Sound attenuator',k:0,fixed:50},grille:{label:'Grille / diffuser',k:0,fixed:25},louvre:{label:'Louvre',k:0,fixed:35},custom:{label:'Custom component',k:0}
+};
 const id=()=>Math.random().toString(36).slice(2,9);
 const item=(kind:Kind='duct'):Item=>({id:id(),name:LIB[kind].label,kind,shape:'rectangular',flow:3600,width:600,height:400,diameter:400,length:kind==='duct'||kind==='flex'?10:0,qty:1,k:LIB[kind].k,fixed:LIB[kind].fixed??0});
 const n=(v:unknown,d=0)=>{const x=Number(v);return Number.isFinite(x)?x:d};
@@ -47,7 +74,7 @@ const calc=(i:Item,density:number,viscosity:number,rough:number,flowFactor:numbe
  const area=i.shape==='circular'?Math.PI*d*d/4:w*h,dh=i.shape==='circular'?d:2*w*h/(w+h),v=q/area,vp=density*v*v/2,re=density*v*dh/viscosity,rr=rough/1000/dh;
  const f=re<=0?0:re<2300?64/re:.25/Math.pow(Math.log10(rr/3.7+5.74/Math.pow(re,.9)),2);
  const friction=(i.kind==='duct'||i.kind==='flex')?f*Math.max(0,i.length)/dh*vp*(i.kind==='flex'?2.5:1)*Math.max(1,i.qty):0;
- const dynamic=(Math.max(0,i.k)*vp+Math.max(0,i.fixed))*Math.max(1,i.qty);
+ const dynamic=(i.k*vp+Math.max(0,i.fixed))*Math.max(1,i.qty);
  return {...i,area,dh,v,vp,re,f,friction,dynamic,loss:friction+dynamic};
 };
 const fmt=(v:number)=>`${v>=100?v.toFixed(0):v.toFixed(1)} Pa`;
