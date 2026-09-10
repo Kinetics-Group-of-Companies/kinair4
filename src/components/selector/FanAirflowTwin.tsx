@@ -91,8 +91,20 @@ export function FanAirflowTwin({
           0%,100% { opacity: .36; transform: scaleY(.94); }
           50% { opacity: .7; transform: scaleY(1.04); }
         }
+        @keyframes fanAirflowTravel {
+          from { stroke-dashoffset: 110; opacity: .22; }
+          45% { opacity: .92; }
+          to { stroke-dashoffset: 0; opacity: .2; }
+        }
+        .fan-airflow-stream {
+          fill: none;
+          stroke-linecap: round;
+          stroke-dasharray: 12 10;
+          animation: fanAirflowTravel 1.35s linear infinite;
+          filter: drop-shadow(0 0 3px rgba(255,255,255,.75));
+        }
         @media (prefers-reduced-motion:reduce) {
-          .fan-twin-particle,.fan-twin-pulse { animation:none!important; }
+          .fan-twin-particle,.fan-twin-pulse,.fan-airflow-stream { animation:none!important; }
         }
       `}</style>
 
@@ -144,6 +156,19 @@ export function FanAirflowTwin({
           <div className="absolute inset-x-0 top-3 flex items-center justify-center gap-2 text-xs font-bold tracking-wide text-cyan-800">
             INLET AIR <ArrowRight className="h-4 w-4" />
           </div>
+          <svg className="pointer-events-none absolute inset-0 h-full w-full" viewBox="0 0 240 180" preserveAspectRatio="none" aria-hidden="true">
+            {[28, 58, 90, 122, 152].map((y, index) => (
+              <path
+                key={y}
+                className="fan-airflow-stream"
+                pathLength="100"
+                d={`M -20 ${y} C 38 ${y - 12}, 82 ${y + 13}, 142 ${y - 4} S 220 ${y + 7}, 270 ${y}`}
+                stroke="rgba(8,145,178,.82)"
+                strokeWidth={index % 2 === 0 ? 4 : 3}
+                style={{ animationDelay: `${-index * .23}s`, animationDuration: `${1.15 + index * .08}s` }}
+              />
+            ))}
+          </svg>
           {[18, 35, 52, 69, 84].map((top, index) => (
             <span key={top} className="fan-twin-particle absolute left-0 h-1.5 w-12 rounded-full bg-cyan-500/70 shadow-[0_0_10px_rgba(6,182,212,.65)]"
               style={{ top: `${top}%`, animation: `fanTwinInlet ${particleDuration * 1.25}s linear infinite`, animationDelay: `${-index * particleDuration * .22}s` }} />
@@ -174,6 +199,19 @@ export function FanAirflowTwin({
           <div className="absolute inset-x-0 top-3 flex items-center justify-center gap-2 text-xs font-bold tracking-wide text-blue-800">
             COMBINED OUTLET <ArrowRight className="h-4 w-4" />
           </div>
+          <svg className="pointer-events-none absolute inset-0 h-full w-full" viewBox="0 0 240 180" preserveAspectRatio="none" aria-hidden="true">
+            {[24, 50, 78, 106, 134, 158].map((y, index) => (
+              <path
+                key={y}
+                className="fan-airflow-stream"
+                pathLength="100"
+                d={`M -25 ${y} C 42 ${y + 10}, 88 ${y - 11}, 150 ${y + 5} S 226 ${y - 7}, 275 ${y}`}
+                stroke="rgba(37,99,235,.84)"
+                strokeWidth={index % 2 === 0 ? 4.5 : 3.2}
+                style={{ animationDelay: `${-index * .18}s`, animationDuration: `${.95 + index * .07}s` }}
+              />
+            ))}
+          </svg>
           {[16, 31, 47, 63, 79, 90].map((top, index) => (
             <span key={top} className="fan-twin-particle absolute left-0 h-1.5 w-16 rounded-full bg-blue-500/75 shadow-[0_0_12px_rgba(59,130,246,.7)]"
               style={{ top: `${top}%`, animation: `fanTwinOutlet ${particleDuration}s linear infinite`, animationDelay: `${-index * particleDuration * .16}s` }} />
@@ -200,11 +238,25 @@ export function FanAirflowTwin({
           </div>
           <div className="rounded-xl border bg-slate-50 p-3">
             <div className="mb-1 flex items-center justify-between text-xs text-muted-foreground"><span>Pressure</span><span>Airflow →</span></div>
-            <svg viewBox="0 0 100 100" className="h-44 w-full" role="img" aria-label={`Single fan and ${quantity}-fan ${arrangement} performance curves`}>
-              <line x1="10" y1="8" x2="10" y2="90" stroke="#94a3b8" strokeWidth="1" />
-              <line x1="10" y1="90" x2="96" y2="90" stroke="#94a3b8" strokeWidth="1" />
-              <polyline points={curvePoints(singleCurve.map((point) => ({ airflow: point.airflow, pressure: point.staticPressure })))} fill="none" stroke="#64748b" strokeWidth="2" strokeDasharray="4 3" />
-              <polyline points={curvePoints(combinedCurve)} fill="none" stroke="#2563eb" strokeWidth="3" />
+            <svg viewBox="0 0 100 100" className="h-52 w-full" role="img" aria-label={`Single fan and ${quantity}-fan ${arrangement} airflow versus static pressure curves`}>
+              {[10, 30, 50, 70, 90].map((tick) => (
+                <line key={`h-${tick}`} x1="10" y1={tick} x2="96" y2={tick} stroke="#dbe3ec" strokeWidth=".45" />
+              ))}
+              {[10, 31.5, 53, 74.5, 96].map((tick) => (
+                <line key={`v-${tick}`} x1={tick} y1="8" x2={tick} y2="90" stroke="#dbe3ec" strokeWidth=".45" />
+              ))}
+              <line x1="10" y1="8" x2="10" y2="90" stroke="#475569" strokeWidth="1.1" />
+              <line x1="10" y1="90" x2="96" y2="90" stroke="#475569" strokeWidth="1.1" />
+              <text x="3" y="51" transform="rotate(-90 3 51)" fontSize="4" fill="#475569" textAnchor="middle">Static pressure (Pa)</text>
+              <text x="53" y="98" fontSize="4" fill="#475569" textAnchor="middle">Airflow ({AIRFLOW_UNITS[airflowUnit].label})</text>
+              <text x="9" y="94" fontSize="3.5" fill="#64748b" textAnchor="end">0</text>
+              <text x="95" y="94" fontSize="3.5" fill="#64748b" textAnchor="end">{formatNumber(maxFlow * AIRFLOW_UNITS[airflowUnit].factor)}</text>
+              <text x="8" y="10" fontSize="3.5" fill="#64748b" textAnchor="end">{formatNumber(maxPressure)}</text>
+              <polyline points={curvePoints(singleCurve.map((point) => ({ airflow: point.airflow, pressure: point.staticPressure })))} fill="none" stroke="#64748b" strokeWidth="1.7" strokeDasharray="4 3" strokeLinejoin="round" />
+              <polyline points={curvePoints(combinedCurve)} fill="none" stroke="#2563eb" strokeWidth="2.7" strokeLinejoin="round" />
+              <circle cx={10 + operatingPoint.airflow / maxFlow * 82} cy={90 - operatingPoint.staticPressure / maxPressure * 76} r="2.2" fill="#64748b" stroke="white" strokeWidth=".8" />
+              <circle cx={10 + systemAirflowCmh / maxFlow * 82} cy={90 - systemStaticPressure / maxPressure * 76} r="2.7" fill="#f97316" stroke="white" strokeWidth=".9" />
+              <text x={Math.min(92, 13 + systemAirflowCmh / maxFlow * 82)} y={Math.max(10, 86 - systemStaticPressure / maxPressure * 76)} fontSize="3.6" fontWeight="700" fill="#c2410c">System duty</text>
             </svg>
             <div className="flex justify-center gap-4 text-xs"><span className="text-slate-600">- - Single fan</span><span className="font-semibold text-blue-700">— Combined system</span></div>
           </div>
