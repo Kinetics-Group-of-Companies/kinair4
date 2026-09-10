@@ -895,8 +895,13 @@ doc.setDrawColor(242, 163, 60);
       doc.rect(unitX, doorY + doorH * t, uw, doorH / bands + 0.12, 'F');
     }
 
-    doc.setDrawColor(255, 255, 255);
-    doc.setLineWidth(0.25);
+    // Use the same strong unit-coloured airflow lines as the website.
+    doc.setDrawColor(
+      Math.max(0, colour[0] - 45),
+      Math.max(0, colour[1] - 45),
+      Math.max(0, colour[2] - 45),
+    );
+    doc.setLineWidth(0.32);
     const streamCount = Math.max(3, Math.min(5, Math.round(uw / 15)));
     for (let streamIndex = 0; streamIndex < streamCount; streamIndex += 1) {
       const streamX = unitX + uw * (streamIndex + 1) / (streamCount + 1);
@@ -911,6 +916,22 @@ doc.setDrawColor(242, 163, 60);
       doc.setFillColor(236, 246, 251);
       doc.rect(unitX + uw - 0.45, doorY, 0.9, doorH, 'F');
     }
+    unitX += uw;
+  });
+
+  // Redraw the complete structural frame after the airflow fills. Drawing it
+  // before the gradients allowed the fill bands to hide the top/header line.
+  doc.setDrawColor(69, 91, 119);
+  doc.setLineWidth(0.9);
+  doc.line(doorX, doorY, doorX + doorW, doorY);
+  doc.line(doorX, doorY, doorX, doorY + doorH);
+  doc.line(doorX + doorW, doorY, doorX + doorW, doorY + doorH);
+
+  // Reinforce the joint between each unit card and its airflow zone.
+  unitX = unitStartX;
+  expandedUnits.forEach((model) => {
+    const uw = installedW * model.lengthMm / Math.max(selection.totalLengthMm, 1);
+    doc.line(unitX, doorY, unitX + uw, doorY);
     unitX += uw;
   });
 
