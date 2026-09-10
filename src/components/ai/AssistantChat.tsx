@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useChat } from '@ai-sdk/react';
 import { DefaultChatTransport } from 'ai';
 import ReactMarkdown from 'react-markdown';
-import { Bot, Send, Sparkles, User, Loader2, LogIn, Wrench, FileDown, Paperclip, X, ListChecks, Box } from 'lucide-react';
+import { Bot, Send, Sparkles, User, Loader2, LogIn, Wrench, FileDown, Paperclip, X, ListChecks } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { Textarea } from '@/components/ui/textarea';
@@ -13,7 +13,6 @@ import { useGuestTrial } from '@/lib/guestTrialContext';
 import { toast } from 'sonner';
 import { useSupabaseFanDatabase } from '@/hooks/useSupabaseFanDatabase';
 import { useAllFanDimensions } from '@/hooks/useFanDatabase';
-import { Fan3DView } from '@/components/selector/Fan3DView';
 import {
   findOptimalSelections,
   FanSelection,
@@ -1820,7 +1819,6 @@ export function AssistantChat({
   const { data: dimensionsMap } = useAllFanDimensions();
   const [autoSelections, setAutoSelections] = useState<Record<string, AutoSelection>>({});
   const [downloadingKey, setDownloadingKey] = useState<string | null>(null);
-  const [open3DKey, setOpen3DKey] = useState<string | null>(null);
   const handledRef = useRef<Set<string>>(new Set());
   const fanDownloadedRef = useRef<Set<string>>(new Set());
 
@@ -2785,15 +2783,6 @@ export function AssistantChat({
                                 <FileDown className="w-3.5 h-3.5 mr-1.5" />
                                 Noise data only
                               </Button>
-                              <Button
-                                size="sm"
-                                variant={open3DKey === key ? 'default' : 'outline'}
-                                className="w-full sm:w-auto justify-center"
-                                onClick={() => setOpen3DKey(current => current === key ? null : key)}
-                              >
-                                <Box className="w-3.5 h-3.5 mr-1.5" />
-                                {open3DKey === key ? 'Close 3D View' : '3D View'}
-                              </Button>
                               {alternatives.map((alt, i) => (
                                 <Button
                                   key={`${key}-alt-${i}`}
@@ -2808,11 +2797,6 @@ export function AssistantChat({
                                 </Button>
                               ))}
                             </div>
-                            {open3DKey === key && (
-                              <div className="mt-3">
-                                <Fan3DView series={best.series} model={best.nomenclature} diameter={best.diameter} />
-                              </div>
-                            )}
                           </div>
                         );
                       })}
