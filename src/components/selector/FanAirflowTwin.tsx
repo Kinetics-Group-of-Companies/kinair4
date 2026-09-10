@@ -1,4 +1,4 @@
-import { ArrowRight, Gauge, Minus, Plus, Wind } from 'lucide-react';
+import { Gauge, Minus, Plus, Wind } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import {
   AIRFLOW_UNITS,
@@ -61,8 +61,6 @@ export function FanAirflowTwin({
   const airPower = systemTotalPressure * systemFlowM3s / 1000;
   const displayAirflow = systemAirflowCmh * AIRFLOW_UNITS[airflowUnit].factor;
   const dutyPass = selection.dutyPointMatch >= 95;
-  const particleDuration = Math.max(0.65, Math.min(2.2, 4 / Math.max(outletVelocity, 1)));
-
   const singleCurve = performanceData.filter((point) => point.airflow >= 0 && point.staticPressure >= 0);
   const combinedCurve = singleCurve.map((point) => ({
     airflow: point.airflow * (isParallel ? quantity : 1),
@@ -76,41 +74,10 @@ export function FanAirflowTwin({
 
   return (
     <section className="mb-6 overflow-hidden rounded-xl border border-border/60 bg-white">
-      <style>{`
-        @keyframes fanTwinInlet {
-          from { transform: translateX(-42px); opacity: 0; }
-          18% { opacity: .85; }
-          to { transform: translateX(150px); opacity: 0; }
-        }
-        @keyframes fanTwinOutlet {
-          from { transform: translateX(-18px); opacity: 0; }
-          15% { opacity: .95; }
-          to { transform: translateX(210px); opacity: 0; }
-        }
-        @keyframes fanTwinPulse {
-          0%,100% { opacity: .36; transform: scaleY(.94); }
-          50% { opacity: .7; transform: scaleY(1.04); }
-        }
-        @keyframes fanAirflowTravel {
-          from { stroke-dashoffset: 110; opacity: .22; }
-          45% { opacity: .92; }
-          to { stroke-dashoffset: 0; opacity: .2; }
-        }
-        .fan-airflow-stream {
-          fill: none;
-          stroke-linecap: round;
-          stroke-dasharray: 12 10;
-          animation: fanAirflowTravel 1.35s linear infinite;
-          filter: drop-shadow(0 0 3px rgba(255,255,255,.75));
-        }
-        @media (prefers-reduced-motion:reduce) {
-          .fan-twin-particle,.fan-twin-pulse,.fan-airflow-stream { animation:none!important; }
-        }
-      `}</style>
 
       <div className="flex flex-wrap items-start justify-between gap-3 border-b bg-slate-50 px-4 py-3">
         <div>
-          <h3 className="font-bold text-foreground">Actual-model Fan Airflow Twin</h3>
+          <h3 className="font-bold text-foreground">Multi-fan System Effect</h3>
           <p className="text-sm text-muted-foreground">
             {selection.nomenclature} · {fanType || 'fan'} · Ø{selection.diameter} mm · {systemLabel}
           </p>
@@ -151,79 +118,8 @@ export function FanAirflowTwin({
         </div>
       </div>
 
-      <div className="grid gap-4 p-4 lg:grid-cols-[1fr_240px_1fr]">
-        <div className="relative min-h-52 overflow-hidden rounded-xl border border-cyan-200 bg-gradient-to-r from-cyan-50 to-cyan-200/70">
-          <div className="absolute inset-x-0 top-3 flex items-center justify-center gap-2 text-xs font-bold tracking-wide text-cyan-800">
-            INLET AIR <ArrowRight className="h-4 w-4" />
-          </div>
-          <svg className="pointer-events-none absolute inset-0 h-full w-full" viewBox="0 0 240 180" preserveAspectRatio="none" aria-hidden="true">
-            {[28, 58, 90, 122, 152].map((y, index) => (
-              <path
-                key={y}
-                className="fan-airflow-stream"
-                pathLength="100"
-                d={`M -20 ${y} C 38 ${y - 12}, 82 ${y + 13}, 142 ${y - 4} S 220 ${y + 7}, 270 ${y}`}
-                stroke="rgba(8,145,178,.82)"
-                strokeWidth={index % 2 === 0 ? 4 : 3}
-                style={{ animationDelay: `${-index * .23}s`, animationDuration: `${1.15 + index * .08}s` }}
-              />
-            ))}
-          </svg>
-          {[18, 35, 52, 69, 84].map((top, index) => (
-            <span key={top} className="fan-twin-particle absolute left-0 h-1.5 w-12 rounded-full bg-cyan-500/70 shadow-[0_0_10px_rgba(6,182,212,.65)]"
-              style={{ top: `${top}%`, animation: `fanTwinInlet ${particleDuration * 1.25}s linear infinite`, animationDelay: `${-index * particleDuration * .22}s` }} />
-          ))}
-          <div className="fan-twin-pulse absolute bottom-3 left-3 right-3 rounded-md bg-white/80 px-3 py-2 text-center text-sm font-semibold text-cyan-900" style={{ animation: 'fanTwinPulse 2.3s ease-in-out infinite' }}>
-            {isParallel && quantity > 1 ? 'Flow divides equally into fan branches' : 'Uniform inlet flow'}
-          </div>
-        </div>
-
-        <div className="flex min-h-52 flex-col rounded-xl border bg-white p-3 shadow-sm">
-          <div className="text-center text-xs font-medium text-muted-foreground">{systemLabel}</div>
-          <div className={`mt-2 grid flex-1 place-content-center gap-1 ${quantity > 3 ? 'grid-cols-3' : quantity > 1 ? 'grid-cols-2' : 'grid-cols-1'}`}>
-            {Array.from({ length: quantity }, (_, index) => (
-              <div key={index} className="relative flex min-h-14 items-center justify-center rounded-md border bg-slate-50 p-1">
-                {imageUrl ? (
-                  <img src={imageUrl} alt={`${selection.nomenclature} fan ${index + 1}`} className={`w-full object-contain ${quantity === 1 ? 'h-28' : 'h-14'}`} />
-                ) : (
-                  <span className="text-center text-xs font-semibold text-slate-600">{selection.nomenclature}</span>
-                )}
-                {quantity > 1 && <span className="absolute right-1 top-0.5 text-[10px] font-bold text-primary">F{index + 1}</span>}
-              </div>
-            ))}
-          </div>
-          <div className="mt-1 text-center text-xs text-slate-600">Inlet <ArrowRight className="inline h-3.5 w-3.5" /> Outlet</div>
-        </div>
-
-        <div className="relative min-h-52 overflow-hidden rounded-xl border border-blue-200 bg-gradient-to-r from-blue-200/80 to-blue-50">
-          <div className="absolute inset-x-0 top-3 flex items-center justify-center gap-2 text-xs font-bold tracking-wide text-blue-800">
-            COMBINED OUTLET <ArrowRight className="h-4 w-4" />
-          </div>
-          <svg className="pointer-events-none absolute inset-0 h-full w-full" viewBox="0 0 240 180" preserveAspectRatio="none" aria-hidden="true">
-            {[24, 50, 78, 106, 134, 158].map((y, index) => (
-              <path
-                key={y}
-                className="fan-airflow-stream"
-                pathLength="100"
-                d={`M -25 ${y} C 42 ${y + 10}, 88 ${y - 11}, 150 ${y + 5} S 226 ${y - 7}, 275 ${y}`}
-                stroke="rgba(37,99,235,.84)"
-                strokeWidth={index % 2 === 0 ? 4.5 : 3.2}
-                style={{ animationDelay: `${-index * .18}s`, animationDuration: `${.95 + index * .07}s` }}
-              />
-            ))}
-          </svg>
-          {[16, 31, 47, 63, 79, 90].map((top, index) => (
-            <span key={top} className="fan-twin-particle absolute left-0 h-1.5 w-16 rounded-full bg-blue-500/75 shadow-[0_0_12px_rgba(59,130,246,.7)]"
-              style={{ top: `${top}%`, animation: `fanTwinOutlet ${particleDuration}s linear infinite`, animationDelay: `${-index * particleDuration * .16}s` }} />
-          ))}
-          <div className="fan-twin-pulse absolute bottom-3 left-3 right-3 rounded-md bg-white/85 px-3 py-2 text-center text-sm font-semibold text-blue-900" style={{ animation: 'fanTwinPulse 1.8s ease-in-out infinite' }}>
-            {formatNumber(displayAirflow)} {AIRFLOW_UNITS[airflowUnit].label} combined
-          </div>
-        </div>
-      </div>
-
       {singleCurve.length > 1 && (
-        <div className="grid gap-4 border-t p-4 lg:grid-cols-[1fr_280px]">
+        <div className="grid gap-6 border-t p-4 lg:grid-cols-[320px_1fr]">
           <div>
             <h4 className="font-semibold">System effect on performance</h4>
             <p className="mt-1 text-sm text-muted-foreground">
@@ -236,9 +132,9 @@ export function FanAirflowTwin({
               <div className="rounded-lg border p-3"><span className="block text-xs text-muted-foreground">Combined noise</span><b>{systemNoise > 0 ? `${systemNoise.toFixed(1)} dB(A)` : '-'}</b></div>
             </div>
           </div>
-          <div className="rounded-xl border bg-slate-50 p-3">
+          <div className="rounded-xl border border-slate-300 bg-white p-4 shadow-sm">
             <div className="mb-1 flex items-center justify-between text-xs text-muted-foreground"><span>Pressure</span><span>Airflow →</span></div>
-            <svg viewBox="0 0 100 100" className="h-52 w-full" role="img" aria-label={`Single fan and ${quantity}-fan ${arrangement} airflow versus static pressure curves`}>
+            <svg viewBox="0 0 100 100" className="h-[320px] w-full" role="img" aria-label={`Single fan and ${quantity}-fan ${arrangement} airflow versus static pressure curves`}>
               {[10, 30, 50, 70, 90].map((tick) => (
                 <line key={`h-${tick}`} x1="10" y1={tick} x2="96" y2={tick} stroke="#dbe3ec" strokeWidth=".45" />
               ))}
