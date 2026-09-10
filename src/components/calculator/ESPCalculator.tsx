@@ -93,6 +93,22 @@ function FittingDiagram({ kind, compact=false }: { kind: Kind; compact?: boolean
   case 'transition': drawing=<><path d="M8 30h28l25 12h31M8 70h28l25-12h31" {...common}/><path d="M43 50h30" {...common}/><path d="M68 45l8 5-8 5" fill="currentColor"/></>;break;
   case 'tee-straight': drawing=<><path d="M8 38h84M8 62h84M45 62v30M68 62v30" {...common}/><path d="M38 45h28" {...common}/><path d="M61 40l8 5-8 5" fill="currentColor"/></>;break;
   case 'tee-branch': drawing=<><path d="M8 38h84M8 62h37v30M68 62v30M68 62h24" {...common}/><path d="M28 48h28v25" {...common}/><path d="M51 69l5 8 5-8" fill="currentColor"/></>;break;
+  case 'elbow90-vaned': drawing=<><path d="M18 84V48c0-20 10-30 30-30h36M40 84V51c0-8 4-12 12-12h32" {...common}/><path d="M29 55c0-17 8-25 25-25M34 63c0-18 9-27 27-27" {...common} strokeWidth="2"/><path d="M68 21l9-5-9-5" fill="currentColor"/></>;break;
+  case 'elbow90-mitered': drawing=<><path d="M18 84V38l20-20h46M40 84V48l8-8h36" {...common}/><path d="M68 21l9-5-9-5" fill="currentColor"/></>;break;
+  case 'reducer': drawing=<><path d="M8 22h30l25 18h29M8 78h30l25-18h29" {...common}/><path d="M40 50h34M68 45l8 5-8 5" fill="currentColor"/></>;break;
+  case 'diffuser': drawing=<><path d="M8 40h29l25-18h30M8 60h29l25 18h30" {...common}/><path d="M31 50h38M63 45l8 5-8 5" fill="currentColor"/></>;break;
+  case 'wye-straight': drawing=<><path d="M8 40h44l35-24M8 62h48l35-24M52 40l32 36M56 62l16 22" {...common}/><path d="M62 46l8 5-8 5" fill="currentColor"/></>;break;
+  case 'wye-branch': drawing=<><path d="M8 40h44l35-24M8 62h48l35-24M52 40l32 36M56 62l16 22" {...common}/><path d="M57 55l10 13M68 62l1 9-9-3" fill="currentColor"/></>;break;
+  case 'takeoff': drawing=<><path d="M8 34h84M8 66h84M42 66l14 20h24M61 66l11 12h12" {...common}/><path d="M58 65l9 8M66 67l3 9-9-2" fill="currentColor"/></>;break;
+  case 'cross-straight': drawing=<><path d="M8 38h84M8 62h84M39 38V8M61 38V8M39 62v30M61 62v30" {...common}/><path d="M37 45h29M60 40l8 5-8 5" fill="currentColor"/></>;break;
+  case 'cross-branch': drawing=<><path d="M8 38h84M8 62h84M39 38V8M61 38V8M39 62v30M61 62v30" {...common}/><path d="M28 49h22v27M45 70l5 8 5-8" fill="currentColor"/></>;break;
+  case 'entry': drawing=<><path d="M10 25h25l14 15h41M10 75h25l14-15h41" {...common}/><path d="M14 50h55M63 45l8 5-8 5" fill="currentColor"/></>;break;
+  case 'exit': drawing=<><path d="M10 40h48l20-20M10 60h48l20 20" {...common}/><path d="M28 50h55M77 45l8 5-8 5" fill="currentColor"/></>;break;
+  case 'fire-damper': drawing=<><path d="M12 22h76v56H12z" {...common}/><path d="M24 28v44M36 28v44M48 28v44M60 28v44M72 28v44" {...common} strokeWidth="2"/><path d="M10 50h80M78 45l8 5-8 5" fill="currentColor"/></>;break;
+  case 'backdraft-damper': drawing=<><path d="M12 22h76v56H12z" {...common}/><path d="M22 35h56l-8 10H22zM22 51h56l-8 10H22z" fill="currentColor" opacity=".45"/>{arrow}</>;break;
+  case 'vav': drawing=<><path d="M12 26h76v48H12z" {...common}/><circle cx="50" cy="50" r="14" {...common}/><path d="M50 36v28M36 50h28" {...common} strokeWidth="2"/>{arrow}</>;break;
+  case 'fan-inlet': drawing=<><path d="M12 35h30M12 65h30M42 35l12 8M42 65l12-8" {...common}/><circle cx="70" cy="50" r="20" {...common}/><path d="M70 34l7 14-14 8z" fill="currentColor"/>{arrow}</>;break;
+  case 'fan-outlet': drawing=<><circle cx="30" cy="50" r="20" {...common}/><path d="M30 34l7 14-14 8z" fill="currentColor"/><path d="M50 38h40M50 62h40" {...common}/><path d="M72 50h16M82 45l8 5-8 5" fill="currentColor"/></>;break;
   case 'damper': drawing=<><path d="M10 27h80v46H10z" {...common}/><line x1="22" y1="68" x2="78" y2="32" {...common}/><circle cx="50" cy="50" r="5" fill="currentColor"/>{arrow}</>;break;
   case 'filter': drawing=<><path d="M20 18h60v64H20z" {...common}/><path d="M27 27l12 46 12-46 12 46 10-46" {...common}/>{arrow}</>;break;
   case 'coil': drawing=<><path d="M18 18h64v64H18z" {...common}/><path d="M30 25c18 10-18 20 0 30s-18 20 0 22M50 25c18 10-18 20 0 30s-18 20 0 22M70 25c18 10-18 20 0 30s-18 20 0 22" {...common}/></>;break;
@@ -144,7 +160,7 @@ export function ESPCalculator(){
    doc.setFillColor(240,145,35);doc.triangle(x+43,y+18,x+49,y+22,x+43,y+26,'F');
   };
   critical.items.forEach((i,index)=>{
-   const isManufacturer=['filter','coil','silencer','grille','louvre'].includes(i.kind);
+   const isManufacturer=['filter','coil','silencer','grille','louvre','fire-damper','backdraft-damper','vav'].includes(i.kind);
    doc.addPage();doc.setTextColor(25,35,50);doc.setFont('helvetica','bold');doc.setFontSize(15);doc.text(`Appendix ${index+1} - ${isManufacturer?'Equipment Verification':'KINAIR Fitting Calculation Backup'}`,14,18);doc.setFontSize(9);doc.setTextColor(30,105,180);doc.text(`Critical route item ${index+1}: ${i.name}`,14,25);doc.setDrawColor(30,105,180);doc.line(14,30,pageW-14,30);
    drawBackupSketch(i.kind,18,40);doc.setTextColor(25,35,50);doc.setFontSize(8);doc.setFont('helvetica','bold');doc.text(LIB[i.kind].label,18,88);doc.setFont('helvetica','normal');doc.setTextColor(90);doc.text(FITTING_SOURCES[i.kind].basis,18,94,{maxWidth:70});
    autoTable(doc,{startY:40,margin:{left:95,right:14},theme:'grid',head:[['Reference field','Selected / calculated value']],body:[['Calculation method',FITTING_SOURCES[i.kind].code],['Supporting publication',FITTING_SOURCES[i.kind].document],['Duct shape and size',i.shape==='circular'?`Circular - diameter ${i.diameter} mm`:`Rectangular - ${i.width} x ${i.height} mm`],['Airflow',`${i.flow} ${FLOW_UNITS[flowUnit].label}`],['Area / hydraulic diameter',`${i.area.toFixed(4)} m2 / ${(i.dh*1000).toFixed(1)} mm`],['Velocity / velocity pressure',`${i.v.toFixed(3)} m/s / ${i.vp.toFixed(3)} Pa`],['Reynolds / friction factor',`${i.re.toFixed(0)} / ${i.f.toFixed(5)}`],['Selected K / fixed loss',`${i.k.toFixed(4)} / ${i.fixed.toFixed(2)} Pa`],['Length / quantity',`${i.length.toFixed(2)} m / ${i.qty}`]],styles:{fontSize:7,cellPadding:1.5},headStyles:{fillColor:[20,50,82]}});
