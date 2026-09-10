@@ -725,16 +725,42 @@ doc.setDrawColor(242, 163, 60);
   const expandedUnits = selection.units.flatMap((unit) =>
     Array.from({ length: unit.qty }, () => unit.model),
   );
+  const mountingMinimums = expandedUnits
+    .map((model) => model.mountingHeightMin)
+    .filter((value): value is number => typeof value === 'number' && value > 0);
+  const mountingMaximums = expandedUnits
+    .map((model) => model.mountingHeightMax)
+    .filter((value): value is number => typeof value === 'number' && value > 0);
+  const suitableHeightMin = mountingMinimums.length ? Math.max(...mountingMinimums) : null;
+  const suitableHeightMax = mountingMaximums.length ? Math.min(...mountingMaximums) : null;
+  const suitableHeightLabel = suitableHeightMin !== null && suitableHeightMax !== null
+    ? `${lenM(suitableHeightMin)} - ${lenM(suitableHeightMax)}`
+    : suitableHeightMax !== null
+      ? `Up to ${lenM(suitableHeightMax)}`
+      : 'Refer to model data';
+
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(8);
+  doc.setTextColor(...COLORS.text);
+  doc.text(`Selected door height: ${lenM(doorHeightM)}`, margin, 49);
+  doc.text(`Suitable mounting height: ${suitableHeightLabel}`, margin, 54);
+  doc.setTextColor(...(selection.heightSuitable ? [20, 145, 95] as [number, number, number] : [210, 120, 0] as [number, number, number]));
+  doc.text(`Height status: ${selection.heightSuitable ? 'SUITABLE' : 'CHECK'}`, margin, 59);
 
   if (seriesPhoto) {
-    const size = fit(seriesPhoto, 48, 32);
-    doc.addImage(seriesPhoto.base64, fmt(seriesPhoto.base64), pageW - margin - size.w, 31, size.w, size.h, undefined, 'NONE');
+    const size = fit(seriesPhoto, 42, 28);
+    const photoX = pageW - margin - size.w;
+    const photoY = 31;
+    doc.setDrawColor(...COLORS.border);
+    doc.setLineWidth(0.25);
+    doc.rect(photoX - 2, photoY - 1, size.w + 4, size.h + 4);
+    doc.addImage(seriesPhoto.base64, fmt(seriesPhoto.base64), photoX, photoY, size.w, size.h, undefined, 'NONE');
   }
 
   const doorX = 24;
-  const doorY = 72;
+  const doorY = 84;
   const doorW = pageW - 48;
-  const doorH = 132;
+  const doorH = 118;
   const installedW = doorW * Math.min(1, selection.totalLengthMm / Math.max(doorWidthMm, 1));
   const unitStartX = doorX + (doorW - installedW) / 2;
   const unitY = doorY - 12;
@@ -830,14 +856,15 @@ doc.setDrawColor(242, 163, 60);
   autoTable(doc, {
     startY: doorY + doorH + 12,
     theme: 'grid',
-    headStyles: { fillColor: COLORS.head, fontSize: 7.5, textColor: [255, 255, 255], fontStyle: 'bold' },
-    styles: { fontSize: 7.5, cellPadding: 1.5, lineColor: COLORS.border, textColor: COLORS.text },
-    head: [['Actual arrangement', 'Installed', 'Coverage', 'Outlet velocity', 'Floor velocity', 'Height']],
+    headStyles: { fillColor: COLORS.head, fontSize: 6.2, textColor: [255, 255, 255], fontStyle: 'bold' },
+    styles: { fontSize: 6.2, cellPadding: 1.3, lineColor: COLORS.border, textColor: COLORS.text },
+    head: [['Actual arrangement', 'Installed', 'Coverage', 'Selected height', 'Suitable height', 'Floor velocity', 'Status']],
     body: [[
       selection.arrangement,
       lenMm(selection.totalLengthMm),
       `${Math.round(selection.coverage * 100)}%`,
-      `${selection.outletVelocity.toFixed(1)} m/s`,
+      lenM(doorHeightM),
+      suitableHeightLabel,
       `${selection.floorVelocity.toFixed(2)} m/s`,
       selection.heightSuitable ? 'Suitable' : 'Check',
     ]],
