@@ -135,7 +135,7 @@ export default function EngineeringIntelligencePage() {
     const profile = CURTAIN_PROFILES[curtainSeries];
     const combination = bestWidthCombination(doorWidth, profile.widths);
     const installedWidth = combination.reduce((sum, width) => sum + width, 0);
-    const effectiveWidth = Math.max(0, installedWidth - Math.max(0, combination.length - 1) * 0.03);
+    const effectiveWidth = installedWidth;
     const coverage = doorWidth > 0 ? Math.min(120, (effectiveWidth / doorWidth) * 100) : 0;
     const disturbance = windSpeed * 0.18 + Math.abs(pressureDifference) * 0.015;
     const decayLength = curtainSeries === 'FM55' ? 3.4 : curtainSeries === 'FM45' ? 3.1 : 2.8;
@@ -332,30 +332,47 @@ export default function EngineeringIntelligencePage() {
                 </CardHeader>
                 <CardContent className="space-y-5">
                   <div className="relative h-72 overflow-hidden rounded-xl border bg-gradient-to-b from-sky-100 via-slate-50 to-slate-200">
-                    {mountingType === 'recessed' && (
-                      <div className="absolute left-[5%] right-[5%] top-0 h-12 border-b-4 border-slate-300 bg-white shadow-sm">
-                        <div className="pt-1 text-center text-[10px] font-medium text-slate-500">CEILING — RECESSED INSTALLATION</div>
+                    {mountingType === 'wall' ? (
+                      <div className="absolute left-[8%] right-[8%] top-5 z-10 flex">
+                        {curtainResult.combination.map((width, index) => (
+                          <div
+                            key={`${width}-${index}`}
+                            className={`relative flex h-12 items-center justify-center border-y border-r border-slate-300 bg-gradient-to-b from-white to-slate-100 text-[10px] font-semibold text-slate-700 shadow-md first:border-l first:rounded-l-lg last:rounded-r-lg`}
+                            style={{ flexGrow: width, flexBasis: 0 }}
+                          >
+                            <span className="absolute left-2 right-2 top-2 h-2 rounded-sm bg-slate-200" />
+                            <span className="absolute bottom-1 left-2 text-[8px] font-bold text-sky-700">KINAIR</span>
+                            <span className="absolute bottom-1 right-2">{width.toFixed(1)} m</span>
+                            <span className="absolute -bottom-1 left-1 right-1 h-1 bg-slate-700" />
+                          </div>
+                        ))}
                       </div>
-                    )}
-                    <div className={`absolute left-[8%] right-[8%] z-10 flex gap-1 ${mountingType === 'recessed' ? 'top-8' : 'top-5'}`}>
-                      {curtainResult.combination.map((width, index) => (
-                        <div
-                          key={`${width}-${index}`}
-                          className={`relative flex h-12 items-center justify-center border border-slate-300 bg-gradient-to-b from-white to-slate-100 text-[10px] font-semibold text-slate-700 shadow-md ${mountingType === 'recessed' ? 'rounded-sm border-b-4' : 'rounded-lg'}`}
-                          style={{ flexGrow: width, flexBasis: 0 }}
-                        >
-                          {mountingType === 'wall' && (
-                            <>
-                              <span className="absolute left-2 right-2 top-2 h-2 rounded-sm bg-slate-200" />
-                              <span className="absolute bottom-1 left-2 text-[8px] font-bold text-sky-700">KINAIR</span>
-                            </>
-                          )}
-                          <span className="absolute bottom-1 right-2">{width.toFixed(1)} m</span>
-                          <span className="absolute -bottom-1 left-3 right-3 h-1 rounded-full bg-slate-700" />
+                    ) : (
+                      <>
+                        <div className="absolute left-[4%] right-[4%] top-0 z-10 h-14 border-b-4 border-slate-300 bg-white shadow-sm">
+                          <div className="pt-1 text-center text-[10px] font-medium text-slate-500">CEILING — UNITS CONCEALED ABOVE</div>
                         </div>
-                      ))}
-                    </div>
-                    <div className={`absolute bottom-6 left-[10%] right-[10%] overflow-hidden rounded-b-lg border-x-4 border-slate-500 bg-white/55 ${mountingType === 'recessed' ? 'top-20' : 'top-17'}`}>
+                        <div className="absolute left-[8%] right-[8%] top-11 z-20 flex">
+                          {curtainResult.combination.map((width, index) => (
+                            <div
+                              key={`grille-${width}-${index}`}
+                              className="relative h-3 border-y border-r border-slate-500 bg-gradient-to-b from-slate-300 via-white to-slate-400 first:border-l"
+                              style={{ flexGrow: width, flexBasis: 0 }}
+                            >
+                              <span className="absolute inset-x-1 top-1 h-[2px] bg-slate-700" />
+                            </div>
+                          ))}
+                        </div>
+                        <div className="absolute left-[8%] right-[8%] top-[59px] z-20 flex text-[9px] font-medium text-slate-600">
+                          {curtainResult.combination.map((width, index) => (
+                            <span key={`label-${width}-${index}`} className="text-center" style={{ flexGrow: width, flexBasis: 0 }}>
+                              {width.toFixed(1)} m grille
+                            </span>
+                          ))}
+                        </div>
+                      </>
+                    )}
+                    <div className={`absolute bottom-6 left-[10%] right-[10%] overflow-hidden rounded-b-lg border-x-4 border-slate-500 bg-white/55 ${mountingType === 'recessed' ? 'top-[72px]' : 'top-[68px]'}`}>
                       <div
                         className={`mx-auto h-full origin-top bg-gradient-to-b ${curtainResult.pass ? 'from-cyan-400/75 via-cyan-300/35 to-cyan-100/5' : 'from-amber-400/70 via-amber-300/30 to-transparent'}`}
                         style={{
@@ -365,7 +382,7 @@ export default function EngineeringIntelligencePage() {
                       />
                     </div>
                     <div className="absolute bottom-1 left-0 right-0 text-center text-xs text-slate-600">
-                      Door {doorWidth.toFixed(2)} m W × {doorHeight.toFixed(2)} m H • proportional unit widths shown
+                      Door {doorWidth.toFixed(2)} m W × {doorHeight.toFixed(2)} m H • units installed edge-to-edge
                     </div>
                   </div>
                   <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border bg-slate-50 p-3 text-sm">
