@@ -20,6 +20,7 @@ import AdminAuthPage from "./pages/AdminAuthPage";
 import AdminPage from "./pages/AdminPage";
 import UserSettingsPage from "./pages/UserSettingsPage";
 import CalculatorPage from "./pages/CalculatorPage";
+import EngineeringIntelligencePage from "./pages/EngineeringIntelligencePage";
 import DocumentationPage from "./pages/DocumentationPage";
 import ProjectsPage from "./pages/ProjectsPage";
 import LpoTrackerPage from "./pages/LpoTrackerPage";
@@ -99,6 +100,11 @@ const App = () => {
                     title="Unit Calculator | KINAIR"
                     description="Convert airflow, pressure and power units for fan selection — m³/h, CFM, Pa, in. wg and more." />
                   <CalculatorPage /></>} />
+                <Route path="/engineering-intelligence" element={<>
+                  <Seo path="/engineering-intelligence"
+                    title="Engineering Intelligence | KINAIR"
+                    description="Advanced air curtain door analysis, fan installation risk prediction, and energy, carbon and payback calculations." />
+                  <EngineeringIntelligencePage /></>} />
                 <Route path="/documentation" element={<>
                   <Seo path="/documentation"
                     title="Documentation | KINAIR"
