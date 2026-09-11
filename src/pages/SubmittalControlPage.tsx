@@ -1,6 +1,6 @@
 import { FormEvent, useMemo, useState } from 'react';
 import { Navigate } from 'react-router-dom';
-import { BarChart3, FilePlus2, FileText, FolderOpen, LayoutDashboard, Library, PackagePlus, Settings2, Wrench } from 'lucide-react';
+import { BarChart3, FilePlus2, FileText, FolderOpen, LayoutDashboard, Library, PackagePlus, Settings2, Wrench, Paperclip } from 'lucide-react';
 import { MainLayout } from '@/components/layout/MainLayout';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
@@ -13,11 +13,12 @@ import { useAuth } from '@/lib/authContext';
 import { useSubmittals, type SubmittalDraft, type SubmittalKind } from '@/hooks/useSubmittals';
 import { SubmittalProducts } from '@/components/submittal/SubmittalProducts';
 import { SubmittalDocuments, SubmittalTemplates } from '@/components/submittal/SubmittalFiles';
+import { SubmittalAttachments } from '@/components/submittal/SubmittalAttachments';
 
-type Section = 'overview' | 'new' | 'pq' | 'om' | 'products' | 'reports' | 'documents' | 'templates';
+type Section = 'overview' | 'new' | 'pq' | 'om' | 'attachments' | 'products' | 'reports' | 'documents' | 'templates';
 const sections = [
   ['overview','Overview',LayoutDashboard],['new','New Submittal',FilePlus2],['pq','New PQ Submittal',PackagePlus],
-  ['om','New O&M Submittal',Wrench],['products','Product List',Library],['reports','Reports',BarChart3],
+  ['om','New O&M Submittal',Wrench],['attachments','Attachments & Dividers',Paperclip],['products','Product List',Library],['reports','Reports',BarChart3],
   ['documents','Documents',FolderOpen],['templates','Templates',Settings2],
 ] as const;
 
@@ -35,6 +36,7 @@ export default function SubmittalControlPage() {
       <section>
         {section==='overview'&&<Overview rows={rows} loading={packages.isLoading} onCreate={setSection}/>}
         {(['new','pq','om'] as Section[]).includes(section)&&<SubmittalForm kind={section==='new'?'regular':section} saving={save.isPending} onSave={async d=>{await save.mutateAsync(d);setSection('overview');}}/>}
+        {section==='attachments'&&<SubmittalAttachments/>}
         {section==='products'&&<SubmittalProducts/>}
         {section==='reports'&&<Reports rows={rows}/>}
         {section==='documents'&&<SubmittalDocuments/>}
