@@ -24,21 +24,34 @@ Deno.serve(async (req) => {
       global: { headers: { Authorization: auth } },
     });
     const admin = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
-    const { packageId, storagePath, fileName, mimeType } = await req.json();
+    const { packageId, storagePath, fileName, mimeType, fileData } = await req.json();
     if (!packageId || !storagePath) throw new Error("Package and source file are required");
 
     const { data: pkg, error: packageError } = await scoped.from("submittal_packages").select("id,tenant_id").eq("id", packageId).single();
     if (packageError || !pkg) throw new Error("Package not found or access denied");
     if (!String(storagePath).startsWith(pkg.tenant_id + "/")) throw new Error("Invalid source path");
 
-    const { data: blob, error: downloadError } = await admin.storage.from("submittal-control").download(storagePath);
-    if (downloadError || !blob) throw downloadError ?? new Error("Unable to read source file");
-    if (blob.size > 50 * 1024 * 1024) throw new Error("Source file must be 50 MB or smaller");
+    let blob: Blob;
+    if (fileData) {
+      const binary = atob(String(fileData).replace(/^data:[^,]+,/, ""));
+      const bytes = Uint8Array.from(binary, (char) => char.charCodeAt(0));
+      if (bytes.byteLength > 15 * 1024 * 1024) throw new Error("Cover/index file must be 15 MB or smaller");
+      const { error: uploadError } = await admin.storage.from("submittal-control").upload(storagePath, bytes, {
+        contentType: mimeType || "application/octet-stream", upsert: true,
+      });
+      if (uploadError) throw uploadError;
+      blob = new Blob([bytes], { type: mimeType || "application/octet-stream" });
+    } else {
+      const { data: downloaded, error: downloadError } = await admin.storage.from("submittal-control").download(storagePath);
+      if (downloadError || !downloaded) throw downloadError ?? new Error("Unable to read source file");
+      blob = downloaded;
+    }
+    if (blob.size > 15 * 1024 * 1024) throw new Error("Cover/index file must be 15 MB or smaller");
 
     const base64 = toBase64(new Uint8Array(await blob.arrayBuffer()));
     const isPdf = mimeType === "application/pdf" || String(fileName).toLowerCase().endsWith(".pdf");
     const filePart = isPdf
-      ? { type: "input_file", filename: fileName || "customer-submittal.pdf", file_data: `data:application/pdf;base64,${base64}`, detail: "high" }
+      ? { type: "input_file", filename: fileName || "customer-submittal.pdf", file_data: `data:application/pdf;base64,${base64}` }
       : { type: "input_image", image_url: `data:${mimeType || "image/png"};base64,${base64}`, detail: "high" };
 
     const prompt = `Read this customer cover page and/or table of contents for a technical material submittal.
@@ -63,7 +76,7 @@ Correct obvious OCR spacing only. Do not invent missing values. Use YYYY-MM-DD f
     const ai = await fetch("https://api.openai.com/v1/responses", {
       method: "POST",
       headers: { "Authorization": `Bearer ${apiKey}`, "Content-Type": "application/json" },
-      body: JSON.stringify({ model: "gpt-5.6-luna", input: [{ role: "user", content: [filePart, { type: "input_text", text: prompt }] }] }),
+      body: JSON.stringify({ model: "gpt-4.1-mini", input: [{ role: "user", content: [filePart, { type: "input_text", text: prompt }] }] }),
     });
     const payload = await ai.json();
     if (!ai.ok) throw new Error(payload?.error?.message || "Unable to read customer document");
