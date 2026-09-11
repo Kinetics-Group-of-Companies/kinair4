@@ -1,7 +1,7 @@
 import { createClient } from "npm:@supabase/supabase-js@2.89.0";
 import { PDFDocument, StandardFonts, rgb } from "npm:pdf-lib@1.17.1";
 Deno.serve(async(req)=>{
- const cors={"Access-Control-Allow-Origin":"*","Access-Control-Allow-Headers":"authorization, apikey, content-type"};
+ const cors={"Access-Control-Allow-Origin":"*","Access-Control-Allow-Headers":"authorization, x-client-info, apikey, content-type","Access-Control-Allow-Methods":"POST, OPTIONS"};
  if(req.method==="OPTIONS")return new Response("ok",{headers:cors});
  try{
   const auth=req.headers.get("Authorization");if(!auth)throw new Error("Authentication required");
