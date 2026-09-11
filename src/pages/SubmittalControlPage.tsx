@@ -38,7 +38,7 @@ export default function SubmittalControlPage() {
     <header className="border-b bg-gradient-to-r from-primary/10 via-primary/5 to-background px-4 py-4 sm:py-7"><div className="mx-auto flex max-w-[1600px] items-start gap-3 sm:items-center"><FileText className="h-7 w-7 shrink-0 text-primary sm:h-8 sm:w-8"/><div className="min-w-0"><h1 className="text-2xl font-bold sm:text-3xl">Submittal Control</h1><p className="hidden text-sm text-muted-foreground sm:block sm:text-base">Controlled Regular, PQ and O&amp;M document packages.</p></div></div></header>
     <div className="mx-auto grid w-full max-w-[1600px] gap-3 p-0 sm:gap-4 sm:p-5 md:p-6 lg:grid-cols-[280px_minmax(0,1fr)] lg:gap-6">
       <Card className="sticky top-0 z-20 h-fit w-full overflow-hidden rounded-none border-x-0 border-primary/15 bg-background/95 shadow-sm backdrop-blur sm:rounded-xl sm:border lg:static"><CardContent className="p-2 sm:p-3 lg:p-2"><nav className="grid grid-cols-2 gap-2 lg:grid-cols-1 lg:gap-1">{sections.map(([id,label,Icon])=><Button key={id} variant={section===id?'secondary':'ghost'} className={`h-14 min-w-0 justify-start whitespace-normal px-3 text-left text-base leading-tight lg:h-12 lg:w-full lg:whitespace-nowrap ${id==='builder'?'col-span-2 lg:col-span-1':''}`} onClick={()=>setSection(id)}><Icon className="h-5 w-5"/>{label}</Button>)}</nav></CardContent></Card>
-      <section className="min-w-0 px-0 pb-4 sm:px-0">
+      <section className="min-w-0 w-full px-0 pb-4 sm:px-0">
         {section==='builder'&&<AdvancedSubmittalBuilder/>}
         {section==='overview'&&<Overview rows={rows} loading={packagesLoading} onCreate={setSection}/>}
         {section==='products'&&<SubmittalProducts/>}
