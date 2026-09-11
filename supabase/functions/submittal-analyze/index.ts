@@ -46,7 +46,8 @@ Deno.serve(async (req) => {
       if (downloadError || !downloaded) throw downloadError ?? new Error("Unable to read source file");
       blob = downloaded;
     }
-    if (blob.size > 15 * 1024 * 1024) throw new Error("Cover/index file must be 15 MB or smaller");
+    if (fileData && blob.size > 15 * 1024 * 1024) throw new Error("Direct cover/index upload must be 15 MB or smaller");
+    if (!fileData && blob.size > 50 * 1024 * 1024) throw new Error("Cover/index file must be 50 MB or smaller");
 
     const base64 = toBase64(new Uint8Array(await blob.arrayBuffer()));
     const isPdf = mimeType === "application/pdf" || String(fileName).toLowerCase().endsWith(".pdf");
