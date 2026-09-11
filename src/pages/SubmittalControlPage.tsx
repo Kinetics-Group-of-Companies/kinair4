@@ -35,9 +35,9 @@ export default function SubmittalControlPage() {
   if (!user) return <Navigate to="/login" replace />;
   const rows = packages;
   return <MainLayout>
-    <header className="border-b bg-gradient-to-r from-primary/10 via-primary/5 to-background px-3 py-5 sm:px-4 sm:py-8"><div className="mx-auto flex max-w-7xl items-start gap-3 sm:items-center"><FileText className="h-7 w-7 shrink-0 text-primary sm:h-8 sm:w-8"/><div className="min-w-0"><h1 className="text-2xl font-bold sm:text-3xl">Submittal Control</h1><p className="text-sm text-muted-foreground sm:text-base">Controlled Regular, PQ and O&amp;M document packages.</p></div></div></header>
-    <div className="mx-auto grid max-w-7xl gap-3 p-2 sm:p-4 md:p-6 lg:grid-cols-[230px_1fr] lg:gap-5">
-      <Card className="sticky top-0 z-20 h-fit overflow-hidden bg-background/95 backdrop-blur lg:static"><CardContent className="overflow-x-auto p-2"><nav className="flex min-w-max gap-1 lg:grid lg:min-w-0">{sections.map(([id,label,Icon])=><Button key={id} variant={section===id?'secondary':'ghost'} className="shrink-0 justify-start whitespace-nowrap" onClick={()=>setSection(id)}><Icon className="h-4 w-4"/>{label}</Button>)}</nav></CardContent></Card>
+    <header className="border-b bg-gradient-to-r from-primary/10 via-primary/5 to-background px-3 py-5 sm:px-4 sm:py-8"><div className="mx-auto flex max-w-[1600px] items-start gap-3 sm:items-center"><FileText className="h-7 w-7 shrink-0 text-primary sm:h-8 sm:w-8"/><div className="min-w-0"><h1 className="text-2xl font-bold sm:text-3xl">Submittal Control</h1><p className="text-sm text-muted-foreground sm:text-base">Controlled Regular, PQ and O&amp;M document packages.</p></div></div></header>
+    <div className="mx-auto grid max-w-[1600px] gap-4 p-3 sm:p-5 md:p-6 lg:grid-cols-[280px_minmax(0,1fr)] lg:gap-6">
+      <Card className="sticky top-0 z-20 h-fit w-full overflow-hidden border-primary/15 bg-background/95 shadow-sm backdrop-blur lg:static"><CardContent className="overflow-x-auto p-2"><nav className="flex min-w-max gap-1 lg:grid lg:min-w-0">{sections.map(([id,label,Icon])=><Button key={id} variant={section===id?'secondary':'ghost'} className="h-12 shrink-0 justify-start whitespace-nowrap px-4 text-base lg:w-full" onClick={()=>setSection(id)}><Icon className="h-5 w-5"/>{label}</Button>)}</nav></CardContent></Card>
       <section className="min-w-0">
         {section==='builder'&&<AdvancedSubmittalBuilder/>}
         {section==='overview'&&<Overview rows={rows} loading={packagesLoading} onCreate={setSection}/>}
