@@ -73,7 +73,9 @@
     "tailwindcss-animate": "^1.0.7",
     "vaul": "^0.9.9",
     "xlsx": "https://cdn.sheetjs.com/xlsx-0.20.3/xlsx-0.20.3.tgz",
-    "zod": "^3.25.76"
+    "zod": "^3.25.76",
+    "pdf-lib": "^1.17.1",
+    "tus-js-client": "^4.3.1"
   },
   "devDependencies": {
     "@capacitor/android": "^8.5.0",
