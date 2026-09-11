@@ -29,9 +29,9 @@ export default function SubmittalControlPage() {
   return <MainLayout>
     <header className="border-b bg-gradient-to-r from-primary/10 via-primary/5 to-background px-4 py-8"><div className="mx-auto max-w-7xl flex items-center gap-3"><FileText className="h-8 w-8 text-primary"/><div><h1 className="text-3xl font-bold">Submittal Control</h1><p className="text-muted-foreground">Controlled Regular, PQ and O&amp;M document packages.</p></div></div></header>
     <div className="mx-auto grid max-w-7xl gap-5 p-4 md:p-6 lg:grid-cols-[230px_1fr]">
-      <Card className="h-fit"><CardContent className="p-2"><nav className="grid gap-1">{sections.map(([id,label,Icon])=><Button key={={id} variant={section===id?'secondary':'ghost'} className="justify-start" onClick={()=>setSection(id)}><Icon className="h-4 w-4"/>{label}</Button>)}</nav></CardContent></Card>
+      <Card className="h-fit"><CardContent className="p-2"><nav className="grid gap-1">{sections.map(([id,label,Icon])=><Button key={id} variant={section===id?'secondary':'ghost'} className="justify-start" onClick={()=>setSection(id)}><Icon className="h-4 w-4"/>{label}</Button>)}</nav></CardContent></Card>
       <section>
-        {section==='overview'&&<Overview rows={rows} loading={packages} onCreate={setSection}/>}
+        {section==='overview'&&<Overview rows={rows} loading={packages.isLoading} onCreate={setSection}/>}
         {(['new','pq','om'] as Section[]).includes(section)&&<SubmittalForm kind={section==='new'?'regular':section} saving={save.isPending} onSave={async d=>{await save.mutateAsync(d);setSection('overview');}}/>}
         {section==='products'&&<Module title="Product List" text="Create categories and models, with shared and model-specific controlled documents." action="Add product model"/>}
         {section==='reports'&&<Reports rows={rows}/>}
