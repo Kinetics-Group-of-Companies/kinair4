@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useState } from 'react';
 import { Navigate } from 'react-router-dom';
 import { BarChart3, FilePlus2, FileText, FolderOpen, LayoutDashboard, Library, PackagePlus, Settings2, Wrench } from 'lucide-react';
 import { MainLayout } from '@/components/layout/MainLayout';
@@ -10,6 +10,10 @@ import { Badge } from '@/components/ui/badge';
 import { useAuth } from '@/lib/authContext';
 
 type Section = 'overview' | 'new' | 'pq' | 'om' | 'products' | 'reports' | 'documents' | 'templates';
+
+const overviewCards = [
+  ['Total packages', '0'], ['Completed', '0'], ['Draft / failed', '0'], ['Products', '0'],
+] as const;
 
 const sections: { id: Section; label: string; icon: typeof LayoutDashboard }[] = [
   { id: 'overview', label: 'Overview', icon: LayoutDashboard },
@@ -69,9 +73,6 @@ export default function SubmittalControlPage() {
 }
 
 function Overview({ onCreate }: { onCreate: (section: Section) => void }) {
-  const cards = useMemo(() => [
-    ['Total packages', '0'], ['Completed', '0'], ['Draft / failed', '0'], ['Products', '0'],
-  ], []);
   return <div className="space-y-5">
     <div className="flex flex-wrap items-center justify-between gap-3">
       <div><h2 className="text-2xl font-semibold">Overview</h2><p className="text-sm text-muted-foreground">A fresh KINAIR workspace ready for its first package.</p></div>
@@ -81,7 +82,7 @@ function Overview({ onCreate }: { onCreate: (section: Section) => void }) {
         <Button variant="outline" onClick={() => onCreate('om')}>New O&amp;M</Button>
       </div>
     </div>
-    <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">{cards.map(([label, value]) => <Card key={label}><CardContent className="p-5"><p className="text-sm text-muted-foreground">{label}</p><p className="mt-1 text-3xl font-bold">{value}</p></CardContent></Card>)}</div>
+    <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">{overviewCards.map(([label, value]) => <Card key={label}><CardContent className="p-5"><p className="text-sm text-muted-foreground">{label}</p><p className="mt-1 text-3xl font-bold">{value}</p></CardContent></Card>)}</div>
     <Card><CardHeader><CardTitle>Submittal register</CardTitle><CardDescription>Regular, PQ and O&amp;M packages will appear here with revision, status, approval and download actions.</CardDescription></CardHeader><CardContent><div className="rounded-lg border border-dashed p-10 text-center text-muted-foreground">No submittals yet.</div></CardContent></Card>
   </div>;
 }
