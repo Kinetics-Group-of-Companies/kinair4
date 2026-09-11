@@ -11,6 +11,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { useToast } from '@/hooks/use-toast';
 import { useAuth } from '@/lib/authContext';
 import { useSubmittals, type SubmittalDraft, type SubmittalKind } from '@/hooks/useSubmittals';
+import { SubmittalProducts } from '@/components/submittal/SubmittalProducts';
 
 type Section = 'overview' | 'new' | 'pq' | 'om' | 'products' | 'reports' | 'documents' | 'templates';
 const sections = [
@@ -33,7 +34,7 @@ export default function SubmittalControlPage() {
       <section>
         {section==='overview'&&<Overview rows={rows} loading={packages.isLoading} onCreate={setSection}/>}
         {(['new','pq','om'] as Section[]).includes(section)&&<SubmittalForm kind={section==='new'?'regular':section} saving={save.isPending} onSave={async d=>{await save.mutateAsync(d);setSection('overview');}}/>}
-        {section==='products'&&<Module title="Product List" text="Create categories and models, with shared and model-specific controlled documents." action="Add product model"/>}
+        {section==='products'&&<SubmittalProducts/>}
         {section==='reports'&&<Reports rows={rows}/>}
         {section==='documents'&&<Module title="Standard Documents" text="Company profiles, trade licences, compliance statements, policies, organisation charts and approvals." action="Upload document"/>}
         {section==='templates'&&<Module title="Templates & Stamps" text="Company cover, index and divider templates, field maps and stamps." action="Upload template"/>}
