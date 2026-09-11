@@ -47,6 +47,9 @@ export function Header() {
             {isAuthenticated && (
               <Link to="/projects" className={navClass('/projects')}>Projects</Link>
             )}
+            {isAuthenticated && (
+              <Link to="/submittal-control" className={navClass('/submittal-control')}>Submittal Control</Link>
+            )}
             {isAuthenticated && canAccessLpo && (
               <Link to="/tracker" className={navClass('/tracker')}>Tracker</Link>
             )}
@@ -143,6 +146,16 @@ export function Header() {
                 >
                   <FolderKanban className="w-4 h-4" />
                   Projects
+                </Link>
+              )}
+              {isAuthenticated && (
+                <Link
+                  to="/submittal-control"
+                  className={`${mobileNavClass('/submittal-control')} flex items-center gap-2`}
+                  onClick={() => setIsMobileMenuOpen(false)}
+                >
+                  <FileText className="w-4 h-4" />
+                  Submittal Control
                 </Link>
               )}
               {isAuthenticated && canAccessLpo && (
