@@ -23,7 +23,7 @@ import { AdvancedSubmittalBuilder } from '@/components/submittal/AdvancedSubmitt
 
 type Section = 'builder' | 'overview' | 'new' | 'pq' | 'om' | 'attachments' | 'products' | 'reports' | 'documents' | 'templates';
 const sections = [
-  ['builder','Automatic Builder',WandSparkles],['overview','Overview',LayoutDashboard],['new','New Submittal',FilePlus2],['pq','New PQ Submittal',PackagePlus],
+  ['builder','Unified Workspace',WandSparkles],['overview','Overview',LayoutDashboard],['new','New Submittal',FilePlus2],['pq','New PQ Submittal',PackagePlus],
   ['om','New O&M Submittal',Wrench],['attachments','Attachments & Dividers',Paperclip],['products','Product List',Library],['reports','Reports',BarChart3],
   ['documents','Documents',FolderOpen],['templates','Templates',Settings2],
 ] as const;
