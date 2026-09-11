@@ -24,6 +24,7 @@ import EngineeringIntelligencePage from "./pages/EngineeringIntelligencePage";
 import DocumentationPage from "./pages/DocumentationPage";
 import ProjectsPage from "./pages/ProjectsPage";
 import LpoTrackerPage from "./pages/LpoTrackerPage";
+import SubmittalControlPage from "./pages/SubmittalControlPage";
 import AboutPage from "./pages/AboutPage";
 import QuotePage from "./pages/QuotePage";
 import ComparePage from "./pages/ComparePage";
@@ -113,6 +114,9 @@ const App = () => {
                 <Route path="/projects" element={<>
                   <Seo path="/projects" title="My Projects | KINAIR" description="Manage your saved fan and air curtain selection projects." noindex />
                   <ProjectsPage /></>} />
+                <Route path="/submittal-control" element={<>
+                  <Seo path="/submittal-control" title="Submittal Control | KINAIR" description="Create and manage regular, PQ and O&M submittal packages." noindex />
+                  <SubmittalControlPage /></>} />
                 <Route path="/tracker" element={<>
                   <Seo path="/tracker" title="LPO & Delivery Tracker | KINAIR" description="Track customer orders from LPO to delivery with lead times, milestones and delay alerts." noindex />
                   <LpoTrackerPage /></>} />
