@@ -35,7 +35,7 @@ export interface SubmittalPackage {
   editing_at: string | null;
 }
 
-export type SubmittalDraft = Omit<SubmittalPackage, 'id' | 'approval_status' | 'output_storage_path' | 'created_at' | 'updated_at'>;
+export type SubmittalDraft = Omit<SubmittalPackage, 'id' | 'approval_status' | 'output_storage_path' | 'created_at' | 'updated_at' | 'version' | 'editing_by' | 'editing_at'>;
 
 const db = supabase as any;
 
