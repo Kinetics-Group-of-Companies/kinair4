@@ -7,6 +7,7 @@ alter table public.submittal_packages
 
 alter table public.submittal_documents
   add column if not exists scope_type text not null default 'company',
+  add column if not exists package_id uuid references public.submittal_packages(id) on delete cascade,
   add column if not exists series_name text,
   add column if not exists keywords text[] not null default '{}',
   add column if not exists is_active boolean not null default true,
@@ -44,6 +45,6 @@ alter table public.submittal_package_products enable row level security;
 do $$ begin create policy "tenant members manage package products" on public.submittal_package_products for all to authenticated using (tenant_id in (select tenant_id from public.profiles where user_id=(select auth.uid()))) with check (tenant_id in (select tenant_id from public.profiles where user_id=(select auth.uid())) and created_by=(select auth.uid())); exception when duplicate_object then null; end $$;
 grant select,insert,update,delete on public.submittal_package_products to authenticated;
 
-create index if not exists submittal_documents_match_idx on public.submittal_documents(tenant_id,category,scope_type,product_id,model_id);
+create index if not exists submittal_documents_match_idx on public.submittal_documents(tenant_id,category,scope_type,package_id,product_id,model_id);
 create index if not exists submittal_package_items_order_idx on public.submittal_package_items(package_id,sort_order);
 create index if not exists submittal_package_products_package_idx on public.submittal_package_products(package_id);
