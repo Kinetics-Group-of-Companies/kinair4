@@ -1,7 +1,7 @@
 import { FormEvent, useMemo, useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { Navigate } from 'react-router-dom';
-import { BarChart3, FilePlus2, FileText, FolderOpen, LayoutDashboard, Library, PackagePlus, Settings2, Wrench, Paperclip } from 'lucide-react';
+import { BarChart3, FilePlus2, FileText, FolderOpen, LayoutDashboard, Library, PackagePlus, Settings2, Wrench, Paperclip, WandSparkles } from 'lucide-react';
 import { MainLayout } from '@/components/layout/MainLayout';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
@@ -18,10 +18,11 @@ import { SubmittalProducts } from '@/components/submittal/SubmittalProducts';
 import { SubmittalDocuments, SubmittalTemplates } from '@/components/submittal/SubmittalFiles';
 import { SubmittalAttachments } from '@/components/submittal/SubmittalAttachments';
 import { SubmittalActions } from '@/components/submittal/SubmittalActions';
+import { AdvancedSubmittalBuilder } from '@/components/submittal/AdvancedSubmittalBuilder';
 
-type Section = 'overview' | 'new' | 'pq' | 'om' | 'attachments' | 'products' | 'reports' | 'documents' | 'templates';
+type Section = 'builder' | 'overview' | 'new' | 'pq' | 'om' | 'attachments' | 'products' | 'reports' | 'documents' | 'templates';
 const sections = [
-  ['overview','Overview',LayoutDashboard],['new','New Submittal',FilePlus2],['pq','New PQ Submittal',PackagePlus],
+  ['builder','Automatic Builder',WandSparkles],['overview','Overview',LayoutDashboard],['new','New Submittal',FilePlus2],['pq','New PQ Submittal',PackagePlus],
   ['om','New O&M Submittal',Wrench],['attachments','Attachments & Dividers',Paperclip],['products','Product List',Library],['reports','Reports',BarChart3],
   ['documents','Documents',FolderOpen],['templates','Templates',Settings2],
 ] as const;
@@ -29,7 +30,7 @@ const sections = [
 export default function SubmittalControlPage() {
   const { user, isLoading } = useAuth();
   const { packages, isLoading: packagesLoading, save } = useSubmittals();
-  const [section,setSection] = useState<Section>('overview');
+  const [section,setSection] = useState<Section>('builder');
   if (isLoading) return <MainLayout><div className="flex h-64 items-center justify-center">Loading…</div></MainLayout>;
   if (!user) return <Navigate to="/login" replace />;
   const rows = packages;
@@ -38,6 +39,7 @@ export default function SubmittalControlPage() {
     <div className="mx-auto grid max-w-7xl gap-5 p-4 md:p-6 lg:grid-cols-[230px_1fr]">
       <Card className="h-fit"><CardContent className="p-2"><nav className="grid gap-1">{sections.map(([id,label,Icon])=><Button key={id} variant={section===id?'secondary':'ghost'} className="justify-start" onClick={()=>setSection(id)}><Icon className="h-4 w-4"/>{label}</Button>)}</nav></CardContent></Card>
       <section>
+        {section==='builder'&&<AdvancedSubmittalBuilder/>}
         {section==='overview'&&<Overview rows={rows} loading={packagesLoading} onCreate={setSection}/>}
         {(['new','pq','om'] as Section[]).includes(section)&&<SubmittalForm kind={section==='new'?'regular':section} saving={save.isPending} onSave={async d=>{await save.mutateAsync(d);setSection('overview');}}/>}
         {section==='attachments'&&<SubmittalAttachments/>}
