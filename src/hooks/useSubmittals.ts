@@ -1,3 +1,4 @@
+import { useEffect } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/integrations/backend/client';
 import { useAuth } from '@/lib/authContext';
@@ -29,6 +30,9 @@ export interface SubmittalPackage {
   output_storage_path: string | null;
   created_at: string;
   updated_at: string;
+  version: number;
+  editing_by: string | null;
+  editing_at: string | null;
 }
 
 export type SubmittalDraft = Omit<SubmittalPackage, 'id' | 'approval_status' | 'output_storage_path' | 'created_at' | 'updated_at'>;
@@ -52,6 +56,8 @@ export function useSubmittals() {
       return (data ?? []) as SubmittalPackage[];
     },
   });
+
+  useEffect(()=>{if(!tenantId)return;const channel=supabase.channel(`submittal-team-${tenantId}`).on('postgres_changes',{event:'*',schema:'public',table:'submittal_packages',filter:`tenant_id=eq.${tenantId}`},()=>void queryClient.invalidateQueries({queryKey:key})).on('postgres_changes',{event:'*',schema:'public',table:'submittal_package_items'},()=>void queryClient.invalidateQueries({queryKey:key})).on('postgres_changes',{event:'*',schema:'public',table:'submittal_package_products'},()=>void queryClient.invalidateQueries({queryKey:key})).subscribe();return()=>{void supabase.removeChannel(channel)}},[tenantId,queryClient]);
 
   const save = useMutation({
     mutationFn: async (draft: SubmittalDraft) => {
