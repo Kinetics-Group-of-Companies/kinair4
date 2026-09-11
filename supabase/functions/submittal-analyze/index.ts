@@ -24,7 +24,7 @@ Deno.serve(async (req) => {
       global: { headers: { Authorization: auth } },
     });
     const admin = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
-    const { packageId, storagePath, fileName, mimeType, fileData } = await req.json();
+    const { packageId, storagePath, fileName, mimeType, fileData, sourceAlreadyUploaded = false } = await req.json();
     if (!packageId || !storagePath) throw new Error("Package and source file are required");
 
     const { data: pkg, error: packageError } = await scoped.from("submittal_packages").select("id,tenant_id").eq("id", packageId).single();
@@ -36,10 +36,12 @@ Deno.serve(async (req) => {
       const binary = atob(String(fileData).replace(/^data:[^,]+,/, ""));
       const bytes = Uint8Array.from(binary, (char) => char.charCodeAt(0));
       if (bytes.byteLength > 15 * 1024 * 1024) throw new Error("Cover/index file must be 15 MB or smaller");
-      const { error: uploadError } = await admin.storage.from("submittal-control").upload(storagePath, bytes, {
-        contentType: mimeType || "application/octet-stream", upsert: true,
-      });
-      if (uploadError) throw uploadError;
+      if (!sourceAlreadyUploaded) {
+        const { error: uploadError } = await admin.storage.from("submittal-control").upload(storagePath, bytes, {
+          contentType: mimeType || "application/octet-stream", upsert: true,
+        });
+        if (uploadError) throw uploadError;
+      }
       blob = new Blob([bytes], { type: mimeType || "application/octet-stream" });
     } else {
       const { data: downloaded, error: downloadError } = await admin.storage.from("submittal-control").download(storagePath);
