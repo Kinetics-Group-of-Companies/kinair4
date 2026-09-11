@@ -38,7 +38,7 @@ const db = supabase as any;
 export function useSubmittals() {
   const { user, tenantId } = useAuth();
   const queryClient = useQueryClient();
-  const key = ['submittal-packages', tenantId];
+  const key = ['submittal-package-register', tenantId];
 
   const packages = useQuery({
     queryKey: key,
