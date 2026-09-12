@@ -147,7 +147,7 @@ export default function FanSelectorPage() {
     }
   };
   // Show loading state
-  if (authLoading || isLoading || loadingDimensions || (isGuest && trialLoading)) {
+  if (authLoading || isLoading || loadingDimensions || ((isGuest || isAccountTrialActive) && trialLoading)) {
     return (
       <MainLayout>
         <div className="min-h-[60vh] flex items-center justify-center">
@@ -170,7 +170,7 @@ export default function FanSelectorPage() {
   }
 
   // Show pending approval screen for unapproved users (except super admins)
-  if (!isApproved && !isSuperAdmin && !isAccountTrialActive && !trialActive) {
+  if (!isApproved && !isSuperAdmin && (!isAccountTrialActive || !trialActive)) {
     return (
       <MainLayout>
         <div className="min-h-[60vh] flex items-center justify-center">
@@ -178,9 +178,13 @@ export default function FanSelectorPage() {
             <div className="w-20 h-20 bg-amber-100 rounded-full flex items-center justify-center mx-auto mb-6">
               <Clock className="w-10 h-10 text-amber-600" />
             </div>
-            <h2 className="text-2xl font-bold mb-3">Approval Pending</h2>
+            <h2 className="text-2xl font-bold mb-3">
+              {isAccountTrialActive ? 'Daily Trial Limit Reached' : 'Approval Pending'}
+            </h2>
             <p className="text-muted-foreground mb-4">
-              Your account is awaiting admin approval. You'll receive access once your request is reviewed.
+              {isAccountTrialActive
+                ? 'Your 5-minute daily selection allowance is finished. Access resets tomorrow (UAE time).'
+                : "Your account is awaiting admin approval. You'll receive access once your request is reviewed."}
             </p>
             <p className="text-sm text-muted-foreground">
               This usually takes 1-2 business days. Contact the administrator if you need urgent access.

@@ -31,7 +31,7 @@ export function AssistantLauncher({
   const { isAuthenticated, isApproved, isSuperAdmin, isAccountTrialActive } = useAuth();
   const { isGuest, trialActive } = useGuestTrial();
   const assistantAllowed = isAuthenticated && (
-    isGuest ? trialActive : (isApproved || isSuperAdmin || isAccountTrialActive)
+    isGuest ? trialActive : (isApproved || isSuperAdmin || (isAccountTrialActive && trialActive))
   );
   const [open, setOpen] = useState(false);
   const [teaserIndex, setTeaserIndex] = useState(0);
