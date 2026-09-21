@@ -11,7 +11,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 
 type Shape='rectangular'|'circular';
-type Kind='duct'|'flex'|'elbow90'|'elbow45'|'transition'|'tee-straight'|'tee-branch'|'damper'|'filter'|'coil'|'silencer'|'grille'|'louvre'|'custom';
+type Kind='duct'|'flex'|'elbow90'|'elbow90-vaned'|'elbow90-mitered'|'elbow45'|'transition'|'reducer'|'diffuser'|'tee-straight'|'tee-branch'|'wye-straight'|'wye-branch'|'takeoff'|'cross-straight'|'cross-branch'|'entry'|'exit'|'damper'|'fire-damper'|'backdraft-damper'|'vav'|'fan-inlet'|'fan-outlet'|'filter'|'coil'|'silencer'|'grille'|'louvre'|'custom';
 type Item={id:string;name:string;kind:Kind;shape:Shape;flow:number;width:number;height:number;diameter:number;length:number;qty:number;k:number;fixed:number};
 type Path={id:string;name:string;items:Item[]};
 type FlowUnit='m3h'|'ls'|'cfm'|'m3s';
@@ -22,12 +22,28 @@ type Material=keyof typeof MATERIALS;
 const FITTING_SOURCES:Record<Kind,{code:string;basis:string;document:string}>={
  duct:{code:'KINAIR METHOD',basis:'Straight round / rectangular duct',document:'KINAIR Darcy-Weisbach duct friction calculation basis'},
  flex:{code:'MANUFACTURER DATA',basis:'Flexible duct construction and compression dependent',document:'Use tested manufacturer friction data; default multiplier is an estimate'},
- elbow90:{code:'KINAIR METHOD',basis:'Round die-stamped r/D=1.5 / rectangular smooth-radius without vanes',document:'KINAIR fitting geometry and dynamic-loss calculation basis'},
+ elbow90:{code:'KINAIR METHOD',basis:'Smooth-radius 90° elbow without turning vanes',document:'Geometry-dependent K; confirm radius ratio and aspect ratio'},
+ 'elbow90-vaned':{code:'KINAIR METHOD',basis:'Rectangular 90° elbow with turning vanes',document:'Confirm vane type, spacing and throat geometry'},
+ 'elbow90-mitered':{code:'KINAIR METHOD',basis:'Mitered square 90° elbow without vanes',document:'High-loss geometry; confirm construction before issue'},
  elbow45:{code:'KINAIR METHOD',basis:'Round die-stamped 45 degree, r/D=1.5',document:'KINAIR fitting geometry and dynamic-loss calculation basis'},
- transition:{code:'KINAIR METHOD',basis:'Supply round transition / symmetrical rectangular transition',document:'KINAIR transition geometry and dynamic-loss calculation basis'},
+ transition:{code:'KINAIR METHOD',basis:'Generic area transition',document:'Confirm inlet/outlet areas, included angle and flow direction'},
+ reducer:{code:'KINAIR METHOD',basis:'Converging reducer',document:'Coefficient depends on area ratio and included angle'},
+ diffuser:{code:'KINAIR METHOD',basis:'Diverging expander / diffuser',document:'Coefficient depends on area ratio, included angle and downstream condition'},
  'tee-straight':{code:'KINAIR METHOD',basis:'90 degree diverging tee, straight-path coefficient Cs',document:'KINAIR junction calculation basis; coefficient varies with area and airflow ratios'},
- 'tee-branch':{code:'KINAIR METHOD',basis:'90 degree diverging tee, branch-path coefficient Cb',document:'KINAIR junction calculation basis; coefficient varies with area and airflow ratios'},
- damper:{code:'KINAIR METHOD',basis:'Rectangular opposed-blade damper',document:'KINAIR damper calculation basis; blade angle/opening required'},
+ 'tee-branch':{code:'KINAIR METHOD',basis:'90° tee branch path',document:'Enter path-specific coefficient using area and airflow ratios'},
+ 'wye-straight':{code:'KINAIR METHOD',basis:'30°/45° wye straight path',document:'Enter path-specific coefficient using area and airflow ratios'},
+ 'wye-branch':{code:'KINAIR METHOD',basis:'30°/45° wye branch path',document:'Enter path-specific coefficient using area and airflow ratios'},
+ takeoff:{code:'KINAIR METHOD',basis:'Conical / bellmouth branch take-off',document:'Confirm take-off geometry, branch flow ratio and reference velocity'},
+ 'cross-straight':{code:'KINAIR METHOD',basis:'Diverging cross straight path',document:'Enter path-specific coefficient for the selected outlet path'},
+ 'cross-branch':{code:'KINAIR METHOD',basis:'Diverging cross branch path',document:'Enter path-specific coefficient for the selected outlet path'},
+ entry:{code:'KINAIR METHOD',basis:'Duct entry / intake hood',document:'Confirm bellmouth, sharp-edge or hood geometry'},
+ exit:{code:'KINAIR METHOD',basis:'Abrupt exit / free discharge',document:'Uses actual outlet velocity pressure reference'},
+ damper:{code:'KINAIR METHOD',basis:'Opposed-blade volume-control damper',document:'Coefficient changes sharply with blade angle/opening'},
+ 'fire-damper':{code:'MANUFACTURER DATA',basis:'Curtain or multi-blade fire damper',document:'Use certified pressure drop for exact tested model and size'},
+ 'backdraft-damper':{code:'MANUFACTURER DATA',basis:'Gravity / counterbalanced backdraft damper',document:'Use manufacturer loss at selected face velocity'},
+ vav:{code:'MANUFACTURER DATA',basis:'VAV terminal box',document:'Use minimum inlet static pressure from certified selection'},
+ 'fan-inlet':{code:'SYSTEM EFFECT',basis:'Fan inlet connection / inlet obstruction',document:'Enter project-specific system-effect loss for actual inlet geometry'},
+ 'fan-outlet':{code:'SYSTEM EFFECT',basis:'Fan outlet connection / discharge elbow',document:'Enter project-specific system-effect loss for actual outlet geometry'},
  filter:{code:'MANUFACTURER DATA',basis:'Clean/design/final pressure drop',document:'Filter manufacturer certified data'},
  coil:{code:'MANUFACTURER DATA',basis:'Coil selection pressure drop at selected face velocity',document:'Coil manufacturer certified data'},
  silencer:{code:'MANUFACTURER DATA',basis:'Insertion-loss selection pressure drop',document:'Sound attenuator manufacturer certified data'},
@@ -36,7 +52,18 @@ const FITTING_SOURCES:Record<Kind,{code:string;basis:string;document:string}>={
  custom:{code:'USER DATA',basis:'User-defined K or fixed pressure drop',document:'Attach project-specific test or manufacturer evidence'}
 };
 
-const LIB:Record<Kind,{label:string;k:number;fixed?:number}>={duct:{label:'Straight duct',k:0},flex:{label:'Flexible duct',k:0},elbow90:{label:'90° elbow',k:.25},elbow45:{label:'45° elbow',k:.12},transition:{label:'Transition',k:.2},'tee-straight':{label:'Tee — straight path',k:.2},'tee-branch':{label:'Tee — branch path',k:.9},damper:{label:'Volume damper',k:.5},filter:{label:'Filter — manufacturer loss',k:0,fixed:75},coil:{label:'Coil — manufacturer loss',k:0,fixed:100},silencer:{label:'Sound attenuator',k:0,fixed:50},grille:{label:'Grille / diffuser',k:0,fixed:25},louvre:{label:'Louvre',k:0,fixed:35},custom:{label:'Custom component',k:0}};
+const LIB:Record<Kind,{label:string;k:number;fixed?:number}>={
+ duct:{label:'Straight duct',k:0},flex:{label:'Flexible duct',k:0},
+ elbow90:{label:'90° radius elbow',k:.25},'elbow90-vaned':{label:'90° elbow with vanes',k:.15},'elbow90-mitered':{label:'90° mitered elbow',k:1.1},elbow45:{label:'45° elbow',k:.12},
+ transition:{label:'Generic transition',k:.2},reducer:{label:'Reducer',k:.12},diffuser:{label:'Expander / diffuser',k:.3},
+ 'tee-straight':{label:'Tee - straight path',k:.2},'tee-branch':{label:'Tee - branch path',k:.9},
+ 'wye-straight':{label:'Wye - straight path',k:.15},'wye-branch':{label:'Wye - branch path',k:.55},takeoff:{label:'Conical branch take-off',k:.75},
+ 'cross-straight':{label:'Cross - straight path',k:.25},'cross-branch':{label:'Cross - branch path',k:1},
+ entry:{label:'Duct entry / intake',k:.5},exit:{label:'Duct exit / discharge',k:1},
+ damper:{label:'Volume-control damper',k:.5},'fire-damper':{label:'Fire damper',k:0},'backdraft-damper':{label:'Backdraft damper',k:0},vav:{label:'VAV terminal',k:0},
+ 'fan-inlet':{label:'Fan inlet system effect',k:.25},'fan-outlet':{label:'Fan outlet system effect',k:.35},
+ filter:{label:'Filter - manufacturer loss',k:0,fixed:75},coil:{label:'Coil - manufacturer loss',k:0,fixed:100},silencer:{label:'Sound attenuator',k:0,fixed:50},grille:{label:'Grille / diffuser',k:0,fixed:25},louvre:{label:'Louvre',k:0,fixed:35},custom:{label:'Custom component',k:0}
+};
 const id=()=>Math.random().toString(36).slice(2,9);
 const item=(kind:Kind='duct'):Item=>({id:id(),name:LIB[kind].label,kind,shape:'rectangular',flow:3600,width:600,height:400,diameter:400,length:kind==='duct'||kind==='flex'?10:0,qty:1,k:LIB[kind].k,fixed:LIB[kind].fixed??0});
 const n=(v:unknown,d=0)=>{const x=Number(v);return Number.isFinite(x)?x:d};
@@ -47,7 +74,7 @@ const calc=(i:Item,density:number,viscosity:number,rough:number,flowFactor:numbe
  const area=i.shape==='circular'?Math.PI*d*d/4:w*h,dh=i.shape==='circular'?d:2*w*h/(w+h),v=q/area,vp=density*v*v/2,re=density*v*dh/viscosity,rr=rough/1000/dh;
  const f=re<=0?0:re<2300?64/re:.25/Math.pow(Math.log10(rr/3.7+5.74/Math.pow(re,.9)),2);
  const friction=(i.kind==='duct'||i.kind==='flex')?f*Math.max(0,i.length)/dh*vp*(i.kind==='flex'?2.5:1)*Math.max(1,i.qty):0;
- const dynamic=(Math.max(0,i.k)*vp+Math.max(0,i.fixed))*Math.max(1,i.qty);
+ const dynamic=(i.k*vp+Math.max(0,i.fixed))*Math.max(1,i.qty);
  return {...i,area,dh,v,vp,re,f,friction,dynamic,loss:friction+dynamic};
 };
 const fmt=(v:number)=>`${v>=100?v.toFixed(0):v.toFixed(1)} Pa`;
@@ -66,6 +93,22 @@ function FittingDiagram({ kind, compact=false }: { kind: Kind; compact?: boolean
   case 'transition': drawing=<><path d="M8 30h28l25 12h31M8 70h28l25-12h31" {...common}/><path d="M43 50h30" {...common}/><path d="M68 45l8 5-8 5" fill="currentColor"/></>;break;
   case 'tee-straight': drawing=<><path d="M8 38h84M8 62h84M45 62v30M68 62v30" {...common}/><path d="M38 45h28" {...common}/><path d="M61 40l8 5-8 5" fill="currentColor"/></>;break;
   case 'tee-branch': drawing=<><path d="M8 38h84M8 62h37v30M68 62v30M68 62h24" {...common}/><path d="M28 48h28v25" {...common}/><path d="M51 69l5 8 5-8" fill="currentColor"/></>;break;
+  case 'elbow90-vaned': drawing=<><path d="M18 84V48c0-20 10-30 30-30h36M40 84V51c0-8 4-12 12-12h32" {...common}/><path d="M29 55c0-17 8-25 25-25M34 63c0-18 9-27 27-27" {...common} strokeWidth="2"/><path d="M68 21l9-5-9-5" fill="currentColor"/></>;break;
+  case 'elbow90-mitered': drawing=<><path d="M18 84V38l20-20h46M40 84V48l8-8h36" {...common}/><path d="M68 21l9-5-9-5" fill="currentColor"/></>;break;
+  case 'reducer': drawing=<><path d="M8 22h30l25 18h29M8 78h30l25-18h29" {...common}/><path d="M40 50h34M68 45l8 5-8 5" fill="currentColor"/></>;break;
+  case 'diffuser': drawing=<><path d="M8 40h29l25-18h30M8 60h29l25 18h30" {...common}/><path d="M31 50h38M63 45l8 5-8 5" fill="currentColor"/></>;break;
+  case 'wye-straight': drawing=<><path d="M8 40h44l35-24M8 62h48l35-24M52 40l32 36M56 62l16 22" {...common}/><path d="M62 46l8 5-8 5" fill="currentColor"/></>;break;
+  case 'wye-branch': drawing=<><path d="M8 40h44l35-24M8 62h48l35-24M52 40l32 36M56 62l16 22" {...common}/><path d="M57 55l10 13M68 62l1 9-9-3" fill="currentColor"/></>;break;
+  case 'takeoff': drawing=<><path d="M8 34h84M8 66h84M42 66l14 20h24M61 66l11 12h12" {...common}/><path d="M58 65l9 8M66 67l3 9-9-2" fill="currentColor"/></>;break;
+  case 'cross-straight': drawing=<><path d="M8 38h84M8 62h84M39 38V8M61 38V8M39 62v30M61 62v30" {...common}/><path d="M37 45h29M60 40l8 5-8 5" fill="currentColor"/></>;break;
+  case 'cross-branch': drawing=<><path d="M8 38h84M8 62h84M39 38V8M61 38V8M39 62v30M61 62v30" {...common}/><path d="M28 49h22v27M45 70l5 8 5-8" fill="currentColor"/></>;break;
+  case 'entry': drawing=<><path d="M10 25h25l14 15h41M10 75h25l14-15h41" {...common}/><path d="M14 50h55M63 45l8 5-8 5" fill="currentColor"/></>;break;
+  case 'exit': drawing=<><path d="M10 40h48l20-20M10 60h48l20 20" {...common}/><path d="M28 50h55M77 45l8 5-8 5" fill="currentColor"/></>;break;
+  case 'fire-damper': drawing=<><path d="M12 22h76v56H12z" {...common}/><path d="M24 28v44M36 28v44M48 28v44M60 28v44M72 28v44" {...common} strokeWidth="2"/><path d="M10 50h80M78 45l8 5-8 5" fill="currentColor"/></>;break;
+  case 'backdraft-damper': drawing=<><path d="M12 22h76v56H12z" {...common}/><path d="M22 35h56l-8 10H22zM22 51h56l-8 10H22z" fill="currentColor" opacity=".45"/>{arrow}</>;break;
+  case 'vav': drawing=<><path d="M12 26h76v48H12z" {...common}/><circle cx="50" cy="50" r="14" {...common}/><path d="M50 36v28M36 50h28" {...common} strokeWidth="2"/>{arrow}</>;break;
+  case 'fan-inlet': drawing=<><path d="M12 35h30M12 65h30M42 35l12 8M42 65l12-8" {...common}/><circle cx="70" cy="50" r="20" {...common}/><path d="M70 34l7 14-14 8z" fill="currentColor"/>{arrow}</>;break;
+  case 'fan-outlet': drawing=<><circle cx="30" cy="50" r="20" {...common}/><path d="M30 34l7 14-14 8z" fill="currentColor"/><path d="M50 38h40M50 62h40" {...common}/><path d="M72 50h16M82 45l8 5-8 5" fill="currentColor"/></>;break;
   case 'damper': drawing=<><path d="M10 27h80v46H10z" {...common}/><line x1="22" y1="68" x2="78" y2="32" {...common}/><circle cx="50" cy="50" r="5" fill="currentColor"/>{arrow}</>;break;
   case 'filter': drawing=<><path d="M20 18h60v64H20z" {...common}/><path d="M27 27l12 46 12-46 12 46 10-46" {...common}/>{arrow}</>;break;
   case 'coil': drawing=<><path d="M18 18h64v64H18z" {...common}/><path d="M30 25c18 10-18 20 0 30s-18 20 0 22M50 25c18 10-18 20 0 30s-18 20 0 22M70 25c18 10-18 20 0 30s-18 20 0 22" {...common}/></>;break;
@@ -84,6 +127,13 @@ export function ESPCalculator(){
  const results=useMemo(()=>paths.map(p=>{const items=p.items.map(i=>calc(i,density,viscosity,rough,FLOW_UNITS[flowUnit].toM3h)),base=items.reduce((s,i)=>s+i.loss,0);return {...p,items,base,total:base*(1+Math.max(0,leak)/100)*(1+Math.max(0,margin)/100)}}),[paths,density,viscosity,rough,flowUnit,leak,margin]);
  const atmosphericPressure=101325*Math.pow(1-2.25577e-5*Math.max(-500,alt),5.2559),densityCorrection=density/1.204;
  const critical=results.reduce((a,b)=>b.total>a.total?b:a,results[0]),selected=results.find(p=>p.id===selectedId)??results[0],max=Math.max(1,...results.map(p=>p.total));
+ const criticalFriction=critical.items.reduce((sum,i)=>sum+i.friction,0);
+ const criticalDynamic=critical.items.reduce((sum,i)=>sum+i.dynamic,0);
+ const criticalAllowance=critical.total-critical.base;
+ const manufacturerKinds:Kind[]=['filter','coil','silencer','grille','louvre','fire-damper','backdraft-damper','vav'];
+ const unverifiedEquipment=critical.items.filter(i=>manufacturerKinds.includes(i.kind)&&i.fixed<=0).length;
+ const highVelocityItems=critical.items.filter(i=>i.v>8).length;
+ const systemEffectItems=critical.items.filter(i=>i.kind==='fan-inlet'||i.kind==='fan-outlet').length;
  const updatePath=(patch:Partial<Path>)=>setPaths(ps=>ps.map(p=>p.id===selected.id?{...p,...patch}:p));
  const updateItem=(iid:string,patch:Partial<Item>)=>setPaths(ps=>ps.map(p=>p.id===selected.id?{...p,items:p.items.map(i=>i.id===iid?{...i,...patch}:i)}:p));
  const addPath=()=>{const p={id:id(),name:`Route ${paths.length+1}`,items:[item()]};setPaths(ps=>[...ps,p]);setSelectedId(p.id)};
@@ -99,25 +149,41 @@ export function ESPCalculator(){
   let y=(doc as any).lastAutoTable.finalY+8;doc.setFontSize(11);doc.setFont('helvetica','bold');doc.setTextColor(25,35,50);doc.text('Route comparison and governing duty',14,y);y+=5;
   const barW=120;results.forEach((p,j)=>{const yy=y+j*9;doc.setFontSize(7);doc.setFont('helvetica',p.id===critical.id?'bold':'normal');doc.text(p.name,14,yy+4,{maxWidth:48});doc.setFillColor(232,237,243);doc.rect(64,yy,barW,5,'F');doc.setFillColor(p.id===critical.id?238:35,p.id===critical.id?145:112,p.id===critical.id?35:190);doc.rect(64,yy,barW*p.total/max,5,'F');doc.text(fmt(p.total),pageW-14,yy+4,{align:'right'})});y+=results.length*9+5;
   doc.setFillColor(8,31,55);doc.roundedRect(14,y,pageW-28,20,2,2,'F');doc.setTextColor(255,255,255);doc.setFontSize(8);doc.text('REQUIRED FAN EXTERNAL STATIC PRESSURE',20,y+7);doc.setTextColor(80,225,235);doc.setFontSize(17);doc.setFont('helvetica','bold');doc.text(fmt(critical.total),20,y+16);doc.setTextColor(255,255,255);doc.setFontSize(9);doc.text(critical.name,pageW-20,y+13,{align:'right'});y+=27;
+  autoTable(doc,{startY:y,theme:'grid',head:[['Pressure-loss breakdown','Pa','Share of base route']],body:[
+   ['Straight/flexible duct friction',criticalFriction.toFixed(1),`${(criticalFriction/Math.max(1,critical.base)*100).toFixed(1)}%`],
+   ['Fittings and equipment',criticalDynamic.toFixed(1),`${(criticalDynamic/Math.max(1,critical.base)*100).toFixed(1)}%`],
+   ['Leakage and design-margin allowance',criticalAllowance.toFixed(1),'Added after route subtotal'],
+   ['Final governing design ESP',critical.total.toFixed(1),'Fan selection duty'],
+  ],styles:{fontSize:7,cellPadding:1.4},headStyles:{fillColor:[20,50,82]},columnStyles:{1:{halign:'right'},2:{halign:'right'}}});
   doc.addPage();doc.setTextColor(25,35,50);doc.setFont('helvetica','bold');doc.setFontSize(15);doc.text('Critical Route - ESP Accumulation',14,18);doc.setFontSize(8);doc.setFont('helvetica','normal');doc.text(critical.name,14,24);doc.setDrawColor(30,110,190);doc.line(14,29,pageW-14,29);
   const gx=28,gy=40,gw=160,gh=75;doc.setFontSize(7);for(let tick=0;tick<=4;tick++){const ty=gy+tick*gh/4,value=critical.base*(1-tick/4);doc.setDrawColor(220);doc.line(gx,ty,gx+gw,ty);doc.setTextColor(80);doc.text(value.toFixed(0),gx-3,ty+1,{align:'right'})}doc.setDrawColor(70);doc.line(gx,gy,gx,gy+gh);doc.line(gx,gy+gh,gx+gw,gy+gh);let cumulative=0,px=gx,py=gy+gh;critical.items.forEach((i,j)=>{cumulative+=i.loss;const x=gx+(j+1)*gw/critical.items.length,y=gy+gh-cumulative/Math.max(1,critical.base)*gh;doc.setDrawColor(20,180,215);doc.setLineWidth(1.2);doc.line(px,py,x,y);doc.setFillColor(245,145,35);doc.circle(x,y,1.5,'F');doc.setFontSize(5.5);doc.setTextColor(70);doc.text(String(j+1),x,gy+gh+4,{align:'center'});px=x;py=y});doc.setFontSize(7);doc.text('Cumulative pressure loss (Pa)',8,gy+gh/2,{angle:90,align:'center'});doc.text('Route component number',gx+gw/2,gy+gh+9,{align:'center'});
   autoTable(doc,{startY:130,theme:'grid',head:[['#','Component','Flow','Duct size','Velocity','K / fixed','Reference','Total']],body:critical.items.map((i,j)=>[j+1,i.name,`${i.flow} ${FLOW_UNITS[flowUnit].label}`,i.shape==='circular'?`Dia. ${i.diameter} mm`:`${i.width} x ${i.height} mm`,`${i.v.toFixed(2)} m/s`,`${i.k.toFixed(2)} / ${i.fixed.toFixed(1)} Pa`,FITTING_SOURCES[i.kind].code,fmt(i.loss)]),styles:{fontSize:6.5,cellPadding:1.35},headStyles:{fillColor:[20,50,82]}});
   doc.addPage();doc.setTextColor(25,35,50);doc.setFont('helvetica','bold');doc.setFontSize(15);doc.text('KINAIR Calculation Evidence',14,18);doc.setFontSize(8);doc.setFont('helvetica','normal');doc.setTextColor(90);doc.text('Each selected component is supported by its KINAIR engineering calculation sheet or manufacturer submittal requirement.',14,25,{maxWidth:pageW-28});
   const uniqueKinds=[...new Set(critical.items.map(i=>i.kind))];autoTable(doc,{startY:34,theme:'grid',head:[['Component','Calculation basis','Selected basis','Supporting document required']],body:uniqueKinds.map(k=>[LIB[k].label,FITTING_SOURCES[k].code,FITTING_SOURCES[k].basis,FITTING_SOURCES[k].document]),styles:{fontSize:7,cellPadding:1.6,overflow:'linebreak'},headStyles:{fillColor:[20,50,82]},columnStyles:{0:{cellWidth:35},1:{cellWidth:32},2:{cellWidth:58},3:{cellWidth:62}}});
-  const ry=(doc as any).lastAutoTable.finalY+8;doc.setFont('helvetica','bold');doc.setFontSize(9);doc.setTextColor(25,35,50);doc.text('Equations used',14,ry);doc.setFont('helvetica','normal');doc.setFontSize(7.5);doc.text(['Straight duct: Delta p = f x (L / Dh) x (rho x V^2 / 2)','Fitting: Delta p = K x (rho x V^2 / 2)','Total route ESP = straight-duct friction + fitting dynamic losses + verified equipment losses','Design ESP = route ESP x leakage allowance x design margin','Governing fan ESP = highest complete route loss; parallel branch losses are not added together'],14,ry+6);
+  const ry=(doc as any).lastAutoTable.finalY+8;doc.setFont('helvetica','bold');doc.setFontSize(9);doc.setTextColor(25,35,50);doc.text('Equations used',14,ry);doc.setFont('helvetica','normal');doc.setFontSize(7.5);doc.text(['Straight duct: Delta p = f x (L / Dh) x (rho x V^2 / 2)','Fitting: Delta p = K x (rho x V^2 / 2)','Junction coefficients may be negative when referenced to the lower-velocity stream.','Total route ESP = duct friction + fitting losses + verified equipment losses','Design ESP = route subtotal x (1 + leakage %) x (1 + design margin %)','Governing fan ESP = highest complete route loss; parallel branch losses are not added together'],14,ry+6);
+  const checkY=ry+35;
+  doc.setFont('helvetica','bold');doc.setFontSize(9);doc.setTextColor(25,35,50);doc.text('Engineering completeness checks',14,checkY);
+  autoTable(doc,{startY:checkY+3,theme:'grid',head:[['Check','Result','Required action']],body:[
+   ['High velocity (> 8 m/s)',String(highVelocityItems),highVelocityItems?'Review noise, erosion and pressure loss':'No high-velocity components'],
+   ['Manufacturer items without entered loss',String(unverifiedEquipment),unverifiedEquipment?'Enter certified pressure drop before issue':'All selected equipment losses entered'],
+   ['Fan inlet/outlet system-effect items',String(systemEffectItems),systemEffectItems?'Confirm actual fan connection geometry':'Add if inlet/outlet arrangement is non-uniform'],
+   ['Negative junction coefficients',String(critical.items.filter(i=>i.k<0).length),'Allowed only with correct reference section and path'],
+  ],styles:{fontSize:6.8,cellPadding:1.35},headStyles:{fillColor:[20,50,82]},columnStyles:{0:{cellWidth:58},1:{cellWidth:22,halign:'center'},2:{cellWidth:102}}});
   doc.setFontSize(6.5);doc.setTextColor(100);doc.text('KINAIR calculation sheets record the selected geometry, inputs, coefficients, equations and results. Attach current manufacturer selections for equipment pressure drops.',14,doc.internal.pageSize.getHeight()-18,{maxWidth:pageW-28});
   const drawBackupSketch=(kind:Kind,x:number,y:number)=>{
    doc.setDrawColor(25,105,190);doc.setLineWidth(1.2);
-   if(kind==='elbow90'){doc.line(x,y+32,x,y+14);doc.lines([[0,-9],[9,-9],[22,0]],x,y+14)}
-   else if(kind==='elbow45'){doc.line(x,y+28,x+14,y+28);doc.line(x+14,y+28,x+34,y+8);doc.line(x+34,y+8,x+48,y+8)}
-   else if(kind==='transition'){doc.line(x,y+8,x+18,y+8);doc.line(x+18,y+8,x+34,y+15);doc.line(x+34,y+15,x+50,y+15);doc.line(x,y+30,x+18,y+30);doc.line(x+18,y+30,x+34,y+23);doc.line(x+34,y+23,x+50,y+23)}
-   else if(kind==='tee-straight'||kind==='tee-branch'){doc.line(x,y+12,x+50,y+12);doc.line(x,y+28,x+50,y+28);doc.line(x+25,y+28,x+25,y+42);doc.line(x+39,y+28,x+39,y+42)}
-   else if(kind==='damper'){doc.rect(x,y+7,50,30);doc.line(x+8,y+33,x+42,y+11);doc.circle(x+25,y+22,2)}
+   if(['elbow90','elbow90-vaned','elbow90-mitered'].includes(kind)){doc.line(x,y+38,x,y+18);doc.lines([[0,-8],[10,-8],[28,0]],x,y+18);doc.line(x+8,y+38,x+8,y+20);doc.lines([[0,-2],[4,-4],[26,0]],x+8,y+20);if(kind==='elbow90-vaned'){doc.arc(x+13,y+17,8,180,270);doc.arc(x+18,y+14,11,180,270)}}
+   else if(kind==='elbow45'){doc.line(x,y+30,x+14,y+30);doc.line(x+14,y+30,x+34,y+10);doc.line(x+34,y+10,x+50,y+10);doc.line(x,y+38,x+18,y+38);doc.line(x+18,y+38,x+38,y+18);doc.line(x+38,y+18,x+50,y+18)}
+   else if(['transition','reducer','diffuser'].includes(kind)){const reverse=kind==='diffuser';const a=reverse?10:20,b=reverse?20:10;doc.line(x,y+10,x+18,y+10);doc.line(x+18,y+10,x+34,y+20-a/2);doc.line(x+34,y+20-a/2,x+52,y+20-a/2);doc.line(x,y+10+b,x+18,y+10+b);doc.line(x+18,y+10+b,x+34,y+20+a/2);doc.line(x+34,y+20+a/2,x+52,y+20+a/2)}
+   else if(kind.startsWith('tee-')||kind.startsWith('wye-')||kind==='takeoff'||kind.startsWith('cross-')){doc.line(x,y+12,x+52,y+12);doc.line(x,y+28,x+52,y+28);if(kind.startsWith('wye-')){doc.line(x+27,y+28,x+48,y+44);doc.line(x+36,y+28,x+53,y+40)}else{doc.line(x+25,y+28,x+25,y+44);doc.line(x+39,y+28,x+39,y+44)}if(kind.startsWith('cross-')){doc.line(x+25,y+12,x+25,y);doc.line(x+39,y+12,x+39,y)}}
+   else if(kind==='entry'||kind==='exit'){doc.line(x,y+12,x+35,y+12);doc.line(x,y+30,x+35,y+30);doc.line(x+35,y+12,x+50,y+(kind==='entry'?18:4));doc.line(x+35,y+30,x+50,y+(kind==='entry'?24:38))}
+   else if(['damper','fire-damper','backdraft-damper'].includes(kind)){doc.rect(x,y+7,50,30);doc.line(x+8,y+33,x+42,y+11);doc.circle(x+25,y+22,2)}
+   else if(kind==='fan-inlet'||kind==='fan-outlet'){doc.circle(x+27,y+22,14);doc.line(x,y+14,x+13,y+14);doc.line(x,y+30,x+13,y+30);doc.line(x+41,y+14,x+54,y+14);doc.line(x+41,y+30,x+54,y+30)}
    else {doc.rect(x,y+10,52,24);doc.line(x+8,y+22,x+42,y+22)}
    doc.setFillColor(240,145,35);doc.triangle(x+43,y+18,x+49,y+22,x+43,y+26,'F');
   };
   critical.items.forEach((i,index)=>{
-   const isManufacturer=['filter','coil','silencer','grille','louvre'].includes(i.kind);
+   const isManufacturer=['filter','coil','silencer','grille','louvre','fire-damper','backdraft-damper','vav'].includes(i.kind);
    doc.addPage();doc.setTextColor(25,35,50);doc.setFont('helvetica','bold');doc.setFontSize(15);doc.text(`Appendix ${index+1} - ${isManufacturer?'Equipment Verification':'KINAIR Fitting Calculation Backup'}`,14,18);doc.setFontSize(9);doc.setTextColor(30,105,180);doc.text(`Critical route item ${index+1}: ${i.name}`,14,25);doc.setDrawColor(30,105,180);doc.line(14,30,pageW-14,30);
    drawBackupSketch(i.kind,18,40);doc.setTextColor(25,35,50);doc.setFontSize(8);doc.setFont('helvetica','bold');doc.text(LIB[i.kind].label,18,88);doc.setFont('helvetica','normal');doc.setTextColor(90);doc.text(FITTING_SOURCES[i.kind].basis,18,94,{maxWidth:70});
    autoTable(doc,{startY:40,margin:{left:95,right:14},theme:'grid',head:[['Reference field','Selected / calculated value']],body:[['Calculation method',FITTING_SOURCES[i.kind].code],['Supporting publication',FITTING_SOURCES[i.kind].document],['Duct shape and size',i.shape==='circular'?`Circular - diameter ${i.diameter} mm`:`Rectangular - ${i.width} x ${i.height} mm`],['Airflow',`${i.flow} ${FLOW_UNITS[flowUnit].label}`],['Area / hydraulic diameter',`${i.area.toFixed(4)} m2 / ${(i.dh*1000).toFixed(1)} mm`],['Velocity / velocity pressure',`${i.v.toFixed(3)} m/s / ${i.vp.toFixed(3)} Pa`],['Reynolds / friction factor',`${i.re.toFixed(0)} / ${i.f.toFixed(5)}`],['Selected K / fixed loss',`${i.k.toFixed(4)} / ${i.fixed.toFixed(2)} Pa`],['Length / quantity',`${i.length.toFixed(2)} m / ${i.qty}`]],styles:{fontSize:7,cellPadding:1.5},headStyles:{fillColor:[20,50,82]}});
