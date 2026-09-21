@@ -14,6 +14,9 @@ export default defineConfig(() => ({
   plugins: [react()],
   resolve: {
     alias: {
+      // Route all fan datasheet imports through the runtime-safe wrapper.
+      // The wrapper preserves the existing generator and fixes multi-fan PDF generation.
+      "@/lib/pdfDatasheetGenerator": path.resolve(__dirname, "./src/lib/pdfDatasheetGeneratorSafe.ts"),
       "@": path.resolve(__dirname, "./src"),
     },
   },
