@@ -73,7 +73,7 @@ async function loadImage(url?: string | null): Promise<string | null> {
   }
 }
 
-export async function downloadCombinedScheduleDatasheet({
+export async function buildCombinedScheduleDatasheet({
   title,
   rows,
   database,
@@ -82,7 +82,7 @@ export async function downloadCombinedScheduleDatasheet({
   logoUrl,
   airCurtainRows = [],
   airCurtainContext,
-}: ChatScheduleDatasheetOptions): Promise<void> {
+}: ChatScheduleDatasheetOptions): Promise<jsPDF> {
   const doc = new jsPDF('p', 'mm', 'a4');
   const pageW = doc.internal.pageSize.getWidth();
   const pageH = doc.internal.pageSize.getHeight();
@@ -178,7 +178,7 @@ export async function downloadCombinedScheduleDatasheet({
       database,
       { airflowUnit: row.airflowUnit, pressureUnit: row.pressureUnit },
       dimensionsMap,
-      { existingDoc: doc, skipSave: true, pageLabel: `Fan ${index + 1} of ${rows.length}` },
+      { existingDoc: doc, skipSave: true, pageLabel: `Fan ${index + 1} of ${rows.length}`, referenceNo: row.tag },
     );
   }
 
@@ -218,9 +218,15 @@ export async function downloadCombinedScheduleDatasheet({
       heightUnitFactorMm: lengthFactors[heightUnit],
       heightUnitLabel: lengthLabels[heightUnit],
       existingDoc: doc,
+      referenceNo: row.tag,
     });
   }
 
-  const safeTitle = title.replace(/[^a-zA-Z0-9]+/g, '_').replace(/^_+|_+$/g, '') || 'Fan_Schedule';
+  return doc;
+}
+
+export async function downloadCombinedScheduleDatasheet(options: ChatScheduleDatasheetOptions): Promise<void> {
+  const doc = await buildCombinedScheduleDatasheet(options);
+  const safeTitle = options.title.replace(/[^a-zA-Z0-9]+/g, '_').replace(/^_+|_+$/g, '') || 'Fan_Schedule';
   doc.save(`${safeTitle}_Combined_Datasheets.pdf`);
 }

@@ -13,7 +13,7 @@ Deno.serve(async(req)=>{
   const {packageId,preview=false}=await req.json();
   const {data:p,error:pe}=await scoped.from("submittal_packages").select("*").eq("id",packageId).single();if(pe||!p)throw pe??new Error("Package not found");
   const {data:items,error:ie}=await scoped.from("submittal_package_items").select("*").eq("package_id",packageId).eq("is_included",true).order("sort_order");if(ie)throw ie;
-  const missing=(p.validation_report?.assembly??[]).filter((x:any)=>x.state==="missing");if(missing.length)throw new Error(`Resolve ${missing.length} missing index section(s) before generating`);
+  // Missing index sections are allowed: keep their divider pages and generate with available documents.
   const usable=(items??[]).filter((x:any)=>x.storage_path&&x.validation_state!=="missing");
   const grouped=new Map<string,any[]>();for(const item of usable){const key=item.section_name||"Supporting Documents";if(!grouped.has(key))grouped.set(key,[]);grouped.get(key)!.push(item)}
   const loaded=new Map<string,PDFDocument>();for(const item of usable){if(loaded.has(item.storage_path))continue;const {data:b,error:be}=await admin.storage.from("submittal-control").download(item.storage_path);if(be||!b)throw new Error(`Unable to load ${safe(item.display_name)}: ${be?.message||"file missing"}`);try{loaded.set(item.storage_path,await PDFDocument.load(await b.arrayBuffer(),{ignoreEncryption:false}))}catch{throw new Error(`PDF cannot be assembled: ${safe(item.display_name)}`)}}

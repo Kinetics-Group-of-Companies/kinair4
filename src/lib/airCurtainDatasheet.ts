@@ -22,6 +22,7 @@ export interface AirCurtainDatasheetInput {
   dimensions?: AirCurtainDimensionRow[];
   projectName?: string;
   clientName?: string;
+  referenceNo?: string;
   companyLogoUrl?: string | null;
   companyName?: string;
   contactInfo?: { phone?: string; email?: string } | null;
@@ -92,6 +93,7 @@ export async function generateAirCurtainDatasheet(input: AirCurtainDatasheetInpu
     dimensions = [],
     projectName,
     clientName,
+    referenceNo,
     companyLogoUrl,
     companyName,
     contactInfo,
@@ -262,6 +264,7 @@ if (seriesPhoto) {
     [
       ...(projectName ? ([['Project', projectName]] as [string, string][]) : []),
       ...(clientName ? ([['Client', clientName]] as [string, string][]) : []),
+      ...(referenceNo ? ([['Reference No.', referenceNo]] as [string, string][]) : []),
       ['Date', new Date().toLocaleDateString()],
       ['Door Width', lenMm(doorWidthMm)],
       ['Door Height', lenM(doorHeightM)],

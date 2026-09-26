@@ -110,6 +110,7 @@ export interface DatasheetOptions {
   existingDoc?: jsPDF; // If provided, append pages to this document instead of creating new one
   skipSave?: boolean; // If true, don't save the PDF (useful for project mode)
   pageLabel?: string; // Optional label like "Fan 1 of 5" for project mode
+  referenceNo?: string; // Equipment/schedule reference, e.g. KEF-RF-01
 }
 
 // Generate QR code as base64 data URL
@@ -1250,6 +1251,7 @@ export async function generateEnhancedDatasheet(options: DatasheetOptions): Prom
     existingDoc,
     skipSave = false,
     pageLabel,
+    referenceNo,
   } = options;
   // The airflow-twin and combined-system pages are optional engineering pages.
   // A normal single-fan datasheet remains two pages; these pages appear only
@@ -1489,6 +1491,12 @@ export async function generateEnhancedDatasheet(options: DatasheetOptions): Prom
   doc.setFontSize(11);
   doc.setTextColor(...COLORS.text);
   doc.text(`Model : ${selection.nomenclature}`, 10, currentY);
+  if (referenceNo?.trim()) {
+    doc.setFontSize(9);
+    doc.setFont('helvetica', 'bold');
+    doc.setTextColor(...COLORS.primary);
+    doc.text(`Reference No. : ${referenceNo.trim()}`, pageWidth - 10, currentY, { align: 'right' });
+  }
   doc.setTextColor(...COLORS.text);
   currentY += 6;
   
@@ -2431,6 +2439,11 @@ export async function generateEnhancedDatasheet(options: DatasheetOptions): Prom
   doc.setFontSize(10);
   doc.setTextColor(...COLORS.text);
   doc.text(`Model : ${selection.nomenclature}`, 10, currentY);
+  if (referenceNo?.trim()) {
+    doc.setFontSize(9);
+    doc.setTextColor(...COLORS.primary);
+    doc.text(`Reference No. : ${referenceNo.trim()}`, pageWidth - 10, currentY, { align: 'right' });
+  }
   currentY += 6;
   
   // Noise section - only render on page 2 if not already rendered on page 1

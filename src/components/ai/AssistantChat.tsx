@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { getDynamicModelOptions, fallbackAiModelOptions, type RegisteredAiModel, type AiMode } from '@/lib/ai/model-options';
 import { useChat } from '@ai-sdk/react';
 import { DefaultChatTransport } from 'ai';
 import ReactMarkdown from 'react-markdown';
@@ -22,6 +23,7 @@ import {
 } from '@/lib/fanData';
 import { generateDatasheetForSelection } from '@/lib/chatDatasheet';
 import { downloadCombinedScheduleDatasheet } from '@/lib/chatScheduleDatasheet';
+import { selectScheduleFan, selectScheduleAirCurtain } from '@/lib/chatSelectionSchedule';
 import { generateAirCurtainDatasheetForSelection } from '@/lib/chatAirCurtainDatasheet';
 import {
   downloadFanDrawing,
@@ -326,28 +328,6 @@ export const AIR_CURTAIN_SUGGESTIONS = [
 
 export type AssistantContext = 'general' | 'fan' | 'air_curtain';
 
-type RegisteredAiModel = {
-  provider: 'google' | 'openai' | 'anthropic';
-  model_id: string;
-  display_name: string;
-  tier: 'free' | 'cheap' | 'balanced' | 'premium';
-  cost_rank: number;
-};
-
-type AiMode =
-  | 'auto'
-  | 'standard'
-  | 'gemini'
-  | 'openai'
-  | 'openai_luna'
-  | 'openai_terra'
-  | 'openai_sol'
-  | 'anthropic'
-  | 'anthropic_haiku'
-  | 'anthropic_sonnet'
-  | 'anthropic_opus';
-
-
 /**
  * AI SDK tool parts arrive incrementally. Never run a selector from an
  * input-streaming part, otherwise the first partial schedule row gets marked
@@ -368,6 +348,7 @@ type DocOutput = 'full' | 'drawing' | 'noise';
 type FanInstallType = 'inline_ducted' | 'wall_mounted' | 'axial';
 
 type DutyRequest = {
+  reference_no?: string | null;
   airflow: number;
   airflow_unit: keyof typeof AIRFLOW_UNITS;
   static_pressure: number;
@@ -403,6 +384,7 @@ type DutyRequest = {
  * attachments and schedules.
  */
 function parseManualFanParameters(userText: string): Partial<DutyRequest> {
+  const referenceNo = userText.match(/\b(?:ref(?:erence)?\s*(?:no\.?|number)?|tag|equipment\s*tag|item\s*(?:no\.?|number))\s*[:=#-]?\s*([A-Za-z0-9][A-Za-z0-9._\/-]{1,40})/i)?.[1] ?? null;
   const motorBrand = userText.match(
     /(?:motor\s*(?:make|brand|manufacturer)|make)\s*(?:(?:is|of|to)\s+|[=:]\s*)?([A-Za-z][A-Za-z0-9 .&-]{1,30})/i,
   )?.[1]?.split(/\b(?:with|and|at|for)\b/i)[0]?.trim().replace(/[,.]$/, '') ?? null;
@@ -449,6 +431,7 @@ function parseManualFanParameters(userText: string): Partial<DutyRequest> {
   );
 
   return {
+    reference_no: referenceNo,
     motor_poles: Number(userText.match(/\b([2468]|12)\s*(?:pole|p)\b/i)?.[1]) || null,
     motor_brand: motorBrand,
     motor_efficiency_class: ieClass ? (`IE${ieClass}` as DutyRequest['motor_efficiency_class']) : null,
@@ -503,9 +486,9 @@ function parseDirectFanDuty(userText: string): DutyRequest | null {
   const pressureUnit: keyof typeof PRESSURE_UNITS =
     pressureToken.startsWith('in') ? 'inwg' : pressureToken.startsWith('mm') ? 'mmwg' : 'Pa';
 
-  const seriesMatch = userText.match(/\b(KVF[\s-]?[PM]|KIN[\s-]?E|KTAF)\b/i);
+  const seriesMatch = userText.match(/\b(KVF[\s-]?(?:MR|M|P)|KIN[\s-]?E|KTAF)\b/i);
   const seriesName = seriesMatch
-    ? seriesMatch[1].toUpperCase().replace(/\s/g, '').replace(/^KVF([PM])$/, 'KVF-$1').replace(/^KIN-?E$/, 'KIN-E')
+    ? seriesMatch[1].toUpperCase().replace(/\s/g, '').replace(/^KVF(MR|M|P)$/, 'KVF-$1').replace(/^KIN-?E$/, 'KIN-E')
     : null;
   const mentionsPlastic = /\b(plastic|pvc|u-pvc|upvc|abs|polypropylene|polymer|pp)\b/i.test(userText);
   const mentionsMetal = /\b(metal|metallic|steel|stainless\s*steel|ss\s*304|ss\s*316|galvanized|galvanised|gi|aluminium|aluminum)\b/i.test(userText);
@@ -514,7 +497,7 @@ function parseDirectFanDuty(userText: string): DutyRequest | null {
       ? 'axial'
       : /\b(kin[\s-]?e|wall[ -]?mounted|wall extract|wall fan)\b/i.test(userText)
         ? 'wall_mounted'
-        : /\b(kvf[\s-]?[pm]|inline|ducted)\b/i.test(userText)
+        : /\b(kvf[\s-]?(?:mr|m|p)|inline|ducted|roof[ -]?mounted|roof fan)\b/i.test(userText)
           ? 'inline_ducted'
           : null;
 
@@ -845,6 +828,7 @@ function formatAirCurtainAirflow(
 }
 
 type AcDutyRequest = {
+  reference_no?: string | null;
   door_width?: number | null;
   door_width_unit?: AcLengthUnit;
   door_height?: number | null;
@@ -870,6 +854,7 @@ type AcDutyRequest = {
 
 function parseManualAirCurtainParameters(userText: string): Partial<AcDutyRequest> {
   const parsed: Partial<AcDutyRequest> = {};
+  parsed.reference_no = userText.match(/\b(?:ref(?:erence)?\s*(?:no\.?|number)?|tag|equipment\s*tag|item\s*(?:no\.?|number))\s*[:=#-]?\s*([A-Za-z0-9][A-Za-z0-9._\/-]{1,40})/i)?.[1] ?? null;
 
   if (/\b(?:low|slow)\s*speed\b/i.test(userText)) parsed.speed = 'low';
   else if (/\bmedium\s*speed\b/i.test(userText)) parsed.speed = 'medium';
@@ -1227,12 +1212,12 @@ function parseInstantFollowUp(userText: string, messages: any[]): InstantFollowU
       : /\b(?:noise|sound)\s*(?:data|sheet|only)?\b/i.test(userText)
         ? 'noise'
         : 'full';
-    const series = userText.match(/\b(KVF[\s-]?[PM]|KIN[\s-]?E|KTAF)\b/i)?.[1];
+    const series = userText.match(/\b(KVF[\s-]?(?:MR|M|P)|KIN[\s-]?E|KTAF)\b/i)?.[1];
     if (series) input.series_name = series.toUpperCase().replace(/\s/g, '').replace(/^KVF([PM])$/, 'KVF-$1').replace(/^KIN-?E$/, 'KIN-E');
     if (/\b(?:plastic|pvc|abs|polypropylene|polymer|pp)\b/i.test(userText)) input.material = 'plastic';
     if (/\b(?:metal|steel|galvanized|galvanised|gi)\b/i.test(userText)) input.material = 'metal';
     if (/\b(?:wall mounted|wall fan|wall extract|KIN[ -]?E)\b/i.test(userText)) input.fan_type = 'wall_mounted';
-    if (/\b(?:inline|ducted|KVF[ -]?[PM])\b/i.test(userText)) input.fan_type = 'inline_ducted';
+    if (/\b(?:inline|ducted|roof[ -]?mounted|roof fan|KVF[ -]?(?:MR|M|P))\b/i.test(userText)) input.fan_type = 'inline_ducted';
     if (/\b(?:axial|KTAF)\b/i.test(userText)) input.fan_type = 'axial';
     const manualParameters = parseManualFanParameters(userText);
     for (const [key, value] of Object.entries(manualParameters)) {
@@ -1335,27 +1320,7 @@ export function AssistantChat({
     };
   }, [isAuthenticated, isGuest, trialActive]);
 
-  const dynamicModelOptions = useMemo(() => {
-    const modeFor = (model: RegisteredAiModel): AiMode | null => {
-      if (model.provider === 'google' && model.tier === 'free') return 'gemini';
-      if (model.provider === 'openai' && model.tier === 'cheap') return 'openai_luna';
-      if (model.provider === 'openai' && model.tier === 'balanced') return 'openai_terra';
-      if (model.provider === 'openai' && model.tier === 'premium') return 'openai_sol';
-      if (model.provider === 'anthropic' && model.tier === 'cheap') return 'anthropic_haiku';
-      if (model.provider === 'anthropic' && model.tier === 'balanced') return 'anthropic_sonnet';
-      if (model.provider === 'anthropic' && model.tier === 'premium') return 'anthropic_opus';
-      return null;
-    };
-    const seen = new Set<string>();
-    return [...availableModels]
-      .sort((a, b) => a.cost_rank - b.cost_rank || b.model_id.localeCompare(a.model_id))
-      .flatMap((model) => {
-        const mode = modeFor(model);
-        if (!mode || seen.has(mode)) return [];
-        seen.add(mode);
-        return [{ mode, label: `${model.display_name} · ${model.tier}` }];
-      });
-  }, [availableModels]);
+  const dynamicModelOptions = useMemo(() => getDynamicModelOptions(availableModels), [availableModels]);
 
   const transport = useMemo(
     () =>
@@ -1848,6 +1813,7 @@ export function AssistantChat({
               fanSizeUnit: duty?.fan_size_unit ?? 'mm',
             },
             dimensionsMap as any,
+            { referenceNo: duty?.reference_no ?? undefined },
           );
           toast.success(`${selection.nomenclature} datasheet downloaded`);
         }
@@ -2052,6 +2018,7 @@ export function AssistantChat({
       selection: AirCurtainSelection,
       auto: AcAutoSelection,
       output: DocOutput = 'full',
+      referenceNo?: string | null,
     ) => {
       setAcDownloadingKey(key);
       try {
@@ -2072,6 +2039,7 @@ export function AssistantChat({
               airflowUnit: auto.airflowUnit,
               widthUnit: auto.widthUnit,
               heightUnit: auto.heightUnit,
+              referenceNo: referenceNo ?? undefined,
             },
             { brands: acBrands, series: acSeries, dimensions: acDimensions, tenant },
           );
@@ -2207,7 +2175,7 @@ export function AssistantChat({
         if (ranked.length > 0) {
           if (!busy && !acDownloadedRef.current.has(key)) {
             acDownloadedRef.current.add(key);
-            void downloadAcDatasheet(key, ranked[0], auto, duty.output ?? 'full');
+            void downloadAcDatasheet(key, ranked[0], auto, duty.output ?? 'full', duty.reference_no);
           }
         } else {
           toast.info('No air curtain in the catalogue suits that opening. Try a lower floor velocity.');
@@ -2296,28 +2264,8 @@ export function AssistantChat({
             const minFloorVelocity = item.min_floor_velocity ?? 2;
             const selectionBasis =
               item.selection_basis ?? (minAirflowCmh > 0 && !item.door_width ? 'airflow' : 'door');
-            const coreResults = selectAirCurtains(acModels, {
-                doorWidthMm,
-                doorHeightM,
-                category,
-                speed: item.speed ?? 'high',
-                minNozzleVelocity: item.min_nozzle_velocity ?? 0,
-                minAirflowCmh,
-                motorType: (item.motor_type as any) ?? 'any',
-                brand: brandMatch ?? 'any',
-                seriesId: series?.id ?? 'any',
-                allowCombinations: item.allow_combinations ?? true,
-                minFloorVelocity,
-                supplyFrequencyHz: item.supply_frequency_hz ?? 50,
-                minMatchPercent: item.min_match_percent ?? AC_MIN_MATCH_PERCENT,
-                maxMatchPercent: item.max_match_percent ?? AC_MAX_MATCH_PERCENT,
-                selectionBasis,
-              });
             const rowOptimize = item.optimize_for ?? acOptimize;
-            const results = rowOptimize === 'balanced'
-              ? coreResults
-              : rankAirCurtains(coreResults, rowOptimize);
-            const optimum = results[0];
+            const optimum = selectScheduleAirCurtain(item, acModels, acSeries, acBrands, rowOptimize)?.selection;
             if (!optimum) {
               return { tag, quantity, product: 'air_curtain', duty, label: 'No suitable model', detail: '' };
             }
@@ -2376,28 +2324,7 @@ export function AssistantChat({
 
 
 
-          const found = findOptimalSelections(
-            database,
-            {
-              requiredAirflow: item.airflow,
-              requiredPressure: item.static_pressure,
-              airflowUnit,
-              pressureUnit,
-              seriesId: (series as any)?.id,
-              motorPole: item.motor_poles ?? undefined,
-              dimensionsBySeriesAndSize: dimensionsMap,
-              ...fanSelectorDefaults(database, series),
-            },
-            10,
-          );
-          let ranked = fanOptimize === 'balanced' ? found : rankFanSelections(found, fanOptimize);
-          if (item.max_noise_db) {
-            const quiet = ranked.filter(
-              (r) => !r.noiseData?.overall || r.noiseData.overall <= (item.max_noise_db as number),
-            );
-            if (quiet.length) ranked = quiet;
-          }
-          const best = ranked[0];
+          const best = selectScheduleFan(item, database, dimensionsMap, fanOptimize);
           if (!best) {
             const seriesLabel = (series as any)?.name ? ` in ${(series as any).name}` : '';
             return { tag, quantity, product: 'fan', duty, label: `No selection available${seriesLabel}`, detail: 'No model can meet this duty — change the duty or series.' };
@@ -2550,15 +2477,9 @@ export function AssistantChat({
                   </option>
                 ))
               ) : (
-                <>
-                  <option value="gemini">Gemini 3.6 Flash · free</option>
-                  <option value="openai_luna">OpenAI GPT-5.6 Luna · cheap</option>
-                  <option value="anthropic_haiku">Claude Haiku 4.5 · cheap</option>
-                  <option value="openai_terra">OpenAI GPT-5.6 Terra · balanced</option>
-                  <option value="anthropic_sonnet">Claude Sonnet 5 · balanced</option>
-                  <option value="openai_sol">OpenAI GPT-5.6 Sol · premium</option>
-                  <option value="anthropic_opus">Claude Opus 5 · premium</option>
-                </>
+                fallbackAiModelOptions.map((model) => (
+                  <option key={model.mode} value={model.mode}>{model.label}</option>
+                ))
               )}
             </select>
           </div>

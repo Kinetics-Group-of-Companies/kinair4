@@ -32,7 +32,6 @@ import {
   PopoverTrigger,
 } from "@/components/ui/popover";
 import { Calendar as CalendarComponent } from "@/components/ui/calendar";
-import { LpoEmailRecipientScheduleManager } from '@/components/admin/LpoEmailRecipientScheduleManager';
 
 const SUPER_ADMIN_EMAILS = ['chndeepak7@gmail.com', 'deepak@kineticsgroup.ae'];
 
@@ -118,6 +117,9 @@ export function UserApprovalManager() {
       ]));
 
       // Transform to flatten tenant and use email from profile (synced from auth.users).
+      // Keep the LPO permission list identical to the approved-user list shown
+      // in Admin Portal. The database RPC resolves stale/re-created auth UUIDs
+      // by email, so every approved row remains manageable here.
       const transformedProfiles = (profiles || []).map(p => {
         const permission = permissionMap.get(p.user_id);
         return {
@@ -131,9 +133,9 @@ export function UserApprovalManager() {
         };
       });
 
-      // Only real authenticated accounts have a permission row. Orphaned legacy
-      // profiles are excluded from the LPO controls so they cannot look enabled.
-      setLpoUsers(transformedProfiles.filter(profile => permissionMap.has(profile.user_id)));
+      // Every approved portal user appears here. Tracker access and email alerts
+      // are controlled independently by the two switches below.
+      setLpoUsers(transformedProfiles.filter(profile => profile.is_approved));
       setUsers(transformedProfiles.filter(
         profile => !SUPER_ADMIN_EMAILS.includes((profile.user_email || '').toLowerCase()),
       ));
@@ -465,21 +467,21 @@ export function UserApprovalManager() {
   ) => {
     setActionLoading(`lpo-${profile.user_id}`);
     try {
-      const payload = {
-        ...changes,
-        updated_at: new Date().toISOString(),
-      };
-      const { error } = await supabase
-        .from('user_lpo_permissions')
-        .update(payload)
-        .eq('user_id', profile.user_id);
+      const { data, error } = await supabase.rpc('admin_set_lpo_permission', {
+        _target_user_id: profile.user_id,
+        _can_access_lpo: changes.can_access_lpo ?? null,
+        _receive_lpo_emails: changes.receive_lpo_emails ?? null,
+        _notification_email: changes.notification_email ?? null,
+      });
 
       if (error) throw error;
+      if (!data) throw new Error('Permission update returned no result');
+
       toast.success('LPO permissions updated');
       await fetchUsers();
     } catch (error) {
       console.error('Error updating LPO permissions:', error);
-      toast.error('Failed to update LPO permissions');
+      toast.error(error instanceof Error ? error.message : 'Failed to update LPO permissions');
     } finally {
       setActionLoading(null);
     }
@@ -554,7 +556,7 @@ export function UserApprovalManager() {
             LPO Tracker &amp; Email Permissions
           </CardTitle>
           <CardDescription>
-            Grant Tracker access only to selected accounts. User alerts are separate from the scheduled summary recipient list below.
+            Select LPO Tracker access and email notifications independently for each approved user. Users granted Tracker access share the same company LPO register.
           </CardDescription>
         </CardHeader>
         <CardContent>
@@ -625,8 +627,6 @@ export function UserApprovalManager() {
           )}
         </CardContent>
       </Card>
-
-      <LpoEmailRecipientScheduleManager />
 
       {/* Pending Approvals */}
       <Card>

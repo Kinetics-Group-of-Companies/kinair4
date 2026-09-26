@@ -12,6 +12,8 @@ import { findOptimalSelections, FanSelection, AIRFLOW_UNITS, PRESSURE_UNITS, Fir
 import { toast } from 'sonner';
 import { useAuth } from '@/lib/authContext';
 import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
 import { useSearchParams } from 'react-router-dom';
 import { GuestAccessPrompt } from '@/components/guest/GuestAccessPrompt';
 import { GuestTrialBanner } from '@/components/guest/GuestTrialBanner';
@@ -26,6 +28,7 @@ export default function FanSelectorPage() {
   const { database, isLoading } = useSupabaseFanDatabase();
   const { data: dimensionsMap, isLoading: loadingDimensions } = useAllFanDimensions();
   const [selections, setSelections] = useState<FanSelection[]>([]);
+  const [referenceNo, setReferenceNo] = useState('');
   const [selectedFan, setSelectedFan] = useState<FanSelection | null>(null);
   const [hasSearched, setHasSearched] = useState(false);
   const [airflowUnit, setAirflowUnit] = useState<keyof typeof AIRFLOW_UNITS>('CMH');
@@ -216,6 +219,13 @@ export default function FanSelectorPage() {
         <div className="flex flex-col gap-4">
           
           {/* Row 1 - Selection Criteria (horizontal content) */}
+          <div className="kinair-card p-4 md:p-5">
+            <div className="max-w-md space-y-1.5">
+              <Label>Reference No. / Tag</Label>
+              <Input value={referenceNo} onChange={(e) => setReferenceNo(e.target.value)} placeholder="e.g. EF-01 / FAN-01" />
+              <p className="text-[11px] text-muted-foreground">Optional. Printed on the datasheet and carried into Selection Assistant/project documents.</p>
+            </div>
+          </div>
           <div className="w-full">
             <SelectionCriteriaPanel
               onSearch={handleSearch}
@@ -272,7 +282,8 @@ export default function FanSelectorPage() {
                 pressureUnit={pressureUnit} 
                 airDensity={searchCriteria.airDensity} 
                 temperature={searchCriteria.temperature} 
-                altitude={searchCriteria.altitude} 
+                altitude={searchCriteria.altitude}
+                referenceNo={referenceNo}
               />
             ) : (
               <div className="kinair-card p-6 md:p-8 text-center">
