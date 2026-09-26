@@ -12,6 +12,7 @@ export default defineConfig(() => ({
     port: 8080,
   },
   plugins: [react()],
+  worker: { format: "es" },
   resolve: {
     alias: {
       // Route all fan datasheet imports through the runtime-safe wrapper.

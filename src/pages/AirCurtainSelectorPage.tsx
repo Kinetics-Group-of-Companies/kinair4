@@ -82,6 +82,7 @@ export default function AirCurtainSelectorPage() {
   const { data: tenant } = useTenantData();
 
 
+  const [referenceNo, setReferenceNo] = useState('');
   const [doorWidth, setDoorWidth] = useState('1200');
   const [doorHeight, setDoorHeight] = useState('3');
   const [category, setCategory] = useState<AirCurtainCategory | 'any'>('any');
@@ -246,6 +247,7 @@ export default function AirCurtainSelectorPage() {
         lengthUnitLabel: LENGTH_UNIT_LABELS[widthUnit],
         heightUnitFactorMm: LENGTH_TO_MM[heightUnit],
         heightUnitLabel: LENGTH_UNIT_LABELS[heightUnit],
+        referenceNo: referenceNo.trim() || undefined,
       });
 
       toast.success('Datasheet downloaded');
@@ -340,6 +342,10 @@ export default function AirCurtainSelectorPage() {
               <Gauge className="w-5 h-5 text-primary" /> Opening Requirements
             </h2>
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+              <div className="space-y-1.5">
+                <Label>Reference No. / Tag</Label>
+                <Input value={referenceNo} onChange={(e) => setReferenceNo(e.target.value)} placeholder="e.g. AC-01 / AIR CURTAIN-01" />
+              </div>
               <div className="space-y-1.5">
                 <Label>Selection Basis</Label>
                 <Select value={selectionBasis} onValueChange={(v) => setSelectionBasis(v as 'door' | 'airflow')}>

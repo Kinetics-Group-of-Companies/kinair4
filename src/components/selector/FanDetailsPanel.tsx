@@ -31,6 +31,7 @@ interface FanDetailsPanelProps {
   airDensity?: number;
   temperature?: number;
   altitude?: number;
+  referenceNo?: string;
   onDutyPointChange?: (airflow: number, pressure: number) => void;
 }
 
@@ -89,7 +90,7 @@ function applySpeedNoiseLaws(
   };
 }
 
-export function FanDetailsPanel({ selection, airflowUnit, pressureUnit, airDensity = 1.2, temperature = 20, altitude = 0, onDutyPointChange }: FanDetailsPanelProps) {
+export function FanDetailsPanel({ selection, airflowUnit, pressureUnit, airDensity = 1.2, temperature = 20, altitude = 0, referenceNo = '', onDutyPointChange }: FanDetailsPanelProps) {
   const { database } = useSupabaseFanDatabase();
   const { isAuthenticated } = useAuth();
   
@@ -796,6 +797,7 @@ export function FanDetailsPanel({ selection, airflowUnit, pressureUnit, airDensi
         seriesId: selection.seriesId,
         seriesName: selection.series,
         seriesInfoFound: !!seriesInfo,
+        referenceNo: referenceNo.trim() || undefined,
         iomUrl: (seriesInfo as any)?.iomUrl,
         catalogueUrl: (seriesInfo as any)?.catalogueUrl,
         stallAirflowMinPercent: (seriesInfo as any)?.stallAirflowMinPercent,
@@ -898,6 +900,7 @@ export function FanDetailsPanel({ selection, airflowUnit, pressureUnit, airDensi
           fireRating: motorSpec.fireRating,
         } : undefined,
         // New datasheet features
+        referenceNo: referenceNo.trim() || undefined,
         iomUrl: (seriesInfo as any)?.iomUrl,
         soundOutletReduction: (seriesInfo as any)?.soundOutletReduction ?? 0,
         stallAirflowMinPercent: (seriesInfo as any)?.stallAirflowMinPercent ?? 15,
@@ -1022,6 +1025,7 @@ export function FanDetailsPanel({ selection, airflowUnit, pressureUnit, airDensi
           motorWeight: motorSpec.motorWeight,
           fireRating: motorSpec.fireRating,
         } : undefined,
+        referenceNo: referenceNo.trim() || undefined,
         iomUrl: (seriesInfo as any)?.iomUrl,
         soundOutletReduction: (seriesInfo as any)?.soundOutletReduction ?? 0,
         stallAirflowMinPercent: (seriesInfo as any)?.stallAirflowMinPercent ?? 15,

@@ -35,7 +35,7 @@ export async function generateDatasheetForSelection(
   database: FanDatabase,
   units?: { airflowUnit?: string; pressureUnit?: string; fanSizeUnit?: 'mm' | 'in' },
   dimensionsMap?: Map<string, FanDimension>,
-  documentOptions?: { existingDoc?: jsPDF; skipSave?: boolean; pageLabel?: string },
+  documentOptions?: { existingDoc?: jsPDF; skipSave?: boolean; pageLabel?: string; referenceNo?: string },
 ): Promise<jsPDF> {
   const seriesInfo: any =
     database.series.find((s) => s.id === selection.seriesId) ||
@@ -183,5 +183,6 @@ export async function generateDatasheetForSelection(
     existingDoc: documentOptions?.existingDoc,
     skipSave: documentOptions?.skipSave,
     pageLabel: documentOptions?.pageLabel,
+    referenceNo: documentOptions?.referenceNo,
   } as any);
 }

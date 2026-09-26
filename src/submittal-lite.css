@@ -1,0 +1,44 @@
+/* Visual tokens for the merged Submittal Control builder. */
+.submittal-lite .bg-grad-primary {
+  background: linear-gradient(125deg, #102f56 0%, #165b98 100%);
+}
+.submittal-lite .bg-grad-hero {
+  background: linear-gradient(125deg, #102b4f 0%, #155c91 65%, #087482 100%);
+}
+.submittal-lite .bg-grad-teal {
+  background: linear-gradient(125deg, #0a6473 0%, #0b8290 100%);
+}
+.submittal-lite .bg-grad-sun {
+  background: linear-gradient(125deg, #ffe7a5 0%, #f4c56c 100%);
+}
+.submittal-lite .bg-grad-lime {
+  background: linear-gradient(125deg, #d8f0c1 0%, #afdda0 100%);
+}
+.submittal-lite .bg-grad-rose {
+  background: linear-gradient(125deg, #aa4266 0%, #823959 100%);
+}
+.submittal-lite .text-grad {
+  color: #124c80;
+}
+.submittal-lite .font-display {
+  font-family: Inter, system-ui, sans-serif;
+}
+.submittal-lite .shadow-clay {
+  box-shadow: 0 12px 30px rgba(15, 48, 86, 0.11), 0 2px 6px rgba(15, 48, 86, 0.05);
+}
+.submittal-lite .shadow-clay-sm {
+  box-shadow: 0 3px 10px rgba(15, 48, 86, 0.1);
+}
+.submittal-lite .shadow-glow {
+  box-shadow: 0 5px 18px rgba(20, 91, 152, 0.26);
+}
+.submittal-lite .animate-blob {
+  animation: submittal-drift 10s ease-in-out infinite alternate;
+}
+@keyframes submittal-drift {
+  from { transform: translate3d(0, 0, 0); }
+  to { transform: translate3d(16px, -12px, 0); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .submittal-lite .animate-blob { animation: none; }
+}

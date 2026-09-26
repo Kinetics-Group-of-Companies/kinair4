@@ -27,6 +27,7 @@ export async function generateAirCurtainDatasheetForSelection(
     airflowUnit?: 'cmh' | 'cfm' | 'ls';
     widthUnit?: 'mm' | 'cm' | 'm' | 'in' | 'ft';
     heightUnit?: 'mm' | 'cm' | 'm' | 'in' | 'ft';
+    referenceNo?: string;
   },
   ctx: ChatAirCurtainContext,
 ) {
@@ -69,5 +70,6 @@ export async function generateAirCurtainDatasheetForSelection(
     lengthUnitLabel: lengthLabels[widthUnit],
     heightUnitFactorMm: lengthFactors[heightUnit],
     heightUnitLabel: lengthLabels[heightUnit],
+    referenceNo: opts.referenceNo,
   });
 }

@@ -426,16 +426,17 @@ Deno.serve(async (req) => {
       description:
         "Run the official KINAIR selection engine on a duty point and produce a document directly in the chat: the full datasheet PDF, the dimensional drawing only, or the sound (noise) data only. Call this WHENEVER the user gives an airflow and a static pressure (with or without a series name) and wants a selection or any document. Also call it AGAIN with a different optimize_for when the user asks for a better/quieter/more efficient/lower power option, or asks for just the drawing or just the noise data of the model already selected. Keep the user's own units.",
       inputSchema: z.object({
+        reference_no: z.string().nullable().describe("User reference/tag, e.g. EF-01. Preserve exactly when supplied; null if absent."),
         airflow: z.number().describe("Airflow value exactly as the user gave it"),
         airflow_unit: z.enum(["CMH", "LPS", "CFM", "CMS"]).describe("Unit of the airflow value"),
         static_pressure: z.number().describe("Static pressure value as the user gave it"),
         pressure_unit: z.enum(["Pa", "inwg", "mmwg"]).describe("Unit of the pressure value"),
-        series_name: z.string().nullable().describe("Series the user asked for, e.g. 'KVF-P'. Null if not specified."),
+        series_name: z.string().nullable().describe("Series the user asked for, e.g. 'KVF-P', 'KVF-M', or 'KVF-MR'. KVF-MR is the roof-application variant of KVF-M and uses the same performance family. Null if not specified."),
         fan_type: z
           .enum(["inline_ducted", "wall_mounted", "axial"])
           .nullable()
           .describe(
-            "Product installation: KVF-P/KVF-M = inline_ducted, KIN-E = wall_mounted, KTAF = axial. Pass axial for tube axial/axial-flow/KTAF requests. Never substitute across these families. Null only if the user gave no hint.",
+            "Product installation: KVF-P/KVF-M = inline_ducted; KVF-MR = roof application using KVF-M performance with MR nomenclature; KIN-E = wall_mounted; KTAF = axial. Never substitute across these families. Null only if the user gave no hint.",
           ),
         material: z
           .string()
@@ -478,6 +479,7 @@ Deno.serve(async (req) => {
       description:
         "Run the official KINAIR air curtain selection engine on a door/opening and produce a document directly in the chat: full datasheet, dimensional drawing only, or sound data only. Call this WHENEVER the user asks for an air curtain selection or document and gives a door width and/or height (any units). Call it AGAIN with different filters or optimize_for when the user asks for lower power consumption, quieter, EC instead of AC motor, another series/brand, or more airflow.",
       inputSchema: z.object({
+        reference_no: z.string().nullable().describe("User reference/tag, e.g. AC-01. Preserve exactly when supplied; null if absent."),
         door_width: z.number().nullable().describe("Door / opening width as the user gave it"),
         door_width_unit: z.enum(["mm", "cm", "m", "in"]).describe("Unit of the door width"),
         door_height: z.number().nullable().describe("Door / opening height (also mounting height)"),
@@ -528,10 +530,14 @@ Deno.serve(async (req) => {
                 fan_type: z
                   .enum(["inline_ducted", "wall_mounted", "axial"])
                   .nullish()
-                  .describe("KVF-P/KVF-M inline, KIN-E wall mounted, KTAF axial"),
+                  .describe("KVF-P/KVF-M inline; KVF-MR roof application using KVF-M performance; KIN-E wall mounted; KTAF axial"),
                 material: z.string().nullish(),
                 motor_poles: z.number().nullish(),
                 max_noise_db: z.number().nullish(),
+                existing_selection: z
+                  .string()
+                  .nullish()
+                  .describe("Exact fan model already printed in the uploaded schedule, e.g. KVF-100P or KVF-100MR. Copy it verbatim; KVF-MR means the roof-application variant of the same KVF-M size/performance."),
               }),
               z.object({
                 product: z.literal("air_curtain"),
@@ -1031,7 +1037,7 @@ Deno.serve(async (req) => {
 
         "- If nothing fits, say so straight and suggest what to change (bigger diameter, faster speed, two units in parallel, less system resistance).",
         "- Do not call find_fans as well as prepare_datasheet for the same request unless you truly need a number to explain the pick.",
-        "- Datasheet in chat: the moment the user gives an airflow AND a static pressure (any units, series optional, e.g. '25 lps @ 50 Pa KVF-P'), call prepare_datasheet with those exact numbers and units. The app then runs the real KINAIR selection engine and downloads the datasheet PDF in the chat — the user does NOT need to open the Fan Selector. Call find_fans too if you need numbers to explain the pick.",
+        "- Reference/tag: when the user gives a Ref No., reference, tag, equipment tag or item code, preserve it exactly in reference_no and carry it into the datasheet.\n        - Datasheet in chat: the moment the user gives an airflow AND a static pressure (any units, series optional, e.g. '25 lps @ 50 Pa KVF-P'), call prepare_datasheet with those exact numbers and units. The app then runs the real KINAIR selection engine and downloads the datasheet PDF in the chat — the user does NOT need to open the Fan Selector. Call find_fans too if you need numbers to explain the pick.",
         "- After calling prepare_datasheet, keep it short: say which duty you selected on and that the datasheet PDF is downloading below, and mention they can pick another option from the buttons under your answer.",
         "- Air curtain datasheet in chat: the moment the user asks for an air curtain for a door/entrance (e.g. '3 m high, 2 m wide shop entrance'), call prepare_air_curtain_datasheet with the door size and units they gave. The app runs the real air curtain selection engine and downloads the datasheet PDF in the chat — the user does NOT need to open the Air Curtain Selector. If only the height is given, still call it and say what width you assumed.",
         "- CUSTOMER-REQUESTED FM35 -> FM45 PROMOTION: always run the normal optimum selection first. Only if that optimum result contains an FM35 model in N-Centrifugal Flow or XD-Centrifugal Flow, and the user explicitly asks to promote/change 3-3.5 m to 4-4.5 m (or FM35 to FM45), replace it after selection with the exact same-series, same-width FM45 model: 3509->4509, 3510->4510, 3512->4512, 3515->4515, 3518->4518, 3520->4520. Preserve unit quantity and arrangement. N-Cross Flow (FM-12xxN) is NEVER part of this promotion and must remain unchanged. Never set every schedule row to N-Centrifugal merely because the user requested FM35 promotion.",
@@ -1049,7 +1055,7 @@ Deno.serve(async (req) => {
         "- The user can attach a fan or air curtain schedule as a PDF, a photo/screenshot or a spreadsheet (spreadsheets arrive as a text table in the message). Read every row carefully: tag/reference, quantity, airflow, static pressure, door width/height, series, noise limit.",
         "- Supported multi-selection inputs are: multiple duties typed in chat, PDF schedules, Excel XLS/XLSX files, CSV files, images, phone photos and screenshots. A single upload may contain fans, air curtains or both mixed together.",
         "- Classify each schedule row independently as fan or air_curtain. Never apply one row's type, mounting, material, units or optimisation to another row.",
-        "- For every row preserve the tag/reference, quantity and original units. For fan rows capture airflow, static pressure, series/type/material/poles/noise. For air-curtain rows capture door width, door height, mounting, motor type, series/brand and airflow/velocity requirement.",
+        "- For every row preserve the tag/reference, quantity and original units. If a fan row already prints a selected model such as KVF-100P, KVF-125M, KVF-100MR, KIN-E or KTAF, copy it verbatim into existing_selection. For fan rows capture airflow, static pressure, series/type/material/poles/noise. For air-curtain rows capture door width, door height, mounting, motor type, series/brand, existing selected model/arrangement and airflow/velocity requirement.",
         "- Use prepare_schedule_selection exactly once for the whole mixed schedule. Include all readable rows in their original order, up to the tool limit. Never create separate tool calls merely because the schedule mixes fans and air curtains.",
         "- If a row is outside the KINAIR range, keep that row in the output and mark it No suitable KINAIR selection; continue selecting all other valid rows.",
 

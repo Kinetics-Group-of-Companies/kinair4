@@ -24,10 +24,19 @@ export function reloadForFreshBundle(): void {
     return;
   }
 
-  if (sessionStorage.getItem(CHUNK_RELOAD_KEY)) return;
-  sessionStorage.setItem(CHUNK_RELOAD_KEY, '1');
+  const attempts = Number(sessionStorage.getItem(CHUNK_RELOAD_KEY) ?? '0');
+  // A failed module load may prevent the window "load" event from ever firing,
+  // so a boolean guard can strand the tab on a blank page forever. Allow one
+  // additional cache-busted retry before giving up.
+  if (attempts >= 2) {
+    sessionStorage.removeItem(CHUNK_RELOAD_KEY);
+    window.location.reload();
+    return;
+  }
+
+  sessionStorage.setItem(CHUNK_RELOAD_KEY, String(attempts + 1));
   const url = new URL(window.location.href);
-  url.searchParams.set('_update', Date.now().toString());
+  url.searchParams.set('_update', `${Date.now()}-${attempts + 1}`);
   window.location.replace(url.toString());
 }
 
@@ -55,8 +64,18 @@ export function recoverFromStartupFailure(): void {
     return;
   }
 
-  if (sessionStorage.getItem(STARTUP_RECOVERY_KEY)) return;
-  sessionStorage.setItem(STARTUP_RECOVERY_KEY, '1');
+  const attempts = Number(sessionStorage.getItem(STARTUP_RECOVERY_KEY) ?? '0');
+  if (attempts >= 2) {
+    // Do not leave the root empty just because an earlier recovery flag survived
+    // a failed module load. Reset the guard and try a clean navigation again.
+    sessionStorage.removeItem(STARTUP_RECOVERY_KEY);
+    sessionStorage.removeItem(CHUNK_RELOAD_KEY);
+    const url = new URL(window.location.href);
+    url.searchParams.set('_recovery', Date.now().toString());
+    window.location.replace(url.toString());
+    return;
+  }
+  sessionStorage.setItem(STARTUP_RECOVERY_KEY, String(attempts + 1));
 
   // Only discard the replaceable local catalogue cache. Authentication and
   // online order data are intentionally preserved.
