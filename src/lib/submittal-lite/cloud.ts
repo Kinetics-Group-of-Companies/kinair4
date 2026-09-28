@@ -22,8 +22,9 @@ export async function putCloudRecord(tenantId: string, record: SubmittalRecord) 
 }
 
 export async function removeCloudRecord(tenantId: string, id: string) {
-  const { error } = await supabase.from("submittal_lite_records").delete().eq("tenant_id", tenantId).eq("id", id);
+  const { data, error } = await supabase.from("submittal_lite_records").delete().eq("tenant_id", tenantId).eq("id", id).select("id");
   if (error) throw error;
+  if (!data?.length) throw new Error("Deletion was not confirmed. The draft may already be deleted, or your account may not have delete permission. Refresh the list.");
 }
 
 export async function loadCloudSettings(tenantId: string): Promise<CloudSettings | null> {
@@ -47,3 +48,4 @@ export async function putCloudSettings(tenantId: string, settings: CloudSettings
   try { await current; }
   finally { if (settingsWrites.get(tenantId) === current) settingsWrites.delete(tenantId); }
 }
+

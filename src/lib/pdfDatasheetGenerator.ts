@@ -1318,7 +1318,7 @@ export async function generateEnhancedDatasheet(options: DatasheetOptions): Prom
   
   // If appending, add a new page first
   if (isAppendMode) {
-    doc.addPage();
+    doc.addPage('a4', 'portrait');
   }
   
   const pageWidth = doc.internal.pageSize.getWidth();

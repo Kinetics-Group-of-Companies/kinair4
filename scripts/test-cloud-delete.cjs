@@ -1,0 +1,5 @@
+const {test}=require('node:test');const assert=require('node:assert/strict');const fs=require('node:fs');const ts=require('typescript');const vm=require('node:vm');
+function load(result){const source=fs.readFileSync(require('node:path').join(__dirname,'../src/lib/submittal-lite/cloud.ts'),'utf8');const chain={delete(){return this},eq(){return this},select:async()=>result};const exports={};vm.runInNewContext(ts.transpileModule(source,{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText,{exports,require:()=>({supabase:{from:()=>chain}})});return exports;}
+test('successful delete requires a confirmed deleted row',async()=>{await load({data:[{id:'draft'}],error:null}).removeCloudRecord('tenant','draft');});
+test('zero-row deletion is not reported as success',async()=>{await assert.rejects(load({data:[],error:null}).removeCloudRecord('tenant','draft'),/not confirmed/);});
+test('cloud deletion error is surfaced',async()=>{await assert.rejects(load({data:null,error:new Error('permission denied')}).removeCloudRecord('tenant','draft'),/permission denied/);});

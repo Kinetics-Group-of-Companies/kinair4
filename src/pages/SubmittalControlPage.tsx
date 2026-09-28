@@ -1,3 +1,5 @@
+import { shareSubmittalPdf, shareFingerprint, cachedSubmittalShare, rememberSubmittalShare } from "@/lib/submittal-lite/share";
+import { coverFieldKey as coverKey, normalizeCoverFields, isProvidedCoverValue } from "@/lib/submittal-lite/cover-fields";
 import { useEffect, useMemo, useRef, useState, type DragEvent, type MutableRefObject } from "react";
 import { ArrowDown, ArrowLeft, ArrowUp, Building2, Check, Download, FilePlus2, FileText, FileUp, GripVertical, ImagePlus, LayoutGrid, Library, Loader2, Paperclip, Plus, Save, Settings2, Sparkles, Tag, Wand2, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -14,9 +16,9 @@ import { loadSelectorModelCatalogue } from "@/lib/submittal-lite/selector-models
 import { countPdfPages } from "@/lib/submittal-lite/pdf-pages";
 import { buildPdfInWorker } from "@/lib/submittal-lite/pdf-worker-client";
 import { idbDel, idbGet, uploadSubmittalFile, setSubmittalStorageTenantId } from "@/lib/submittal-lite/idb";
-import { loadLibrary, matches, saveLibrary, tplKey, uid, type Brand, type Company, type Doc, type Slot } from "@/lib/submittal-lite/library";
+import { indexHeadingIntent, loadLibrary, matches, saveLibrary, tplKey, uid, type Brand, type Company, type Doc, type Slot } from "@/lib/submittal-lite/library";
 import { loadCloudRecords, putCloudRecord, removeCloudRecord, loadCloudSettings, putCloudSettings } from "@/lib/submittal-lite/cloud";
-import { loadRecords, nextRef, saveRecords, statusDot, type DocRef, type Field, type IndexMode, type Kind, type Section, type Status, type StampMode, type SubmittalRecord } from "@/lib/submittal-lite/records";
+import { nextRef, saveRecords, statusDot, type DocRef, type Field, type IndexMode, type Kind, type Section, type Status, type StampMode, type SubmittalRecord } from "@/lib/submittal-lite/records";
 import type { FileData, PageLabel } from "@/lib/submittal-lite/pdf-build";
 import { normalizeUploadData, normalizeUploads } from "@/lib/submittal-lite/uploads";
 import { MainLayout } from "@/components/layout/MainLayout";
@@ -39,15 +41,15 @@ const coverDefaults: Field[] = [
   { label: "MEP Contractor", value: "" }, { label: "Supplier Name", value: "" },
   { label: "Brand Name", value: "" },
 ];
-const coverKey = (label: string) => label.trim().toLowerCase().replace(/[^a-z0-9]/g, "").replace(/^project$/, "projectname").replace(/^client$/, "clientname").replace(/^consultant$|^mepconsultantname$/, "mepconsultant").replace(/^hvccontractor$|^hvaccontractor$|^mvpcontractor$/, "mepcontractor").replace(/^supplier$|^submittedby$|^company$/, "suppliername").replace(/^brand$|^manufacturer$|^make$/, "brandname").replace(/^plot(?:no|number)?(?:loc|location)?$/, "plotnolocation");
 function mergeCoverFields(current: Field[], imported: Field[], followImportedOrder = false) {
-  const next = current.map((f) => ({ ...f }));
+  const next = normalizeCoverFields(current, true);
+  imported = normalizeCoverFields(imported, true);
   for (const field of imported) {
     const at = next.findIndex((f) => coverKey(f.label) === coverKey(field.label));
-    if (at >= 0) next[at] = followImportedOrder
+    if (at >= 0 && (!next[at].value || isProvidedCoverValue(field.value))) next[at] = followImportedOrder
       ? { ...next[at]!, label: field.label, value: field.value }
       : { ...next[at]!, value: field.value };
-    else next.push({ ...field });
+    else if (at < 0) next.push({ ...field });
   }
   if (!followImportedOrder || !imported.length) return next;
   const importedKeys = new Set(imported.map((f) => coverKey(f.label)));
@@ -58,8 +60,8 @@ const materialProducts = ["Fan", "Air Curtains", "AHU", "FAHU", "MAHU", "Ecology
 const inferMaterialProducts = (text: string) => {
   const value = text.toUpperCase();
   const found: string[] = [];
-  if (/\b(?:FAN|KVF|KTAF|KIN[-\s]?E)\b/.test(value)) found.push("Fan");
-  if (/\b(?:AIR\s*CURTAIN|N[-\s]?CROSS\s*FLOW|N[-\s]?CENTRIFUGAL|XD[-\s]?CENTRIFUGAL|WING)\b/.test(value)) found.push("Air Curtains");
+  if (/\b(?:FANS?|KVF|KTAF|KIN[-\s]?E)\b/.test(value)) found.push("Fan");
+  if (/\b(?:AIR\s*CURTAINS?|N[-\s]?CROSS\s*FLOW|N[-\s]?CENTRIFUGAL|XD[-\s]?CENTRIFUGAL|WING)\b/.test(value)) found.push("Air Curtains");
   if (/\bFAHU\b|\bFRESH\s*AIR\s*HANDLING\b/.test(value)) found.push("FAHU");
   if (/\bMAHU\b|\bMAKE[-\s]*UP\s*AIR\s*HANDLING\b/.test(value)) found.push("MAHU");
   if (/\bECOLOGY\b|\bECOLOGY\s*UNIT\b|\bKITCHEN\s*EXHAUST\s*ECOLOGY\b/.test(value)) found.push("Ecology");
@@ -68,8 +70,8 @@ const inferMaterialProducts = (text: string) => {
 };
 const moveArray = <T,>(items: T[], from: number, to: number): T[] => { const next = [...items]; const [item] = next.splice(from, 1); if (item !== undefined) next.splice(to, 0, item); return next; };
 
-const isMaterialSchedule = (title: string) => /\bmaterial\s+schedules?\b/i.test(title);
-const isComplianceStatement = (title: string) => /\bcompliance\s+(statement|sheet|matrix|report)\b/i.test(title);
+const isMaterialSchedule = (title: string) => indexHeadingIntent(title) === "schedule" || /\bmaterial\s+schedules?\b/i.test(title);
+const isComplianceStatement = (title: string) => indexHeadingIntent(title) === "compliance" || /\bcompliance\s+(statement|sheet|matrix|report)\b/i.test(title);
 const defaultSectionStamp = (title: string): "all" | "divider" => isMaterialSchedule(title) || isComplianceStatement(title) ? "all" : "divider";
 const mkSections = (titles: string[], prev: Section[] = []) => {
   const selected = titles.map((t) => { const old = prev.find((p) => p.title.toLowerCase() === t.toLowerCase()); return old ? { ...old, title: t, auto: false } : { id: uid(), title: t, docs: [], stamp: defaultSectionStamp(t) }; });
@@ -148,15 +150,18 @@ async function dataUrlToFile(url?: string, name = "image"): Promise<FileData | u
 
 const docTitle = (d: Doc) => (d.category && d.category !== "Other" ? d.category : d.name.replace(/\.[a-z0-9]+$/i, "")).trim();
 
+const logicalFileNameKey = (name: string) => name
+  .toLowerCase()
+  .replace(/\.[a-z0-9]+$/i, "")
+  .replace(/\b(?:copy|final|rev(?:ision)?\s*\d+|v\d+)\b/g, "")
+  .replace(/[^a-z0-9]+/g, " ")
+  .trim();
+
 const logicalDocKey = (doc: Doc) => {
-  const base = doc.name
-    .toLowerCase()
-    .replace(/\.[a-z0-9]+$/i, "")
-    .replace(/\b(?:copy|final|rev(?:ision)?\s*\d+|v\d+)\b/g, "")
-    .replace(/[^a-z0-9]+/g, " ")
-    .trim();
   const category = (doc.category || "other").toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
-  return `${category}|${base}|${doc.size ?? ""}|${doc.pages ?? ""}`;
+  // Do not include size/page metadata here: the same PDF may be re-uploaded or
+  // normalized and still be the same logical catalogue/document.
+  return `${category}|${logicalFileNameKey(doc.name)}`;
 };
 
 
@@ -183,11 +188,14 @@ function docsForSelection(company: Company | undefined, brand: Brand | undefined
   const approvalNames = new Set<string>();
   const catalogueKeys = new Set<string>();
   const selectedModelNames = selectedSeries.map((series) => series.name.toUpperCase());
+  const explicitlyAssigned = new Set(selectedSeries.flatMap((series) => series.docs.map((doc) => doc.id)));
   for (const doc of [...(company?.docs ?? []), ...(brand?.docs ?? []), ...selectedSeries.flatMap((series) => series.docs), ...sharedApprovals]) {
-    // A library link can be misfiled. Never auto attach a document that names
-    // another series, even when it was saved under the selected series.
+    // The Admin/Library series assignment is the source of truth. Only use
+    // filename series guards for company/brand-level documents that were not
+    // explicitly assigned to the selected product series.
     const namedSeries = detectScheduleSeries(doc.name, brand?.series.map((series) => series.name) ?? []).series;
-    if (namedSeries.length && !namedSeries.some((name) => selectedModelNames.includes(name.toUpperCase()))) continue;
+    if (!explicitlyAssigned.has(doc.id) && namedSeries.length &&
+        !namedSeries.some((name) => selectedModelNames.includes(name.toUpperCase()))) continue;
     // Trust explicit series/library assignment. A shared OEM certificate can
     // legitimately contain "Cross Flow" in its filename while being mapped to
     // N-Centrifugal / XD-Centrifugal as well. The exact named-series guard above
@@ -225,9 +233,25 @@ function attach(sections: Section[], pool: Doc[]) {
   return sections
     .filter((section) => !section.auto || section.docs.some((d) => !d.auto))
     .map((section) => {
-      const kept = section.docs.filter((d) => !d.auto || (!section.auto && ids.has(d.id) && matches(section.title, pool.find((doc) => doc.id === d.id)!)));
+      const seen = new Set<string>();
+      const kept = section.docs
+        .filter((d) => !d.auto || (!section.auto && ids.has(d.id) && matches(section.title, pool.find((doc) => doc.id === d.id)!)))
+        .filter((d) => {
+          const key = logicalFileNameKey(d.name);
+          if (!key) return true;
+          if (seen.has(key)) return false;
+          seen.add(key);
+          return true;
+        });
       if (section.auto) return { ...section, docs: kept };
-      const add = pool.filter((d) => matches(section.title, d) && !kept.some((existing) => existing.id === d.id))
+      const add = pool
+        .filter((d) => matches(section.title, d))
+        .filter((d) => {
+          const key = logicalFileNameKey(d.name);
+          if (!key || seen.has(key)) return false;
+          seen.add(key);
+          return true;
+        })
         .map((d) => ({ id: d.id, name: d.name, type: d.type, size: d.size, pages: d.pages, auto: true }));
       return { ...section, docs: [...kept, ...add] };
     });
@@ -310,7 +334,9 @@ function SimpleSubmittalBuilder({ tenantId }: { tenantId: string }) {
   const [chatMounted, setChatMounted] = useState(false);
   const [modelCatalog, setModelCatalog] = useState<SeriesModel[]>([]);
   const [pendingChatDownloadId, setPendingChatDownloadId] = useState<string>();
+  const [preparedChatPdfId, setPreparedChatPdfId] = useState<string>();
   const [lastChatPdfReadyId, setLastChatPdfReadyId] = useState<string>();
+  const [mobileMode, setMobileMode] = useState(() => typeof window !== "undefined" && window.matchMedia("(max-width: 767px), (pointer: coarse)").matches);
   const [mgrTab, setMgrTab] = useState<"companies" | "brands">("companies");
   const [pickFor, setPickFor] = useState<string>();
   const [records, setRecords] = useState<SubmittalRecord[]>([]);
@@ -331,6 +357,7 @@ function SimpleSubmittalBuilder({ tenantId }: { tenantId: string }) {
   const dragged = useRef<DragItem | null>(null);
 
   useEffect(() => { if (chatOpen) setChatMounted(true); }, [chatOpen]);
+  useEffect(() => { const media = window.matchMedia("(max-width: 767px), (pointer: coarse)"); const sync = () => setMobileMode(media.matches); sync(); media.addEventListener?.("change", sync); return () => media.removeEventListener?.("change", sync); }, []);
   useEffect(() => {
     let cancelled = false;
     void loadSelectorModelCatalogue(tenantId).then((models) => {
@@ -358,15 +385,9 @@ function SimpleSubmittalBuilder({ tenantId }: { tenantId: string }) {
         const sel = remoteLibrary?.selection ?? (mayImportLegacy ? JSON.parse(localStorage.getItem("submittals:sel") ?? "{}") as { companyId?: string; brandId?: string; seriesIds?: string[]; customProducts?: string[]; stampAll?: boolean } : {});
         setCompanyId(lib.companies.some((c) => c.id === sel.companyId) ? sel.companyId! : (lib.companies[0]?.id ?? ""));
         setBrandId(sel.brandId ?? ""); setSeriesIds(sel.seriesIds ?? []); setCustomProducts(sel.customProducts ?? []); setStampAll(sel.stampAll ?? true);
-        const localRecords = mayImportLegacy ? loadRecords() : [];
-        const cloudRecords = await loadCloudRecords(tenantId);
-        const remoteIds = new Set(cloudRecords.map((r) => r.id));
-        const imported: SubmittalRecord[] = [];
-        for (const record of localRecords.filter((r) => !remoteIds.has(r.id))) {
-          try { await putCloudRecord(tenantId, record); imported.push(record); }
-          catch { /* Keep conflicting or unsynced local drafts on this device. */ }
-        }
-        const recs = [...cloudRecords, ...imported];
+        // Cloud is authoritative. A missing ID can mean deletion by another
+        // tab/device; cached records must never be silently re-uploaded.
+        const recs = await loadCloudRecords(tenantId);
         setRecords(recs); setView("list");
         localStorage.setItem("submittals:tenant", tenantId);
               setLoaded(true);
@@ -429,7 +450,7 @@ function SimpleSubmittalBuilder({ tenantId }: { tenantId: string }) {
   const editing = records.find((r) => r.id === editingId);
   const allDocs = sections.filter((section) => !section.auto).flatMap((section) => section.docs);
   const pageTotal = allDocs.reduce((sum, doc) => sum + (doc.pages ?? 1), 0);
-  const largeMode = allDocs.some((doc) => (doc.size ?? 0) > 20 * 1024 * 1024) || pageTotal > 100;
+  const largeMode = mobileMode || allDocs.some((doc) => (doc.size ?? 0) > 20 * 1024 * 1024) || pageTotal > 100;
   const buildKey = JSON.stringify({ kind, title, coverHeading, fields, sections, indexMode, companyId, brandId, stampAll, stampCover, stampIndex, useDefaultCover, useDefaultIndex, coverDoc: editing?.coverDoc?.id, indexDoc: editing?.indexDoc?.id });
 
   const normCache = useRef(new Map<string, FileData>());
@@ -647,8 +668,12 @@ function SimpleSubmittalBuilder({ tenantId }: { tenantId: string }) {
     try {
       await removeCloudRecord(tenantId, id);
       setRecords((current) => current.filter((r) => r.id !== id));
-      for (const docId of uniqueFiles) await idbDel(`doc:${docId}`);
-      setNotice(`${target.ref} and its unused uploads deleted.`);
+      try { saveRecords(records.filter(record => record.id !== id)); } catch { /* Cloud deletion remains authoritative. */ }
+      if (editingId === id) { setEditingId(""); setView("list"); }
+      const cleanup = await Promise.allSettled([...uniqueFiles].map(docId => idbDel(`doc:${docId}`)));
+      setNotice(cleanup.some(result => result.status === "rejected")
+        ? `${target.ref} deleted. Some unused uploads could not be cleaned up.`
+        : `${target.ref} and its unused uploads deleted.`);
     } catch (error) {
       setNotice(`Could not delete ${target.ref}: ${error instanceof Error ? error.message : "Please try again."}`);
     }
@@ -658,6 +683,77 @@ function SimpleSubmittalBuilder({ tenantId }: { tenantId: string }) {
     setEditingId(undefined); setKind("Material"); setCoverText(""); setIndexText(""); setFields(coverDefaults.map((f) => ({ ...f }))); setIndexMode("general"); setTitle(""); setCoverHeading(""); setBrandId(""); setSeriesIds([]); setCustomProducts([]); setCustomProduct(""); setUseDefaultCover(false); setUseDefaultIndex(false); setStampAll(false); setStampCover(true); setStampIndex(true);
     setSections(attach(mkSections(indexTemplates.general), [...(company?.docs ?? [])])); setView("edit"); window.scrollTo(0, 0);
   };
+  const shareSavedRecord = async (record: SubmittalRecord) => {
+    const company = companies.find((item) => item.id === record.companyId);
+    const brand = brands.find((item) => item.id === record.brandId);
+    if (!company) throw new Error("The supplier settings are missing. Open this submittal to review them.");
+    const version = await shareFingerprint(JSON.stringify({ record, company, brand, renderer: "share-v1" }));
+    const cached = cachedSubmittalShare(tenantId, version);
+    if (cached) return cached;
+    const { kind, title, fields, stampAll } = record;
+    const coverHeading = record.coverHeading ?? "";
+    const stampCover = record.stampCover ?? true;
+    const stampIndex = record.stampIndex ?? true;
+    const useDefaultCover = false, useDefaultIndex = false;
+    const editing = record;
+    const sections = attach(record.sections, docsForSelection(company, brand, record.seriesIds));
+    const types = record.seriesIds.filter((id) => /^(default|custom):/.test(id)).map((id) => id.slice(id.indexOf(":") + 1));
+    const models = (brand?.series ?? []).filter((item) => record.seriesIds.includes(item.id)).map((item) => item.name);
+    const selectedProducts = (types.length ? types : models).join(", ");
+    const buildController = new AbortController();
+        const templates: Partial<Record<Slot, FileData>> = {};
+        if (company) for (const s of ["cover", "index", "divider"] as Slot[]) {
+          const meta = company.tpl[s];
+          const bytes = meta && (await idbGet(tplKey(company.id, s)));
+          if (meta && bytes?.byteLength) templates[s] = await normalizeUploadData({ bytes: bytes.slice(0), type: meta.type, name: meta.name });
+          else if (meta) throw new Error(`${s[0]?.toUpperCase()}${s.slice(1)} template file is missing. Please upload it again in Company settings.`);
+        }
+        const missingFiles: string[] = [];
+        const loadSourceDoc = async (ref?: DocRef): Promise<FileData | undefined> => {
+          if (!ref) return undefined;
+          const bytes = await bytesOf(ref.id);
+          if (!bytes) { missingFiles.push(ref.name); return undefined; }
+          return normalizeUploadData({ bytes, type: ref.type, name: ref.name });
+        };
+        const sourceCover = await loadSourceDoc(editing?.coverDoc);
+        const sourceIndex = await loadSourceDoc(editing?.indexDoc);
+        const secs: { title: string; stamp: StampMode | undefined; files: FileData[] }[] = [];
+        for (const section of sections.filter((item) => !item.auto)) {
+          const files: FileData[] = [];
+          for (const d of section.docs) {
+            const hit = normCache.current.get(d.id);
+            if (hit) { files.push(hit); continue; }
+            const bytes = await bytesOf(d.id);
+            if (!bytes) { missingFiles.push(d.name); continue; }
+            const normalized = await normalizeUploadData({ bytes, type: d.type, name: d.name });
+            if (bytes.byteLength <= 1024 * 1024) normCache.current.set(d.id, normalized);
+            files.push(normalized);
+          }
+          secs.push({ title: section.title, stamp: section.stamp, files });
+          
+        }
+        const selectionLabels = /^(supplier(?: name)?|submitted by|company|brand(?: name)?|manufacturer|make|product|product type|equipment|model|series)$/i;
+        const customerFields = fields.filter((f) => !selectionLabels.test(f.label.trim()));
+        const fieldValue = (pattern: RegExp) => fields.find((f) => pattern.test(f.label.trim()))?.value.trim() ?? "";
+        const supplierName = fieldValue(/^(supplier(?: name)?|submitted by|company)$/i) || company?.name || "";
+        const displayBrand = fieldValue(/^(brand(?: name)?|manufacturer|make)$/i) || brand?.name || "";
+        const displayProduct = selectedProducts || fieldValue(/^(product|product type|equipment|model|series)$/i);
+        const coverFields = [
+          ...customerFields,
+          ...(supplierName ? [{ label: "Supplier Name", value: supplierName }] : []),
+          ...(displayBrand ? [{ label: "Brand Name", value: displayBrand }] : []),
+          ...(displayProduct ? [{ label: "Product", value: displayProduct }] : []),
+        ];
+        const coverLabel = coverHeading.trim() || (kind === "Material" && selectedProducts ? `Material Submittal for ${selectedProducts}` : kindLabel[kind]);
+        
+        const out = await buildPdfInWorker({ kindLabel: kindLabel[kind], coverLabel, title, companyName: company?.name, brandName: brand?.name, productName: selectedProducts, fields: coverFields, sections: secs, templates, sourceCover, sourceIndex, useDefaultCover: useDefaultCover && Boolean(company?.tpl.cover), useDefaultIndex: useDefaultIndex && Boolean(company?.tpl.index), companyLogo: await dataUrlToFile(company?.logo, "company.png"), brandLogo: await dataUrlToFile(brand?.logo, "brand.png"), stamp: await dataUrlToFile(company?.stamp, "stamp.png"), stampEveryPage: stampAll, stampCover, stampIndex }, buildController.signal);
+
+    if (missingFiles.length || out.skipped.length) throw new Error(`Cannot share an incomplete PDF. Missing or unreadable files: ${[...missingFiles, ...out.skipped].join(", ")}. Open the submittal and re-upload them.`);
+    const result = await shareSubmittalPdf(tenantId, out.bytes);
+    rememberSubmittalShare(tenantId, version, result);
+    return result;
+  };
+
   const loadRecord = async (r: SubmittalRecord, asNew = false) => {
     setKind(r.kind); setCoverText(r.coverText); setIndexText(r.indexText); setFields(r.fields.map((field) => ({ ...field }))); setTitle(r.title); setCoverHeading(r.coverHeading ?? "");
     setIndexMode(r.indexMode ?? (r.indexText ? "customer" : "general"));
@@ -725,13 +821,25 @@ function SimpleSubmittalBuilder({ tenantId }: { tenantId: string }) {
     // Use the same product-type and series controls as the manual builder.
     // Exact series detection avoids interpreting KVF-MR as KVF-M.
     const catalogue = selectedBrand?.series.map((item) => item.name) ?? [];
+    const selectionAuthorityText = uploads.flatMap((upload) => upload.selectionItems ?? [])
+      .flatMap((item) => [item.series_name ?? "", item.existing_selection ?? ""])
+      .filter(Boolean).join("\n");
+    const selectionItems = uploads.flatMap((upload) => upload.selectionItems ?? []);
+    const fromSelectionAssistant = detectScheduleSeries(selectionAuthorityText, catalogue, modelCatalog).series;
     const fromRequest = detectScheduleSeries(product, catalogue, modelCatalog).series;
     const fromSchedule = detectScheduleSeries(scheduleText, catalogue, modelCatalog).series;
-    const seriesNames = [...new Set([...fromSchedule, ...fromRequest])];
-    const inferredTypes = [...new Set(seriesNames.map(seriesProductType).filter((name): name is "Fan" | "Air Curtains" => Boolean(name)))];
+    const seriesNames = [...new Set([...fromSelectionAssistant, ...fromSchedule, ...fromRequest])];
+    const inferredTypes = [...new Set(seriesNames.map((name) => seriesProductType(name, modelCatalog)).filter((name): name is string => Boolean(name)))];
+    const selectionTypes = [...new Set(selectionItems.map((item) => item.product === "air_curtain" ? "Air Curtains" : item.product === "fan" ? "Fan" : "").filter(Boolean))];
     const explicitTypes = materialProducts.filter((name) => near(name, product));
     const textTypes = inferMaterialProducts(`${product}\n${scheduleText}`);
-    const productTypes = [...new Set([...inferredTypes, ...explicitTypes, ...textTypes])];
+    // Selection Assistant rows and exact series/model detection are authoritative.
+    // Generic words inside a TDS (for example "fan" in an Air Curtain document)
+    // must never add another product family after the equipment has been resolved.
+    const authoritativeTypes = [...new Set([...selectionTypes, ...inferredTypes])];
+    const productTypes = authoritativeTypes.length
+      ? authoritativeTypes
+      : [...new Set([...explicitTypes, ...textTypes])];
     const modelIds = seriesNames.map((name) => selectedBrand?.series.find((item) =>
       item.name.toUpperCase().replace(/[^A-Z0-9]/g, "") === name.toUpperCase().replace(/[^A-Z0-9]/g, ""))?.id ?? `custom:${name}`);
     const requestedIds = [...productTypes.map((name) => `default:${name}`), ...modelIds];
@@ -745,13 +853,13 @@ function SimpleSubmittalBuilder({ tenantId }: { tenantId: string }) {
     const uploadedIndex = uploads.find((upload) => upload.kind === "index" && upload.documentText);
     const customerTitles = uploadedIndex ? localParse("", uploadedIndex.documentText!).sections : [];
     const hasProjectSpecification = uploads.some((upload) => /project\s*specification/i.test(upload.sectionTitle + " " + upload.file.name));
-    const mode = customerTitles.length ? "customer" : hasProjectSpecification ? "project"
+    const mode = plan.explicitIndexMode && plan.indexMode !== "keep" ? plan.indexMode : customerTitles.length ? "customer" : hasProjectSpecification ? "project"
       : plan.indexMode === "keep" ? (source?.indexMode ?? "general") : plan.indexMode;
     const preset = mode === "project" ? indexTemplates.project : mode === "general"
       ? (chatKind === "Material" ? indexTemplates.general : sectionDefaults[chatKind]) : [];
     const keepExistingIndex = plan.indexMode === "keep" && source && !customerTitles.length && !hasProjectSpecification;
     const initial = keepExistingIndex ? source.sections.map((section) => section.title) : preset;
-    const requested = customerTitles.length ? customerTitles : plan.sections ?? [];
+    const requested = mode === "customer" && customerTitles.length ? customerTitles : plan.sections ?? [];
     // Saved General/Project templates define the index exactly. AI proposals must
     // not append unrelated sections such as drawings or a table of contents.
     const titles = (mode === "customer" && requested.length ? requested
@@ -766,21 +874,23 @@ function SimpleSubmittalBuilder({ tenantId }: { tenantId: string }) {
       const existing = chatFields.find((field) => coverKey(field.label) === "brandname");
       if (existing) existing.value = plan.brand.trim() || selectedBrand!.name;
     }
-    const verifiedPool = docsForSelection(targetCompany, selectedBrand, selectedSeriesIds)
-      .filter((doc) => verifiedAiLibraryDoc(doc, selectedBrand, selectedSeriesIds, seriesNames));
+    // Use the exact same Company → Brand → selected Series document pool as
+    // the manual builder. Do not apply an AI-only filename certificate filter:
+    // explicit Library/Admin series assignment is already authoritative.
+    const verifiedPool = docsForSelection(targetCompany, selectedBrand, selectedSeriesIds);
     const chatSections = attach(mkSections(titles, source?.sections ?? []), verifiedPool)
       .filter((section) => !(plan.omitSections ?? []).some((excluded) => near(section.title, excluded)));
     const explicitTitle = plan.title.trim();
     const productTitle = chatKind === "Material"
       ? `Material Submittal for ${productTypes.length ? productTypes.join(" & ") : product || "Fan"}`
       : kindLabel[chatKind];
-    const inferredSeriesTitle = explicitTitle && seriesNames.some((name) => explicitTitle.toLowerCase().includes(name.toLowerCase()));
-    const chatTitle = inferredSeriesTitle ? productTitle : (explicitTitle || source?.title || productTitle);
+    const projectName = chatFields.find((field) => coverKey(field.label) === "projectname")?.value?.trim() ?? "";
+    const chatTitle = projectName || explicitTitle || source?.title || productTitle;
     return {
       ...(source ?? {} as SubmittalRecord),
       id: uid(), ref: source?.ref ?? nextRef(chatKind, records),
       rev: source ? Math.max(...records.filter((item) => item.ref === source.ref).map((item) => item.rev), source.rev) + 1 : 0,
-      kind: chatKind, title: chatTitle, coverHeading: plan.coverHeading?.trim() || source?.coverHeading || "", project: chatFields.find((field) => coverKey(field.label) === "projectname")?.value ?? source?.project ?? "",
+      kind: chatKind, title: chatTitle, coverHeading: plan.coverHeading?.trim() || source?.coverHeading || "", project: projectName || source?.project || "",
       status: "Draft", companyId: targetCompany?.id ?? "", brandId: selectedBrand?.id ?? "",
       seriesIds: selectedSeriesIds, customProducts: selectedCustomProducts, fields: chatFields, sections: chatSections,
       stampAll: source?.stampAll ?? stampAll, stampCover: source?.stampCover ?? true, stampIndex: source?.stampIndex ?? true,
@@ -795,14 +905,20 @@ function SimpleSubmittalBuilder({ tenantId }: { tenantId: string }) {
     const resolveSection = (upload: ChatUpload) => {
       if (upload.kind === "cover" || upload.kind === "index") return "";
       if (upload.sectionTitle.startsWith("new:")) return upload.sectionTitle.slice(4).trim().slice(0, 100);
+      const scheduleLike = upload.sourceRole === "schedule" || upload.sectionTitle === "Material schedule" || /\bschedule\b/i.test(upload.file.name);
+      if (scheduleLike) {
+        const materialSchedule = record.sections.find((section) => isMaterialSchedule(section.title));
+        return materialSchedule?.title ?? "Material schedule";
+      }
+      // An unreadable original can still be assigned by its selected purpose or
+      // unambiguous document name; OCR is not required to append a PDF.
       if (upload.sectionTitle) {
-        const chosen = record.sections.find((section) => near(section.title, upload.sectionTitle));
+        const chosen = record.sections.find((section) => section.title.trim().toLowerCase() === upload.sectionTitle.trim().toLowerCase());
         if (chosen) return chosen.title;
-        if (["Material schedule", "Technical data sheet", "Compliance statement"].includes(upload.sectionTitle)) return upload.sectionTitle;
+
       }
       if (upload.sectionTitle) {
-        const hint = record.sections.filter((section) => near(section.title, upload.sectionTitle)
-          || matches(section.title, { id: "", name: upload.sectionTitle, type: upload.file.type, category: "Other" }));
+        const hint = record.sections.filter((section) => matches(section.title, { id: "", name: upload.sectionTitle, type: upload.file.type, category: "Other" }));
         if (hint.length === 1) return hint[0]!.title;
       }
       const possible = record.sections.filter((section) => matches(section.title, { id: "", name: upload.file.name, type: upload.file.type, category: "Other" }));
@@ -811,11 +927,10 @@ function SimpleSubmittalBuilder({ tenantId }: { tenantId: string }) {
       return schedule ? `${schedule[1]!.slice(0, 1).toUpperCase()}${schedule[1]!.slice(1).toLowerCase()} schedule` : "";
     };
     const assignments = uploads.map(resolveSection);
+    // Customer project details are descriptive, not mandatory schema fields.
+    // Never invent/ask for MEP Consultant, Main Contractor or MEP Contractor
+    // when the customer did not provide those labels.
     const missingCover = [
-      ...(!record.project.trim() ? ["Project Name"] : []),
-      ...(!record.fields.some((field) => coverKey(field.label) === "clientname" && field.value.trim()) ? ["Client Name"] : []),
-      ...(["MEP Consultant", "Main Contractor", "MEP Contractor"] as const).filter((label) =>
-        !record.fields.some((field) => coverKey(field.label) === coverKey(label) && field.value.trim())),
       ...(!record.fields.some((field) => coverKey(field.label) === "brandname" && field.value.trim()) && !record.brandId ? ["Brand Name"] : []),
       ...(!record.seriesIds.some((id) => !id.startsWith("default:")) && record.seriesIds.some((id) => id === "default:Fan" || id === "default:Air Curtains") ? ["Exact product series / model"] : !record.seriesIds.length ? ["Product / series"] : []),
       ...((!record.companyId || companies.find((item) => item.id === record.companyId)?.name === "My company")
@@ -823,10 +938,10 @@ function SimpleSubmittalBuilder({ tenantId }: { tenantId: string }) {
     ];
     const empty = record.sections.filter((section) => !section.docs.length && !assignments.includes(section.title));
     const catalogue = brands.flatMap((item) => item.series.map((series) => series.name));
-    const scheduleUploads = uploads.filter((upload) => upload.sectionTitle === "Material schedule" || /schedule/i.test(upload.file.name));
+    const scheduleUploads = uploads.filter((upload) => upload.sectionTitle === "Material schedule" || Boolean(upload.selectionItems?.length));
     const scheduleModels = detectScheduleSeries(scheduleUploads.map((upload) => upload.scheduleText ?? upload.documentText ?? "").join("\n"), catalogue, modelCatalog);
     const tdsModels = detectScheduleSeries(uploads.filter((upload) =>
-      /technical data sheet|datasheet|tds/i.test(upload.sectionTitle + " " + upload.file.name))
+      /technical data sheet|datasheet|tds/i.test(upload.sectionTitle))
       .map((upload) => upload.documentText ?? "").join("\n"), catalogue, modelCatalog);
     const detectedModels = detectScheduleSeries(uploads.map((upload) => upload.scheduleText ?? upload.documentText ?? "").join("\n"), catalogue, modelCatalog);
     const tdsFallback = !scheduleModels.series.length && tdsModels.series.length === 1;
@@ -883,7 +998,7 @@ function SimpleSubmittalBuilder({ tenantId }: { tenantId: string }) {
     if (destination === "pdf") setLastChatPdfReadyId(undefined);
     const record = prepareChatRecord(plan, uploads);
     const sourceCover = uploads.find((upload) => upload.kind === "cover");
-    const sourceIndex = uploads.find((upload) => upload.kind === "index");
+    const sourceIndex = plan.indexMode === "customer" || plan.indexMode === "keep" ? uploads.find((upload) => upload.kind === "index") : undefined;
     const saveSourceArtwork = async (upload: ChatUpload | undefined, kind: "cover" | "index") => {
       if (!upload) return undefined;
       const file = (await normalizeUploads([upload.file]))[0]!;
@@ -928,12 +1043,17 @@ function SimpleSubmittalBuilder({ tenantId }: { tenantId: string }) {
     // without waiting on the cloud metadata write.
     await loadRecord(record);
     if (destination === "pdf") {
-      setPendingChatDownloadId(record.id);
-      setNotice(`${record.ref} Rev ${record.rev} · Building combined PDF…`);
       void putCloudRecord(tenantId, record).catch((error) => {
-        setNotice(`PDF build started, but cloud save failed: ${error instanceof Error ? error.message : "Please retry save."}`);
+        setNotice(`Cloud save failed: ${error instanceof Error ? error.message : "Please retry save."}`);
       });
-      return `${record.ref} Rev ${record.rev} · Core builder is assembling the combined PDF now.`;
+      // Use the same automatic core-builder flow on desktop and mobile.
+      // The manual download button remains available as a fallback if the browser
+      // suppresses a programmatic download.
+      setPreparedChatPdfId(undefined);
+      setPendingChatDownloadId(record.id);
+      setLastChatPdfReadyId(undefined);
+      setNotice(`${record.ref} Rev ${record.rev} · Building combined PDF…`);
+      return `${record.ref} Rev ${record.rev} · Core builder is assembling and will download the combined PDF automatically.`;
     }
     await putCloudRecord(tenantId, record);
     setPendingChatDownloadId(undefined);
@@ -946,6 +1066,7 @@ function SimpleSubmittalBuilder({ tenantId }: { tenantId: string }) {
     if (building) return;
     if (pdf && !hasPdfIssues) {
       setLastChatPdfReadyId(pendingChatDownloadId);
+      setPreparedChatPdfId(undefined);
       setPendingChatDownloadId(undefined);
       void download();
     } else if (hasPdfIssues) {
@@ -1158,7 +1279,7 @@ function SimpleSubmittalBuilder({ tenantId }: { tenantId: string }) {
             </div>
 
             <div className="lg:sticky lg:top-4 lg:self-start">
-              {largeMode && <div className="mb-3 rounded-xl bg-secondary p-3 text-sm"><p className="font-bold">Large submittal · ${pageTotal} source pages</p><p className="mt-1 text-xs">The PDF builds when requested so editing and upload stay responsive.</p><Button className="mt-2" disabled={building || uploadProgress !== null} onClick={() => setManualBuildKey(buildKey)}>{building ? "Building…" : "Build PDF preview"}</Button></div>}
+              {largeMode && <div className="mb-3 rounded-xl bg-secondary p-3 text-sm"><p className="font-bold">{mobileMode ? "Mobile lightweight mode" : `Large submittal · ${pageTotal} source pages`}</p><p className="mt-1 text-xs">{mobileMode ? "Preview is deferred to keep the phone responsive. Build the PDF only when you need it." : "The PDF builds when requested so editing and upload stay responsive."}</p><Button className="mt-2" disabled={building || uploadProgress !== null} onClick={() => setManualBuildKey(buildKey)}>{building ? "Building…" : "Build PDF preview"}</Button></div>}
               {uploadProgress !== null && <p role="status" className="mb-3 text-sm">Uploading document: {uploadProgress}%</p>}
               <PdfPreview bytes={pdf?.bytes} labels={pdf?.labels ?? []} building={building} rotations={rotations} onRotate={(i, d) => setRotations((r) => ({ ...r, [i]: ((r[i] ?? 0) + d + 360) % 360 }))} />
               <div className="mt-4 grid grid-cols-2 gap-3"><Button variant="default" size="default" onClick={() => void download()} disabled={!pdf || building || hasPdfIssues}><Download /> Download PDF</Button><Button variant="outline" size="default" onClick={() => void save("Submitted")} disabled={!pdf || building || hasPdfIssues}><Check /> Mark submitted</Button></div>
@@ -1166,7 +1287,7 @@ function SimpleSubmittalBuilder({ tenantId }: { tenantId: string }) {
             </div>
           </main>
         ) : (
-          <SubmittalsHome records={records} companies={companies} brands={brands} onNew={resetEditor} onEdit={(r) => void loadRecord(r)} onDuplicate={(r) => void loadRecord(r, true)} onDelete={(id) => void deleteRecord(id)} onStatus={(id, status, note) => void setRecordStatus(id, status, note)} />
+          <SubmittalsHome onShare={shareSavedRecord} records={records} companies={companies} brands={brands} onNew={resetEditor} onEdit={(r) => void loadRecord(r)} onDuplicate={(r) => void loadRecord(r, true)} onDelete={(id) => void deleteRecord(id)} onStatus={(id, status, note) => void setRecordStatus(id, status, note)} />
         )}
 
         <nav className="fixed inset-x-0 bottom-0 z-30 border-t border-border bg-card/95 px-5 py-2 backdrop-blur lg:hidden">
@@ -1178,7 +1299,6 @@ function SimpleSubmittalBuilder({ tenantId }: { tenantId: string }) {
         </nav>
       </div>
 
-      <div className="mx-5 mb-4 text-sm"><a className="text-primary underline" href="/submittal-control/shared">Open shared Supabase workspace</a><span className="ml-2 text-muted-foreground">Uploaded files use the shared KINAIR Supabase storage. Draft details, revisions, and library settings sync to your tenant workspace.</span></div>
       {!chatOpen && <button
         type="button"
         aria-label="Open KINAIR submittal AI chat"
@@ -1191,7 +1311,18 @@ function SimpleSubmittalBuilder({ tenantId }: { tenantId: string }) {
           <span className="block truncate text-[11px] text-muted-foreground">Standard index · Missing files · Final PDF</span>
         </span>
       </button>}
-      {chatMounted && <SubmittalChat open={chatOpen} onOpenChange={setChatOpen} records={records} brands={brands.map((brand) => brand.name)} seriesCatalogue={brands.flatMap((brand) => brand.series.map((series) => series.name))} modelCatalog={modelCatalog} tenantId={tenantId} currentRecordId={view === "edit" ? editingId : undefined} inspectPlan={inspectChatPlan} onApply={applyChatPlan} pdfBuilding={Boolean(pendingChatDownloadId)} pdfReady={Boolean(lastChatPdfReadyId && editingId === lastChatPdfReadyId && pdf && !building && !hasPdfIssues)} pdfFailed={Boolean(pendingChatDownloadId && hasPdfIssues && !building)} onDownloadPdf={() => void download()} onOpenBuilder={() => { resetEditor(); setChatOpen(false); }} />}
+      {chatMounted && <SubmittalChat open={chatOpen} onOpenChange={setChatOpen} records={records} brands={brands.map((brand) => brand.name)} seriesCatalogue={brands.flatMap((brand) => brand.series.map((series) => series.name))} modelCatalog={modelCatalog} tenantId={tenantId} currentRecordId={view === "edit" ? editingId : undefined} inspectPlan={inspectChatPlan} onApply={applyChatPlan} pdfBuilding={Boolean(pendingChatDownloadId)} pdfReady={Boolean(lastChatPdfReadyId && editingId === lastChatPdfReadyId && pdf && !building && !hasPdfIssues)} pdfPrepared={Boolean(preparedChatPdfId && editingId === preparedChatPdfId)} pdfFailed={Boolean(pendingChatDownloadId && hasPdfIssues && !building)} mobileMode={mobileMode} scheduleBranding={{ companyName: company?.name, companyLogo: company?.logo, brandLogo: brand?.logo }} onSharePdf={async () => {
+        if (!pdf || building || hasPdfIssues || !lastChatPdfReadyId || editingId !== lastChatPdfReadyId) throw new Error("Build the final submittal PDF before sharing.");
+        return shareSubmittalPdf(tenantId, pdf.bytes);
+      }} onDownloadPdf={() => {
+        if (preparedChatPdfId && editingId === preparedChatPdfId && (!pdf || largeMode)) {
+          setPreparedChatPdfId(undefined);
+          setPendingChatDownloadId(preparedChatPdfId);
+          setManualBuildKey(buildKey);
+          return;
+        }
+        void download();
+      }} onOpenBuilder={() => { resetEditor(); setChatOpen(false); }} />}
       <LibraryManager open={mgrOpen} onClose={() => setMgrOpen(false)} tab={mgrTab} setTab={setMgrTab} companies={companies} setCompanies={(fn) => setCompanies((c) => { const n = fn(c); if (!n.some((x) => x.id === companyId)) setCompanyId(n[0]?.id ?? ""); return n; })} brands={brands} setBrands={setBrands} />
       <DocPicker open={!!pickFor} onClose={() => setPickFor(undefined)} title={pickSection?.title ?? ""}
         groups={[
@@ -1212,3 +1343,4 @@ export default function SubmittalControlPage() {
   if (!tenantId) return <MainLayout><p className="p-6">Your workspace could not be loaded. Please sign in again.</p></MainLayout>;
   return <SimpleSubmittalBuilder tenantId={tenantId} />;
 }
+

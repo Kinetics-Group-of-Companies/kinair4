@@ -1,4 +1,22 @@
-export type SeriesModel = { code: string; series: string };
+export type SeriesModel = {
+  code: string;
+  series: string;
+  productType?: "Fan" | "Air Curtains" | "AHU" | "FAHU" | "MAHU" | "Ecology" | string;
+  selectorKind?: "fan" | "air_curtain" | "generic";
+  baseSeries?: string;
+  seriesId?: string;
+  modelId?: string;
+  diameter?: number;
+  lengthMm?: number;
+  remarks?: string;
+  seriesDescription?: string;
+  datasheetDescription?: string;
+  drawingUrl?: string;
+  catalogueUrl?: string;
+  iomUrl?: string;
+  tdsStoragePath?: string;
+  tdsDisplayName?: string;
+};
 export type ScheduleSeriesResult = { series: string[]; unresolved: string[] };
 
 
@@ -38,16 +56,28 @@ export function normalizeOcrModelCodes(text: string, modelCatalog: SeriesModel[]
 
 const builtInSeries = ["KVF-MR", "KVF-M", "KVF-P", "KIN-E", "KTAF", "N-Cross Flow", "N-Centrifugal Flow", "XD-Centrifugal Flow", "WING", "VVS"];
 
-export function seriesProductType(name: string): "Fan" | "Air Curtains" | undefined {
+export function seriesProductType(name: string, catalogue: SeriesModel[] = []): "Fan" | "Air Curtains" | "AHU" | "FAHU" | "MAHU" | "Ecology" | string | undefined {
   const compact = name.toUpperCase().replace(/[^A-Z0-9]/g, "");
+  const registered = [...new Set(catalogue
+    .filter((item) => item.series.toUpperCase().replace(/[^A-Z0-9]/g, "") === compact)
+    .map((item) => item.productType)
+    .filter((value): value is string => Boolean(value)))];
+  if (registered.length === 1) return registered[0];
   if (/^(KVFMR|KVFM|KVFP|KINE|KTAF)/.test(compact)) return "Fan";
   if (/^(NCROSSFLOW|NCENTRIFUGALFLOW|XDCENTRIFUGALFLOW|WING)/.test(compact)) return "Air Curtains";
+  if (/^FAHU/.test(compact)) return "FAHU";
+  if (/^MAHU/.test(compact)) return "MAHU";
+  if (/^ECOLOGY/.test(compact)) return "Ecology";
+  if (/^AHU/.test(compact)) return "AHU";
   return undefined;
 }
 
 /** Only these series have a live KINAIR selection engine capable of generating TDS. */
-export function isSelectorSeries(name: string): boolean {
+export function isSelectorSeries(name: string, catalogue: SeriesModel[] = []): boolean {
   const compact = name.toUpperCase().replace(/[^A-Z0-9]/g, "");
+  if (catalogue.some((item) =>
+    item.series.toUpperCase().replace(/[^A-Z0-9]/g, "") === compact &&
+    (item.selectorKind === "fan" || item.selectorKind === "air_curtain"))) return true;
   return /^(KVFMR|KVFM|KVFP|KINE|KTAF|NCROSSFLOW|NCENTRIFUGALFLOW|XDCENTRIFUGALFLOW)$/.test(compact);
 }
 
@@ -84,6 +114,18 @@ export function detectScheduleSeries(text: string, availableSeries: string[] = [
       : code.split(/[^A-Z0-9]+/).filter(Boolean).join("[\\s._-]*");
     if (!stem || stem.length < 6) continue;
     if (new RegExp("(^|[^A-Z0-9])" + stem + "(?=$|[^A-Z0-9])", "i").test(input)) detected.add(canonical(model.series));
+  }
+  // Air-curtain schedule model conventions are authoritative even when the
+  // selector catalogue has not loaded yet. Detected series IDs drive the same
+  // saved-series document pool as the manual builder.
+  if (/(^|[^A-Z0-9])FM[\s._-]*\d{4}N(?:[\s._-]*\d+)?(?:\([^)]*\))?(?=$|[^A-Z0-9])/i.test(input)) {
+    detected.add(canonical("N-Cross Flow"));
+  }
+  if (/(^|[^A-Z0-9])FM[\s._-]*\d{4}[\s._-]*L(?:\([^)]*\))?(?=$|[^A-Z0-9])/i.test(input)) {
+    detected.add(canonical("N-Centrifugal Flow"));
+  }
+  if (/(^|[^A-Z0-9])FM[\s._-]*\d{4}XD(?:\([^)]*\))?(?:[\s._-]*L)?(?:\/\([^)]*\))?(?=$|[^A-Z0-9])/i.test(input)) {
+    detected.add(canonical("XD-Centrifugal Flow"));
   }
   // KVF-MR model convention is supplied by the product team; the selector table
   // does not yet contain its sizes. The explicit MR suffix prevents M confusion.

@@ -1,5 +1,5 @@
-import { useMemo, useState } from "react";
-import { Copy, FilePlus2, FolderOpen, Pencil, Search, Trash2, X } from "lucide-react";
+import { useMemo, useRef, useState } from "react";
+import { Link, Copy, FilePlus2, FolderOpen, Pencil, Search, Trash2, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
@@ -9,8 +9,49 @@ import type { Brand, Company } from "@/lib/submittal-lite/library";
 type Props = {
   records: SubmittalRecord[]; companies: Company[]; brands: Brand[];
   onNew: () => void; onEdit: (r: SubmittalRecord) => void; onDuplicate: (r: SubmittalRecord) => void; onDelete: (id: string) => void;
+  onShare: (record: SubmittalRecord) => Promise<{ url: string; expiresAt: string }>;
   onStatus: (id: string, s: Status, note: string) => void;
 };
+
+function ShareRecordAction({ record, onShare }: Pick<Props, "onShare"> & { record: SubmittalRecord }) {
+  const [result, setResult] = useState<{ url: string; expiresAt: string }>();
+  const [busy, setBusy] = useState(false);
+  const [message, setMessage] = useState("");
+  const [failed, setFailed] = useState(false);
+  const lock = useRef(false);
+  const input = useRef<HTMLInputElement>(null);
+  const copy = async () => {
+    if (lock.current) return;
+    if (result && Date.parse(result.expiresAt) > Date.now() + 60_000) {
+      input.current?.select();
+      try {
+        if (!document.execCommand("copy")) await navigator.clipboard.writeText(result.url);
+        setMessage("Link copied"); setFailed(false);
+      } catch { setMessage("Select the link below to copy it."); }
+      return;
+    }
+    lock.current = true; setBusy(true); setFailed(false); setMessage("");
+    const task = onShare(record);
+    // Start clipboard access during the tap, before PDF building/uploading.
+    let copied: Promise<boolean> = Promise.resolve(false);
+    try {
+      if (typeof ClipboardItem !== "undefined" && navigator.clipboard?.write) {
+        copied = navigator.clipboard.write([new ClipboardItem({ "text/plain": task.then((value) => new Blob([value.url], { type: "text/plain" })) })]).then(() => true, () => false);
+      }
+    } catch { /* A second tap can copy the ready URL. */ }
+    try {
+      const value = await task; setResult(value);
+      setMessage(await Promise.race([copied, new Promise<boolean>((resolve) => setTimeout(() => resolve(false), 4000))]) ? "Link copied" : "Link ready. Tap Copy share link to copy it.");
+    } catch (error) { setFailed(true); setMessage(error instanceof Error ? error.message : "Could not create the link. Please retry."); }
+    finally { lock.current = false; setBusy(false); }
+  };
+  return <div className="mt-4 rounded-2xl border bg-primary/5 p-3">
+    <Button variant="outline" className="w-full" disabled={busy} onClick={() => void copy()}><Link />{busy ? "Preparing link…" : "Copy share link"}</Button>
+    <p className="mt-2 text-center text-xs text-muted-foreground">{result ? `Valid until ${new Date(result.expiresAt).toLocaleDateString()}` : "Branded link · valid for 7 days"}</p>
+    {message && <p role="status" className={`mt-2 text-sm ${failed ? "text-destructive" : "text-muted-foreground"}`}>{message}</p>}
+    {result && <Input ref={input} readOnly value={result.url} aria-label="Submittal share link" onFocus={(event) => event.target.select()} className="mt-2 text-xs" />}
+  </div>;
+}
 
 const groups: { label: string; match: (s: Status) => boolean }[] = [
   { label: "All", match: () => true },
@@ -20,7 +61,7 @@ const groups: { label: string; match: (s: Status) => boolean }[] = [
   { label: "Action needed", match: (s) => s === "Revise & resubmit" || s === "Rejected" },
 ];
 
-export function SubmittalsHome({ records, companies, brands, onNew, onEdit, onDuplicate, onDelete, onStatus }: Props) {
+export function SubmittalsHome({ records, companies, brands, onNew, onEdit, onDuplicate, onDelete, onStatus, onShare }: Props) {
   const [q, setQ] = useState("");
   const [group, setGroup] = useState("All");
   const [kind, setKind] = useState<"All" | Kind>("All");
@@ -109,6 +150,8 @@ export function SubmittalsHome({ records, companies, brands, onNew, onEdit, onDu
               <Button variant="outline" className="text-destructive" onClick={() => setPendingDeleteId(open.id)}><Trash2 /> Delete</Button>
             </div>
 
+            <ShareRecordAction key={JSON.stringify(open)} record={open} onShare={onShare} />
+
             {pendingDeleteId === open.id && (
               <div className="mt-3 rounded-2xl border border-destructive/30 bg-destructive/5 p-3">
                 <p className="text-sm font-bold text-destructive">Delete {open.ref}{open.rev ? ` Rev ${open.rev}` : ""}?</p>
@@ -152,3 +195,4 @@ export function SubmittalsHome({ records, companies, brands, onNew, onEdit, onDu
     </main>
   );
 }
+

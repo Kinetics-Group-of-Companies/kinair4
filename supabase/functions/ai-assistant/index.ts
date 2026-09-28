@@ -12,6 +12,11 @@ import { createGoogleGenerativeAI } from "npm:@ai-sdk/google@2.0.96";
 import { z } from "npm:zod@3";
 import { createClient } from "npm:@supabase/supabase-js@2";
 
+const sourceProposedSchema = z.object({
+  model: z.string().nullish(), airflow: z.string().nullish(), esp: z.string().nullish(),
+  fan_rpm: z.string().nullish(), motor_rpm: z.string().nullish(), power: z.string().nullish(),
+  electrical: z.string().nullish(), length: z.string().nullish(), installation_height: z.string().nullish(), velocity: z.string().nullish(),
+}).nullish().describe("Copy printed PROPOSED/offered values and units verbatim. Never fill blanks from specified values or selection calculations. Motor RPM and fan RPM are distinct. Null if absent.");
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
@@ -186,6 +191,7 @@ Deno.serve(async (req) => {
         .order("model_id", { ascending: false }),
       req.json() as Promise<{
         messages: UIMessage[];
+        forceScheduleTool?: boolean;
         aiMode?:
           | "auto"
           | "standard"
@@ -224,7 +230,7 @@ Deno.serve(async (req) => {
     }
 
     const { data: registeredModels } = registryResult;
-    const { messages, aiMode = "auto" } = requestBody;
+    const { messages, aiMode = "auto", forceScheduleTool = false } = requestBody;
 
     const listSeries = tool({
       description:
@@ -444,7 +450,9 @@ Deno.serve(async (req) => {
           .describe(
             "Casing material the user asked for, e.g. 'plastic' or 'metal'. Null if not mentioned. When the user says plastic, only plastic-cased series may be offered - never mix in metal models, and vice versa.",
           ),
-        motor_poles: z.number().nullable().describe("Motor poles if the user specified, else null"),
+        motor_poles: z.number().nullable().describe("Motor poles only if explicitly specified, never infer from RPM"),
+        motor_rpm: z.number().nullish().describe("Specified motor speed, never fan speed"),
+        fan_rpm: z.number().nullish().describe("Specified fan/impeller speed, never motor speed"),
         output: z
           .enum(["full", "drawing", "noise"])
           .describe(
@@ -512,7 +520,7 @@ Deno.serve(async (req) => {
     // image / spreadsheet). The app runs the real selection engine on every line.
     const prepareScheduleSelection = tool({
       description:
-        "Select MULTIPLE items in one go from a schedule. Use this whenever the user gives more than one duty / door in a single message, or attaches a fan or air curtain schedule as a PDF, image or spreadsheet. Read every row of the schedule, convert it into one item per row (keep the user's units and the row tag/reference) and pass them all here in one call. If the source already contains an air-curtain selected model/arrangement, copy it verbatim into existing_selection. The app runs the official KINAIR engine on every row. An FM35-to-FM45 promotion happens only after optimum selection and only for selected FM35 units in N-Centrifugal or XD-Centrifugal; N-Cross Flow must remain unchanged. Never invent or drop a row.",
+        "Select MULTIPLE technical items in one go from a schedule, quotation, technical offer or equipment list. Use this whenever the source contains fan or air-curtain line items. Read every technical row, keep the user's units/tag/reference and pass all rows here in one call. Copy any printed model into existing_selection ONLY as the source's proposed model. Preserve supplied models and proposed parameters; report discrepancies separately without replacing source values. Ignore prices, unit rates, amounts, discounts, VAT/tax and all commercial/payment/delivery/warranty terms. Never invent or drop a technical row.",
       inputSchema: z.object({
         title: z.string().nullable().describe("Short name for the schedule, e.g. 'Car park fan schedule'"),
         items: z
@@ -520,6 +528,10 @@ Deno.serve(async (req) => {
             z.discriminatedUnion("product", [
               z.object({
                 product: z.literal("fan"),
+                proposed: sourceProposedSchema,
+                source_has_proposed: z.boolean().nullish(),
+                motor_rpm: z.number().nullish().describe("Specified motor RPM only, never fan RPM or synchronous speed"),
+                fan_rpm: z.number().nullish().describe("Specified fan/impeller RPM only; never copy motor RPM"),
                 tag: z.string().nullish().describe("Row tag/reference, e.g. EF-01"),
                 quantity: z.number().nullish().describe("Quantity, default 1"),
                 airflow: z.number().nullable().describe("Fan airflow exactly as given; null only if unreadable"),
@@ -534,13 +546,22 @@ Deno.serve(async (req) => {
                 material: z.string().nullish(),
                 motor_poles: z.number().nullish(),
                 max_noise_db: z.number().nullish(),
+                area_served: z.string().nullish().describe("Area served / application from this exact row"),
+                location: z.string().nullish().describe("Location from this exact row"),
+                building: z.string().nullish().describe("Building/zone from this exact row"),
+                specified_electrical: z.string().nullish().describe("Specified voltage/phase/frequency exactly as written"),
+                specified_power_w: z.number().nullish().describe("Specified input/motor power in watts when readable"),
+                accessories: z.string().nullish().describe("Technical accessories only; never commercial terms"),
+                remarks: z.string().nullish().describe("Preserve the technical remarks for this row verbatim. Remarks such as roof mounted, wall mounted, axial, plastic, metal, low noise are engineering constraints."),
                 existing_selection: z
                   .string()
                   .nullish()
-                  .describe("Exact fan model already printed in the uploaded schedule, e.g. KVF-100P or KVF-100MR. Copy it verbatim; KVF-MR means the roof-application variant of the same KVF-M size/performance."),
+                  .describe("Fan model printed in the source, e.g. KVF-100P. Copy it verbatim as an unverified proposed model. Do NOT assume it is correct; the KINAIR selector will independently validate/correct it from duty + remarks/type/material."),
               }),
               z.object({
                 product: z.literal("air_curtain"),
+                proposed: sourceProposedSchema,
+                source_has_proposed: z.boolean().nullish(),
                 tag: z.string().nullish().describe("Row tag/reference, e.g. AC-01"),
                 quantity: z.number().nullish().describe("Quantity, default 1"),
                 door_width: z.number().nullable().describe("Door/opening width exactly as given; null only if unreadable"),
@@ -557,12 +578,17 @@ Deno.serve(async (req) => {
                 existing_selection: z
                   .string()
                   .nullish()
-                  .describe("Exact air-curtain model or arrangement already printed in the uploaded schedule, if present. Copy it verbatim; never infer or replace it."),
+                  .describe("Exact air-curtain model or arrangement already printed in the uploaded schedule. If the same tagged door continues on blank rows with more offered units, combine them into one arrangement such as '2 x FM-1215N-2(Y)'. Copy it verbatim; never infer or replace it."),
+                accessories: z.string().nullish().describe("Technical accessories only; never commercial terms"),
+                remarks: z
+                  .string()
+                  .nullish()
+                  .describe("Remarks for this exact door, preserved verbatim. Treat Cross Flow/Centrifugal, wall/surface, recessed/concealed and motor-type remarks as engineering constraints."),
               }),
             ]),
           )
           .max(60)
-          .describe("One entry per schedule row, in schedule order"),
+          .describe("One entry per logical equipment/door row, in schedule order. Blank continuation rows that add units to the same tagged air-curtain door belong to that same item, not a new door."),
         optimize_for: z
           .enum(["balanced", "low_noise", "high_efficiency", "low_power", "smallest_size"])
           .describe("What to optimise every row for; 'balanced' by default"),
@@ -891,11 +917,13 @@ Deno.serve(async (req) => {
     // "standard" is retained for older website/app clients. Classification
     // uses only the latest user message, so a Claude answer can never make
     // Anthropic sticky for the next normal selection.
-    const automaticMode = needsClaude
-      ? "anthropic_sonnet"
-      : needsTools
-        ? "openai_luna"
-        : "gemini";
+    const automaticMode = forceScheduleTool
+      ? "openai_luna"
+      : needsClaude
+        ? "anthropic_sonnet"
+        : needsTools
+          ? "openai_luna"
+          : "gemini";
     const routedMode =
       aiMode === "auto" || aiMode === "standard"
         ? automaticMode
@@ -1042,7 +1070,7 @@ Deno.serve(async (req) => {
         "- Air curtain datasheet in chat: the moment the user asks for an air curtain for a door/entrance (e.g. '3 m high, 2 m wide shop entrance'), call prepare_air_curtain_datasheet with the door size and units they gave. The app runs the real air curtain selection engine and downloads the datasheet PDF in the chat — the user does NOT need to open the Air Curtain Selector. If only the height is given, still call it and say what width you assumed.",
         "- CUSTOMER-REQUESTED FM35 -> FM45 PROMOTION: always run the normal optimum selection first. Only if that optimum result contains an FM35 model in N-Centrifugal Flow or XD-Centrifugal Flow, and the user explicitly asks to promote/change 3-3.5 m to 4-4.5 m (or FM35 to FM45), replace it after selection with the exact same-series, same-width FM45 model: 3509->4509, 3510->4510, 3512->4512, 3515->4515, 3518->4518, 3520->4520. Preserve unit quantity and arrangement. N-Cross Flow (FM-12xxN) is NEVER part of this promotion and must remain unchanged. Never set every schedule row to N-Centrifugal merely because the user requested FM35 promotion.",
         "- GENERIC SEQUENTIAL STOCK SUBSTITUTION: after optimum selection and after any FM35->FM45 promotion, replace only models the user explicitly declares unavailable/out of stock. Choose the next longer available catalogue model in the same air-curtain series, motor type and mounting-height class; preserve mounting and quantity, then recalculate from the replacement row. Examples: FM-4510XD -> FM-4512XD and FM-4518XD -> FM-4520XD. If the immediate next size is also declared unavailable, continue to the next available longer size. Never alter unaffected rows, never move to a different series or height class, and never use a shorter model. If no longer valid model exists or the result exceeds the permitted match limit, state that no stock substitution is available.",
-        "- For schedule revisions, copy each existing selected model/arrangement into existing_selection exactly when the source contains one. That existing model identifies its series and mounting; do not reinterpret an N-Cross Flow row as N-Centrifugal or XD.",
+        "- For schedules/quotations, copy each printed model/arrangement into existing_selection exactly, and preserve all printed proposed values in the proposed object with their units. Never replace source proposals with newly selected values. Motor RPM and fan RPM are separate; never calculate fan RPM from motor poles or frequency.",
         "- Air curtain mounting is a HARD constraint and always overrides optimisation, motor type, brand and series. 'Ceiling mounted', 'ceiling recessed', 'recess/recessed mounted', 'concealed' and 'flush mounted' must pass mounting='recessed' and may return ONLY recessed-category series/models. 'Wall mounted', 'surface mounted' and 'exposed' must pass mounting='surface' and may return ONLY surface-category series/models. Never silently substitute the other mounting category. If an explicitly named series conflicts with mounting, keep the mounting category and report that the named series is incompatible.",
         "- Catalogues and IOM manuals: when the user asks for a catalogue, brochure, IOM, installation or maintenance manual, call get_documents and reply with the download links as markdown links. If nothing is uploaded for that series, say so plainly.",
         "- Technical specifications: when the user asks about construction, certifications (AMCA/CE/ISO/UL/ATEX), fire rating, available sizes, diameters or motor poles, call get_specifications and answer from it. Never guess a certification.",
@@ -1052,15 +1080,16 @@ Deno.serve(async (req) => {
         "- Only point the user to the Selector pages when they ask for something the chat cannot do (curve tweaking, speed control, detailed coverage tuning).",
         "",
         "Schedules and attachments:",
-        "- The user can attach a fan or air curtain schedule as a PDF, a photo/screenshot or a spreadsheet (spreadsheets arrive as a text table in the message). Read every row carefully: tag/reference, quantity, airflow, static pressure, door width/height, series, noise limit.",
+        "- The user can attach a fan/air-curtain schedule OR a quotation/technical offer as PDF, photo/screenshot or spreadsheet. Read every technical equipment row carefully: tag/reference, quantity, airflow, static pressure, door width/height, type/material/mounting, series, noise limit, accessories and remarks. In quotations ignore every price/currency/amount/discount/VAT/payment/delivery/warranty/commercial term.",
         "- Supported multi-selection inputs are: multiple duties typed in chat, PDF schedules, Excel XLS/XLSX files, CSV files, images, phone photos and screenshots. A single upload may contain fans, air curtains or both mixed together.",
         "- Classify each schedule row independently as fan or air_curtain. Never apply one row's type, mounting, material, units or optimisation to another row.",
-        "- For every row preserve the tag/reference, quantity and original units. If a fan row already prints a selected model such as KVF-100P, KVF-125M, KVF-100MR, KIN-E or KTAF, copy it verbatim into existing_selection. For fan rows capture airflow, static pressure, series/type/material/poles/noise. For air-curtain rows capture door width, door height, mounting, motor type, series/brand, existing selected model/arrangement and airflow/velocity requirement.",
+        "- For every technical row preserve tag/reference, quantity, original units, area/location/building, electrical/power, accessories and Remarks when present. Copy a printed model into existing_selection verbatim. Populate proposed with source offered parameters and source_has_proposed=true when present. Capture fan airflow/static pressure/type/material/poles/noise and air-curtain opening/mounting/motor/series/airflow requirements. Only inquiries without supplied selections should receive new proposed values. Leave unprovided source proposed cells null.",
         "- Use prepare_schedule_selection exactly once for the whole mixed schedule. Include all readable rows in their original order, up to the tool limit. Never create separate tool calls merely because the schedule mixes fans and air curtains.",
         "- If a row is outside the KINAIR range, keep that row in the output and mark it No suitable KINAIR selection; continue selecting all other valid rows.",
 
         "- Whenever there is MORE THAN ONE duty (attached schedule or several duties typed in one message), call prepare_schedule_selection ONCE with every row as an item — never call prepare_datasheet row by row.",
-        "- Keep the schedule's own row order, tags and units. Never invent a row, never skip a row. If a row is unreadable or missing data, still include it with what you have and say in one line which rows need confirming.",
+        "- Keep the schedule's own row order, tags and units. For air curtains, read door width and door height ONLY from the specified opening columns; do not confuse offered air-curtain length or installation-height range with the door dimensions. Preserve the Remarks column and treat it as a hard constraint. Blank continuation rows under the same door tag that add another offered unit/model are part of the same door; combine them into one arrangement such as 2 x FM-1215N-2(Y). Never invent or skip a logical door.",
+        "- Air-curtain remarks are hard rules: Cross Flow => N-Cross Flow; Wall mounted/Surface => surface; Recessed/Concealed => recessed; Centrifugal Flow + recessed => XD-Centrifugal Flow.",
         "- A single duty stays with prepare_datasheet / prepare_air_curtain_datasheet as before.",
         "- Schedule rows without numbers: if a row gives a room size, area or duct run instead of airflow/pressure, call estimate_duty for it first, then include the worked-out numbers in the schedule item.",
         "",
@@ -1091,6 +1120,7 @@ Deno.serve(async (req) => {
         prepare_schedule_selection: prepareScheduleSelection,
         estimate_duty: estimateDuty,
       },
+      toolChoice: forceScheduleTool ? { type: "tool", toolName: "prepare_schedule_selection" } : "auto",
       stopWhen: stepCountIs(6),
     });
 
@@ -1119,3 +1149,4 @@ Deno.serve(async (req) => {
     );
   }
 });
+

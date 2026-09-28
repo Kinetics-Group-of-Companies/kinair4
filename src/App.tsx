@@ -1,3 +1,4 @@
+import SubmittalSharePage from "./pages/SubmittalSharePage";
 import { Toaster } from "@/components/ui/toaster";
 import { Toaster as Sonner } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
@@ -67,6 +68,7 @@ const App = () => {
             <FaviconLoader />
             <Router>
               <Routes>
+                <Route path="/kinair-submittal" element={<><Seo path="/kinair-submittal" title="Your Submittal | KINAIR" description="Download your KINAIR submittal." noindex /><SubmittalSharePage /></>} />
                 <Route path="/" element={<>
                   <Seo path="/"
                     title="KINAIR — Fan & Air Curtain Selection Tool"
@@ -168,3 +170,4 @@ const App = () => {
 };
 
 export default App;
+

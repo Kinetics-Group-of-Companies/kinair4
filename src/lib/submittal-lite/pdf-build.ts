@@ -1,3 +1,4 @@
+import { coverFieldKey, normalizeCoverFields } from "./cover-fields";
 import type { PDFDocument as PDFDoc, PDFFont, PDFImage, PDFPage } from "pdf-lib";
 
 export type FileData = { bytes: ArrayBuffer; type: string; name: string };
@@ -51,7 +52,7 @@ export const isPdf = (f: FileData) => f.type === "application/pdf" || f.name.toL
 export const isImg = (f: FileData) => /image\/(png|jpe?g)/.test(f.type) || /\.(png|jpe?g)$/i.test(f.name);
 
 export async function buildSubmittalPdf(input: BuildInput): Promise<{ bytes: Uint8Array; labels: PageLabel[]; skipped: string[] }> {
-  const { PDFDocument, StandardFonts, rgb, degrees } = await import("pdf-lib");
+  const { PDFDocument, StandardFonts, rgb } = await import("pdf-lib");
   const doc: PDFDoc = await PDFDocument.create();
   const font = await doc.embedFont(StandardFonts.Helvetica);
   const bold = await doc.embedFont(StandardFonts.HelveticaBold);
@@ -126,12 +127,32 @@ export async function buildSubmittalPdf(input: BuildInput): Promise<{ bytes: Uin
     page.drawImage(logo, { x: x + (boxW - width) / 2, y: y + (boxH - height) / 2, width, height });
   };
 
-  const drawStamp = (page: PDFPage) => {
+  const drawStamp = (page: PDFPage, compactSchedule = false) => {
     if (!stamp) return;
     const { width, height } = page.getSize();
-    const s = Math.min(width, height) * 0.17;
+    const s = compactSchedule ? 68 : Math.min(width, height) * 0.17;
     const r = Math.min(s / stamp.width, s / stamp.height);
-    page.drawImage(stamp, { x: width - stamp.width * r - 36, y: height * 0.13 + 6, width: stamp.width * r, height: stamp.height * r, opacity: 0.92 });
+    page.drawImage(stamp, { x: width - stamp.width * r - (compactSchedule ? 23 : 36), y: compactSchedule ? 23 : height * 0.13 + 6, width: stamp.width * r, height: stamp.height * r, opacity: 0.92 });
+  };
+
+  const attachmentFooters = new WeakMap<PDFPage, { x: number; y: number; width: number }>();
+  const addAttachmentFooter = (page: PDFPage, withStamp: boolean) => {
+    // Never guess that a certificate's blank-looking area is safe to stamp.
+    // Extend the visible page outside its original crop; content/annotations
+    // and rotation retain their original coordinates.
+    const box = page.getCropBox();
+    const band = withStamp && stamp ? 90 : 40;
+    const footerY = box.y - band;
+    page.setMediaBox(box.x, footerY, box.width, box.height + band);
+    page.setCropBox(box.x, footerY, box.width, box.height + band);
+    page.drawRectangle({ x: box.x, y: footerY, width: box.width, height: band, color: rgb(1, 1, 1) });
+    page.drawLine({ start: { x: box.x, y: box.y }, end: { x: box.x + box.width, y: box.y }, color: line, thickness: 0.5 });
+    attachmentFooters.set(page, { x: box.x, y: footerY, width: box.width });
+    if (withStamp && stamp) {
+      const ratio = Math.min(64 / stamp.width, 64 / stamp.height);
+      page.drawImage(stamp, { x: box.x + box.width - 24 - stamp.width * ratio, y: footerY + 14,
+        width: stamp.width * ratio, height: stamp.height * ratio, opacity: 0.92 });
+    }
   };
 
   // Load attachments first so the index can show page numbers.
@@ -183,25 +204,53 @@ export async function buildSubmittalPdf(input: BuildInput): Promise<{ bytes: Uin
     if (!input.useDefaultCover) drawLogos(cover);
     if (!input.useDefaultCover) {
       const heading = clean((input.coverLabel ?? input.kindLabel).toUpperCase());
-      const headingSize = heading.length > 34 ? 17 : 21;
+      const headingSize = Math.min(heading.length > 34 ? 17 : 21, (coverW - 2 * coverX) / Math.max(1, bold.widthOfTextAtSize(heading, 1)));
       cover.drawText(heading, { x: (coverW - bold.widthOfTextAtSize(heading, headingSize)) / 2, y: y - 24, size: headingSize, font: bold, color: coverBg ? ink : blue });
       y -= 54;
-      if (input.title) {
-        for (const l of wrap(input.title, bold, 14, coverW - 2 * coverX)) { cover.drawText(l, { x: (coverW - bold.widthOfTextAtSize(l, 14)) / 2, y: y - 14, size: 14, font: bold, color: ink }); y -= 19; }
+      const coverFields = normalizeCoverFields(input.fields);
+      const hasProject = coverFields.some(field => coverFieldKey(field.label) === "projectname");
+      if (input.title && !hasProject) {
+        for (const l of wrap(input.title, bold, 14, coverW - 2 * coverX)) { cover.drawText(l, { x: coverX, y: y - 14, size: 14, font: bold, color: ink }); y -= 19; }
       }
-      y -= 28;
-      const labelW = Math.min(150, coverW * 0.28);
-      const coverFields = input.fields;
-      for (const f of coverFields) {
-        const vLines = wrap(f.value, bold, 10.5, coverW - 2 * coverX - labelW - 12);
-        const lLines = wrap(f.label, bold, 10, labelW - 8);
-        const rows = Math.max(vLines.length, lLines.length);
-        const rowH = rows * 14 + 12;
-        if (y - rowH < coverBottom + 20) break;
-        lLines.forEach((l, i) => cover.drawText(`${l}${l.endsWith(":") ? "" : ":"}`, { x: coverX, y: y - 15 - i * 14, size: 10, font: bold, color: coverBg ? ink : blue }));
-        vLines.forEach((l, i) => cover.drawText(l, { x: coverX + labelW, y: y - 15 - i * 14, size: 10.5, font: bold, color: ink }));
-        y -= rowH;
-      }
+      y -= 18;
+      const supplierKeys = new Set(["suppliername", "brandname", "product", "producttype", "equipment", "model", "series"]);
+      const projectFields = coverFields.filter(field => !supplierKeys.has(coverFieldKey(field.label)));
+      const supplyFields = coverFields.filter(field => supplierKeys.has(coverFieldKey(field.label)));
+      const tablePage = cover;
+      const tableW = coverW - 2 * coverX;
+      const labelW = tableW * 0.32;
+      // Measure both tables together before drawing so the cover stays one page.
+      const availableHeight = y - (stamp && input.stampCover !== false ? coverBottom + 115 : coverBottom);
+      let scale = 1;
+      const heightAt = (factor: number) => [projectFields, supplyFields].reduce((total, fields) => {
+        if (!fields.length) return total;
+        return total + 47 * factor + fields.reduce((height, field) => height +
+          Math.max(wrap(field.label.replace(/:$/, ""), bold, 9.5 * factor, labelW - 24 * factor).length,
+            wrap(field.value, font, 10 * factor, tableW - labelW - 24 * factor).length) * 14 * factor + 20 * factor, 0);
+      }, 0);
+      while (heightAt(scale) > availableHeight && scale > 0.1) scale *= 0.95;
+      const table = async (heading: string, fields: typeof coverFields) => {
+        if (!fields.length) return;
+        const header = () => {
+          tablePage.drawRectangle({ x: coverX, y: y - 27 * scale, width: tableW, height: 27 * scale, color: blue });
+          tablePage.drawText(heading, { x: coverX + 12 * scale, y: y - 18 * scale, font: bold, size: 10 * scale, color: rgb(1, 1, 1) });
+          y -= 27 * scale;
+        };
+        header();
+        for (const [index, field] of fields.entries()) {
+          const names = wrap(field.label.replace(/:$/, ""), bold, 9.5 * scale, labelW - 24 * scale);
+          const values = wrap(field.value, font, 10 * scale, tableW - labelW - 24 * scale);
+          const rowH = Math.max(names.length, values.length) * 14 * scale + 20 * scale;
+          tablePage.drawRectangle({ x: coverX, y: y - rowH, width: tableW, height: rowH, color: index % 2 ? rgb(1, 1, 1) : softBlue, borderColor: line, borderWidth: 0.5 });
+          tablePage.drawLine({ start: { x: coverX + labelW, y }, end: { x: coverX + labelW, y: y - rowH }, color: line, thickness: 0.5 });
+          names.forEach((text, i) => tablePage.drawText(text, { x: coverX + 12 * scale, y: y - 21 * scale - i * 14 * scale, size: 9.5 * scale, font: bold, color: blue }));
+          values.forEach((text, i) => tablePage.drawText(text, { x: coverX + labelW + 12 * scale, y: y - 21 * scale - i * 14 * scale, size: 10 * scale, font, color: ink }));
+          y -= rowH;
+        }
+        y -= 20 * scale;
+      };
+      await table("PROJECT DETAILS", projectFields);
+      await table("SUPPLIER & PRODUCT DETAILS", supplyFields);
       if (input.stampCover !== false) drawStamp(cover);
     }
   }
@@ -297,19 +346,32 @@ export async function buildSubmittalPdf(input: BuildInput): Promise<{ bytes: Uin
     drawLogos(page);
     if (s.stamp !== "none") drawStamp(page);
 
+    const isCatalogueSection = /\bcatalog(?:ue|og)s?\b/i.test(s.title);
+    const hasDedicatedXdCatalogue = isCatalogueSection && s.parts.some((part) =>
+      /\bXD[\s_-]*Centrifugal\b/i.test(part.name));
     for (const part of s.parts) {
       if ("pdf" in part) {
-        const copied = await doc.copyPages(part.pdf, part.pdf.getPageIndices());
+        let pageIndices = part.pdf.getPageIndices();
+        // The saved N-Centrifugal catalogue is a legacy 2-page combined file
+        // whose second page overlaps the separately saved XD catalogue. When
+        // both dedicated catalogues are selected, keep only the N-Centrifugal
+        // page here so XD appears exactly once.
+        if (hasDedicatedXdCatalogue
+          && /\bN[\s_-]*Centrifugal\b/i.test(part.name)
+          && !/\bXD[\s_-]*Centrifugal\b/i.test(part.name)
+          && pageIndices.length > 1) {
+          pageIndices = [pageIndices[0]!];
+        }
+        const copied = await doc.copyPages(part.pdf, pageIndices);
         copied.forEach((p, k) => {
-          if (/\bmaterial\s+schedules?\b/i.test(s.title)) {
-            const angle = ((p.getRotation().angle % 360) + 360) % 360;
-            const { width, height } = p.getSize();
-            const effectiveWidth = angle === 90 || angle === 270 ? height : width;
-            const effectiveHeight = angle === 90 || angle === 270 ? width : height;
-            if (effectiveWidth < effectiveHeight) p.setRotation(degrees((angle + 90) % 360));
-          }
+          // Preserve the source page rotation exactly. Material schedules must
+          // never be forced to landscape just because they are schedule pages.
+          // If a source page is actually sideways, the manual/core builder
+          // rotation control remains the final correction and is applied at download.
           doc.addPage(p);
-          if (s.stamp === "all") drawStamp(p);
+          if (/^KINAIR-Material-Schedule(?:\.|$)/i.test(part.name)) {
+            if (s.stamp === "all") drawStamp(p, true);
+          } else addAttachmentFooter(p, s.stamp === "all");
           labels.push({ label: `${i + 1}.${k + 1} ${part.name}`, kind: "doc" });
         });
       } else {
@@ -318,7 +380,7 @@ export async function buildSubmittalPdf(input: BuildInput): Promise<{ bytes: Uin
         const r = Math.min((width - 60) / part.img.width, (height - 60) / part.img.height);
         const w = part.img.width * r, h = part.img.height * r;
         p.drawImage(part.img, { x: (width - w) / 2, y: (height - h) / 2, width: w, height: h });
-        if (s.stamp === "all") drawStamp(p);
+        addAttachmentFooter(p, s.stamp === "all");
         labels.push({ label: `${i + 1} ${part.name}`, kind: "doc" });
       }
     }
@@ -328,13 +390,17 @@ export async function buildSubmittalPdf(input: BuildInput): Promise<{ bytes: Uin
   const totalPages = doc.getPageCount();
   doc.getPages().forEach((p, i) => {
     if (i === 0) return;
-    const { width } = p.getSize();
+    const footer = attachmentFooters.get(p);
+    const width = footer?.width ?? p.getSize().width;
+    const offsetX = footer?.x ?? 0, offsetY = footer?.y ?? 0;
     const text = `PAGE ${i + 1} / ${totalPages}`;
     const textW = bold.widthOfTextAtSize(text, 10);
-    const x = (width - textW) / 2;
-    p.drawRectangle({ x: x - 12, y: 10, width: textW + 24, height: 24, color: rgb(1, 1, 1), opacity: 0.94, borderColor: line, borderWidth: 0.5 });
-    p.drawText(text, { x, y: 17, size: 10, font: bold, color: blue });
+    const x = offsetX + (width - textW) / 2;
+    p.drawRectangle({ x: x - 12, y: offsetY + 10, width: textW + 24, height: 24, color: rgb(1, 1, 1), opacity: 0.94, borderColor: line, borderWidth: 0.5 });
+    p.drawText(text, { x, y: offsetY + 17, size: 10, font: bold, color: blue });
   });
 
   return { bytes: await doc.save(), labels, skipped };
 }
+
+

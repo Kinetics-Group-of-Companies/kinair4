@@ -67,11 +67,8 @@ export async function idbSet(key: string, value: ArrayBuffer, contentType?: stri
     upsert: true,
   });
   if (error) throw error;
-  try {
-    await tx<void>("readwrite", (s) => s.put(copy, key));
-  } catch {
-    // Supabase Storage is the source of truth; the browser cache is optional.
-  }
+  // Storage has completed. A blocked IndexedDB cache must never block sharing.
+  void tx<void>("readwrite", (s) => s.put(copy, key)).catch(() => {});
 }
 
 // Large files go directly to Storage in 6 MiB resumable chunks. Avoid reading or
@@ -122,3 +119,4 @@ export async function idbDel(key: string): Promise<void> {
     // The remote object was already removed.
   }
 }
+

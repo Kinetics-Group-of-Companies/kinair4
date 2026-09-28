@@ -125,7 +125,7 @@ export async function generateAirCurtainDatasheet(input: AirCurtainDatasheetInpu
 
 
   const doc = input.existingDoc ?? new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
-  if (input.existingDoc) doc.addPage();
+  if (input.existingDoc) doc.addPage('a4', 'portrait');
   const pageW = doc.internal.pageSize.getWidth();
   const pageH = doc.internal.pageSize.getHeight();
   const margin = 10;
