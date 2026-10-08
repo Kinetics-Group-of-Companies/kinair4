@@ -145,25 +145,41 @@ async function callSelectionAssistantScheduleOnce(
 }
 
 
+// Provider availability is not extraction success. Escalate empty/failed reads,
+// but keep content-classification probes cheap and stop on authentication failures.
+async function recoverScheduleRead(
+  aiMode: string,
+  allowNonSchedule: boolean,
+  read: (mode: string) => Promise<SelectionAssistantScheduleResult | null>,
+): Promise<SelectionAssistantScheduleResult | null> {
+  const initial = ["auto", "local", "standard"].includes(aiMode) ? "gemini" : aiMode;
+  const tiers = ["gemini", "openai_luna", "openai_terra", "openai_sol"];
+  const at = tiers.indexOf(initial);
+  const modes = allowNonSchedule ? [initial] : at >= 0 ? tiers.slice(at) : [initial, ...tiers];
+  const failures: string[] = [];
+  for (const mode of modes) {
+    try {
+      const result = await read(mode);
+      if (result?.items.length) return result;
+      failures.push(`${mode}: no readable equipment rows`);
+    } catch (error) {
+      const reason = error instanceof Error ? error.message : "read failed";
+      if (/sign in|HTTP (401|403)\b/i.test(reason)) throw error;
+      failures.push(`${mode}: ${reason}`);
+    }
+  }
+  if (allowNonSchedule) return null;
+  throw new Error(`Schedule reading failed after AI recovery. ${failures.join("; ")}`);
+}
+
 async function callSelectionAssistantSchedule(
   schedule: string,
   userRequest: string,
   aiMode: string,
   allowNonSchedule: boolean,
 ): Promise<SelectionAssistantScheduleResult | null> {
-  // The Edge Function already performs automatic provider routing/fallback.
-  // Do one request only; repeating the same schedule across providers made
-  // mobile Submittal AI unnecessarily slow and sometimes produced conflicting rows.
-  const mode = aiMode === "local" || aiMode === "standard" ? "auto" : aiMode;
-  try {
-    const result = await callSelectionAssistantScheduleOnce(schedule, userRequest, mode, allowNonSchedule);
-    if (result) return result;
-    if (allowNonSchedule) return null;
-  } catch (error) {
-    if (allowNonSchedule) return null;
-    if (error instanceof Error) throw error;
-  }
-  throw new Error("Selection Assistant could not read the schedule rows.");
+  return recoverScheduleRead(aiMode, allowNonSchedule,
+    mode => callSelectionAssistantScheduleOnce(schedule, userRequest, mode, allowNonSchedule));
 }
 
 async function callSelectionAssistantAttachmentOnce(
@@ -221,16 +237,8 @@ async function callSelectionAssistantAttachment(
   allowNonSchedule: boolean,
   forceVision = false,
 ): Promise<SelectionAssistantScheduleResult | null> {
-  const mode = aiMode === "local" || aiMode === "standard" ? "auto" : aiMode;
-  try {
-    const result = await callSelectionAssistantAttachmentOnce(file, userRequest, mode, allowNonSchedule, forceVision);
-    if (result) return result;
-    if (allowNonSchedule) return null;
-  } catch (error) {
-    if (allowNonSchedule) return null;
-    if (error instanceof Error) throw error;
-  }
-  throw new Error("Selection Assistant could not read the attached schedule.");
+  return recoverScheduleRead(aiMode, allowNonSchedule,
+    mode => callSelectionAssistantAttachmentOnce(file, userRequest, mode, allowNonSchedule, forceVision));
 }
 
 export async function probeSelectionAssistantAttachment(

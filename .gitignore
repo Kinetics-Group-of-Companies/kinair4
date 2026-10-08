@@ -25,3 +25,8 @@ dist-ssr
 
 electron-release
 android/app/build/
+
+# Supabase migration backups and private env files
+supabase-backup/
+scripts/supabase-migration/.env
+scripts/supabase-migration/*.private.env

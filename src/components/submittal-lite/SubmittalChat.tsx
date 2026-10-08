@@ -1,3 +1,5 @@
+import { ProjectDetailsReuse } from "@/components/submittal-lite/ProjectDetailsReuse";
+import { parseIndexHeadings } from "@/lib/submittal-lite/setup-parser";
 import { indexHeadingIntent } from "@/lib/submittal-lite/library";
 import { readWordInquiry } from "@/lib/submittal-lite/word-inquiry";
 import { normalizeCoverFields } from "@/lib/submittal-lite/cover-fields";
@@ -8,7 +10,15 @@ import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { supabase } from "@/integrations/backend/client";
-import { extractTextAdvanced, readScannedPage } from "@/lib/submittal-lite/extract";
+import { extractTextAdvanced, extractSetupText, readScannedPage } from "@/lib/submittal-lite/extract";
+import { readSpecification } from "@/lib/submittal-lite/compliance-read";
+import { readConsultantComments } from "@/lib/submittal-lite/rtcc-read";
+import { specificationBody, specificationComment, type ComplianceSheet } from "@/lib/submittal-lite/compliance";
+import { rtccCommentBody, type RtccRound } from "@/lib/submittal-lite/rtcc";
+import { complianceExportTables, downloadReviewExcel, rtccExportTables } from "@/lib/submittal-lite/review-excel";
+import { readReplyWorkbook, matchImportedReplies } from "@/lib/submittal-lite/review-import";
+import { buildCompliancePdf } from "@/lib/submittal-lite/compliance-pdf";
+import { buildReviewPdf } from "@/lib/submittal-lite/review-pdf";
 import { detectScheduleSeries, isSelectorSeries, normalizeOcrModelCodes, seriesProductType, type SeriesModel } from "@/lib/submittal-lite/schedule-series";
 import { makeAssistantSubmittalTds } from "@/lib/submittal-lite/selector-tds";
 import { probeSelectionAssistantSchedule, readSelectionAssistantAttachment, readSelectionAssistantSchedule } from "@/lib/submittal-lite/selection-assistant-schedule";
@@ -17,11 +27,12 @@ import { useSupabaseFanDatabase } from "@/hooks/useSupabaseFanDatabase";
 import { useAllFanDimensions, useTenantData } from "@/hooks/useFanDatabase";
 import { useAirCurtainModels, useAirCurtainBrands, useAirCurtainSeries, useAirCurtainDimensions } from "@/hooks/useAirCurtains";
 import { loadRegisteredSeriesTds, loadSelectorModelCatalogue } from "@/lib/submittal-lite/selector-models";
-import type { SubmittalRecord, Kind } from "@/lib/submittal-lite/records";
+import type { SubmittalRecord, Kind, Field } from "@/lib/submittal-lite/records";
 import { isSpreadsheet, spreadsheetToText, pdfToText } from "@/lib/chatSchedule";
 
 export type SubmittalChatPlan = {
-  action: "create" | "revise" | "clarify"; sourceRecordId: string; kind: Kind;
+  technicalIssues?: string[];
+  companyId?: string; brandId?: string; action: "create" | "revise" | "clarify"; sourceRecordId: string; kind: Kind;
   title: string; coverHeading?: string; explicitIndexMode?: boolean; brand: string; product: string; confirmedSeries?: string; indexMode: "general" | "project" | "customer" | "keep";
   fields: { label: string; value: string }[]; sections: string[]; omitSections: string[]; reply: string;
 };
@@ -56,13 +67,7 @@ function parseClientProjectFields(text: string): { label: string; value: string 
 }
 
 function parsePastedIndexSections(text: string): string[] {
-  return text.split(/\r?\n/)
-    .map((line) => line
-      .replace(/^\s*\d+(?:\.\d+)*[.)\-:]?\s*/, "")
-      .replace(/\s*(?:\.{2,}|\||\t)\s*\d+\s*$/, "")
-      .replace(/\s+[1-9]\d{0,2}\s*$/, "")
-      .trim())
-    .filter((line) => line.length > 2 && line.length < 120);
+  return parseIndexHeadings(text);
 }
 const inferMaterialTypes = (text: string) => {
   const value = text.toUpperCase();
@@ -104,7 +109,16 @@ function uniqueProjectDetails(fields: { label: string; value: string }[]) {
   return normalizeCoverFields(fields);
 }
 
-export type ChatUpload = { uploadPurpose?: "Cover" | "Project Specification" | "Compliance Statement" | "Customer index" | "Quotation"; file: File; sectionTitle: string; kind?: "cover" | "index" | "support"; scheduleText?: string; documentText?: string; scheduleError?: string; selectionItems?: AssistantScheduleItem[]; selectionProvider?: string; selectionOptimizeFor?: string; readMethods?: string[]; readWarnings?: string[]; directReadProvider?: string; sourceRole?: "schedule" | "quotation"; excludeFromPdf?: boolean };
+export type ChatUpload = { pageMode?: "uploaded" | "generated"; uploadPurpose?: string; file: File; sectionTitle: string; kind?: "cover" | "index" | "support"; scheduleText?: string; documentText?: string; scheduleError?: string; selectionItems?: AssistantScheduleItem[]; selectionProvider?: string; selectionOptimizeFor?: string; readMethods?: string[]; readWarnings?: string[]; directReadProvider?: string; sourceRole?: "schedule" | "quotation"; excludeFromPdf?: boolean };
+type ChatReplyWorkflow =
+  | { kind:"compliance"; sourceName:string; fields:Field[]; sheet:ComplianceSheet; excelImported:boolean }
+  | { kind:"rtcc"; sourceName:string; fields:Field[]; rounds:RtccRound[]; excelImported:boolean };
+function submittalMessageIntent(message: string): "repair" | "question" | "build" {
+  if (/\b(?:missing|missed|not included|not loaded|didn['’]?t include|haven['’]?t included|recheck|re-check|retry|repair|rework|re-work|fix|wrong|incorrect)\b/i.test(message)) return "repair";
+  if (/\?|^(?:why|how|what|where|which|can you|could you|please explain|explain|tell me|hello|hi|thanks)\b/i.test(message.trim())) return "question";
+  return "build";
+}
+
 export type ChatInspection = { sections: string[]; indexMode: "general" | "project" | "customer" | "keep"; sectionStatus: { title: string; count: number }[]; assignments: string[]; missingCover: string[]; missingDocuments: string[]; unassignedFiles: string[]; attachedCount: number; omittedCount: number; emptyCount: number; detectedSeries: string[]; unresolvedModels: string[]; unreadableSchedules: string[]; undetectedSchedules: string[]; seriesConflicts: string[]; unverifiedCertificates: string[]; excludedCertificates: string[] };
 
 function classifyUpload(_file: File, text: string): { kind: "cover" | "index" | "support"; sectionTitle: string; isSchedule: boolean } {
@@ -154,7 +168,8 @@ function classifyUpload(_file: File, text: string): { kind: "cover" | "index" | 
 
   if (coverFields >= 4 && indexLines < 3) return { kind: "cover", sectionTitle: "Cover page", isSchedule: false };
   if (/\b(?:technical\s*data\s*sheet|datasheet|tds|product\s*data\s*sheet|performance\s*data)\b/.test(first)) return { kind: "support", sectionTitle: "Technical data sheet", isSchedule: false };
-  if (/\bproject\s*specification\b/.test(first)) return { kind: "support", sectionTitle: "Project specification", isSchedule: false };
+  if (/\b(?:consultant(?:[’\']s)?\s+comments?|comments?\s+by\s+consultant|reply\s+to\s+consultant\s+comments?|rtcc)\b/.test(sample)) return { kind: "support", sectionTitle: "Consultant comments", isSchedule: false };
+  if (/\bproject\s*specification\b/.test(first) || (/^\s*SECTION\s+\d{4,}\b/im.test(text) && /^\s*PART\s+\d+\b/im.test(text))) return { kind: "support", sectionTitle: "Project specification", isSchedule: false };
   if (/\b(?:compliance|conformity|deviation)\b/.test(first)) return { kind: "support", sectionTitle: "Compliance statement", isSchedule: false };
   if (/\b(?:test\s*(?:report|certificate)|performance\s*certificate)\b/.test(first)) return { kind: "support", sectionTitle: "Test certificate", isSchedule: false };
   if (/\b(?:iso\s*(?:9001|14001|45001)|iso\s*certificate)\b/.test(first)) return { kind: "support", sectionTitle: "ISO certificate", isSchedule: false };
@@ -166,23 +181,29 @@ function classifyUpload(_file: File, text: string): { kind: "cover" | "index" | 
   return { kind: "support", sectionTitle: "", isSchedule: false };
 }
 
+type ChatWorkflowChoice = Kind | "Compliance" | "RTCC";
 type ChatSessionSeed = {
   uploads?: ChatUpload[]; input?: string; coverDetailsText?: string; customIndexText?: string;
-  indexChoice?: "general" | "project" | "customer" | null; submittalKind?: Kind; scheduleMode?: "uploaded" | "ai";
+  indexChoice?: "general" | "project" | "customer" | null; submittalKind?: Kind; workflowChoice?: ChatWorkflowChoice; scheduleMode?: "uploaded" | "ai";
 };
 type SubmittalChatProps = {
+  companyOptions?: { id: string; name: string }[]; brandOptions?: { id: string; name: string }[];
+  selectedCompanyId?: string; selectedBrandId?: string;
+  onCompanyChange?: (id: string) => void; onBrandChange?: (id: string) => void;
   open: boolean; onOpenChange: (value: boolean) => void; records: SubmittalRecord[];
   brands: string[]; seriesCatalogue: string[]; modelCatalog: SeriesModel[]; tenantId: string; currentRecordId?: string; inspectPlan: (plan: SubmittalChatPlan, uploads: ChatUpload[], omitEmpty: boolean) => ChatInspection;
   onApply: (plan: SubmittalChatPlan, uploads: ChatUpload[], omitEmpty: boolean, destination: "pdf" | "builder", confirmedCertificateMapping: boolean) => Promise<string>;
   onOpenBuilder: () => void;
-  pdfBuilding: boolean; pdfReady: boolean; pdfPrepared: boolean; pdfFailed: boolean; onDownloadPdf: () => void; onSharePdf: () => Promise<{ url: string; expiresAt: string }>; mobileMode?: boolean; scheduleBranding?: { companyName?: string; companyLogo?: string; brandLogo?: string };
+  onOpenRtcc?: () => void;
+  onOpenCompliance?: () => void;
+  pdfBuilding: boolean; pdfReady: boolean; pdfPrepared: boolean; pdfFailed: boolean; pdfError?: string; onDownloadPdf: () => void; onSharePdf: () => Promise<{ url: string; expiresAt: string }>; mobileMode?: boolean; scheduleBranding?: { companyName?: string; companyLogo?: string; brandLogo?: string; stamp?: string };
 };
 export function SubmittalChat(props: SubmittalChatProps) {
   const [session, setSession] = useState({ id: 0, seed: {} as ChatSessionSeed });
   return <SubmittalChatSession key={session.id} {...props} initialSeed={session.seed} newSession={session.id > 0}
     onRestart={(seed = {}) => setSession(current => ({ id: current.id + 1, seed }))} />;
 }
-function SubmittalChatSession({ open, onOpenChange, records, brands, seriesCatalogue, modelCatalog, tenantId, currentRecordId, inspectPlan, onApply, onOpenBuilder, pdfBuilding, pdfReady, pdfPrepared, pdfFailed, onDownloadPdf, onSharePdf, scheduleBranding, mobileMode, initialSeed = {}, newSession = false, onRestart }: SubmittalChatProps & {
+function SubmittalChatSession({ companyOptions, brandOptions, selectedCompanyId, selectedBrandId, onCompanyChange, onBrandChange, open, onOpenChange, records, brands, seriesCatalogue, modelCatalog, tenantId, currentRecordId, inspectPlan, onApply, onOpenBuilder, onOpenRtcc, onOpenCompliance, pdfBuilding, pdfReady, pdfPrepared, pdfFailed, pdfError, onDownloadPdf, onSharePdf, scheduleBranding, mobileMode, initialSeed = {}, newSession = false, onRestart }: SubmittalChatProps & {
   initialSeed?: ChatSessionSeed; newSession?: boolean; onRestart?: (seed?: ChatSessionSeed) => void;
 }) {
   const { database, isLoading: fanLoading } = useSupabaseFanDatabase();
@@ -205,12 +226,13 @@ function SubmittalChatSession({ open, onOpenChange, records, brands, seriesCatal
   const [freshSession, setFreshSession] = useState(newSession);
   const [scheduleMode, setScheduleMode] = useState<"uploaded" | "ai">(initialSeed.scheduleMode ?? "uploaded");
   const [submittalKind, setSubmittalKind] = useState<Kind>(initialSeed.submittalKind ?? "Material");
+  const [workflowChoice,setWorkflowChoice]=useState<ChatWorkflowChoice>(initialSeed.workflowChoice ?? initialSeed.submittalKind ?? "Material");
   const [indexChoice, setIndexChoice] = useState<"general" | "project" | "customer" | null>(initialSeed.indexChoice ?? "general");
   const [customIndexText, setCustomIndexText] = useState(initialSeed.customIndexText ?? "");
   const [coverDetailsText, setCoverDetailsText] = useState(initialSeed.coverDetailsText ?? "");
   const coverUploadRef = useRef<HTMLInputElement>(null);
   const targetedUploadRef = useRef<HTMLInputElement>(null);
-  const uploadTarget = useRef<"Project Specification" | "Compliance Statement" | "Customer index" | "Quotation">("Project Specification");
+  const uploadTarget = useRef<string>("Project Specification");
   const [messages, setMessages] = useState<Message[]>([]);
   const [plan, setPlan] = useState<SubmittalChatPlan | null>(null);
   const [busy, setBusy] = useState(false);
@@ -251,24 +273,28 @@ function SubmittalChatSession({ open, onOpenChange, records, brands, seriesCatal
   const [confirmedCertificateMapping, setConfirmedCertificateMapping] = useState(false);
   const [composePending, setComposePending] = useState(Boolean(initialSeed.uploads?.length));
   const uploadInputRef = useRef<HTMLInputElement>(null);
+  const replyExcelInputRef = useRef<HTMLInputElement>(null);
+  const [replyWorkflow,setReplyWorkflow] = useState<ChatReplyWorkflow | null>(null);
+  const [replyWorkflowBusy,setReplyWorkflowBusy] = useState(false);
+  const [replyWorkflowProgress,setReplyWorkflowProgress] = useState("");
   const autoFinish = useRef(true);
   const startNewSubmittal = () => {
     if (!completed && (busy || applying || readingUploads)) return;
     if (onRestart) { onRestart(); return; }
     setShareResult(null); setShareError(""); setShareCopied(false); setTdsWarnings([]);
     setInput(""); setMessages([]); setPlan(null); setUploads([]);
-    setCoverDetailsText(""); setCustomIndexText(""); setIndexChoice("general"); setSubmittalKind("Material"); setScheduleMode("uploaded");
-    setSelectionArtifacts(null); setActiveProvider(""); setOmitEmpty(false);
+    setCoverDetailsText(""); setCustomIndexText(""); setIndexChoice("general"); setSubmittalKind("Material"); setWorkflowChoice("Material"); setScheduleMode("uploaded");
+    setSelectionArtifacts(null); setReplyWorkflow(null); setReplyWorkflowProgress(""); setActiveProvider(""); setOmitEmpty(false);
     setConfirmedCertificateMapping(false); setComposePending(false);
     setCompleted(false); setShowSavedPdf(false); setFreshSession(true); setSetupOpen(true);
     autoFinish.current = true;
-    for (const ref of [uploadInputRef, coverUploadRef, targetedUploadRef]) if (ref.current) ref.current.value = "";
+    for (const ref of [uploadInputRef, coverUploadRef, targetedUploadRef, replyExcelInputRef]) if (ref.current) ref.current.value = "";
   };
   const finishSubmittal = () => {
     setBusy(false); setApplying(false); setReadingUploads(0);
-    setPlan(null); setUploads([]); setOmitEmpty(false); setConfirmedCertificateMapping(false);
-    setCoverDetailsText(""); setCustomIndexText(""); setIndexChoice("general"); setSubmittalKind("Material"); setScheduleMode("uploaded");
-    setSelectionArtifacts(null); setComposePending(false); setCompleted(true); setShowSavedPdf(true); setFreshSession(false);
+    // Retain the source files and plan for questions and repairs after download.
+    // New submittal (or a new attachment batch after completion) resets them.
+    setComposePending(false); setCompleted(true); setShowSavedPdf(true); setFreshSession(false);
     autoFinish.current = true;
   };
   const supportingUploads = uploads.filter((upload) => upload.kind !== "cover" && upload.kind !== "index" && !upload.excludeFromPdf);
@@ -281,28 +307,82 @@ function SubmittalChatSession({ open, onOpenChange, records, brands, seriesCatal
     : inferMaterialTypes([plan?.product ?? "", ...uploads.map((item) => item.scheduleText ?? item.documentText ?? "")].join("\n"));
   const tdsNeeded = Boolean(plan && uploads.some((item) => item.sectionTitle === "Material schedule" || Boolean(item.selectionItems?.length)) && review?.sectionStatus.some((item) => /technical data sheet|datasheet|tds/i.test(item.title) && !item.count));
   const ready = !readingUploads && Boolean(review) && !review?.unassignedFiles.length && !review?.sectionStatus.some(section => section.count === 0);
+  const typedWorkflowChoice=(value:string):ChatWorkflowChoice|undefined=>{
+    if(/\b(?:compliance\s+statement|specification\s+compliance)\b/i.test(value))return "Compliance";
+    if(/\b(?:rtcc|reply\s+to\s+(?:consultant\s+)?comments?)\b/i.test(value))return "RTCC";
+    if(/\b(?:pre[- ]?qualification|pq\s+submittal)\b/i.test(value))return "PQ";
+    if(/\b(?:o\s*&\s*m|operation\s*(?:&|and)\s*maintenance)\b/i.test(value))return "O&M";
+    if(/\bmaterial\s+submittal\b/i.test(value))return "Material";
+  };
   const ask = async (question = input) => {
+    let currentTechnicalIssues: string[] = [];
     if (sharing || busy || applying || (!question.trim() && !coverDetailsText.trim() && !uploads.length && !customIndexText.trim())) return;
-    const continuingRevision = /\b(?:revise|revision|update)\b/i.test(question);
+    let intent = submittalMessageIntent(question);
+    const followUp = Boolean(plan && question.trim() && !composePending);
+    if (intent === "question" || (followUp && intent !== "repair" && !/\b(?:build|create|generate|download|finish)\b/i.test(question))) {
+      setInput(""); setBusy(true);
+      setMessages(items => [...items, { role: "user", text: question }]);
+      try {
+        const result = await supabase.functions.invoke("submittal-assistant", { body: {
+          action: "conversation", message: question, aiMode, history: messages.slice(-8),
+          draftPlan: plan, checklist: review, warnings: tdsWarnings,
+          documents: uploads.map(item => ({ filename: item.file.name, section: item.sectionTitle })),
+        } });
+        if (result.error) throw result.error;
+        if (!result.data?.reply) throw new Error("No chat response returned");
+        setMessages(items => [...items, { role: "assistant", text: result.data.reply }]);
+        setActiveProvider(result.data.provider ?? "KINAIR local engine");
+        if (result.data.intent === "answer") return;
+        intent = result.data.intent === "repair" ? "repair" : "build";
+      } catch {
+        setMessages(items => [...items, { role: "assistant", text: "I couldn't reach the chat service. Your files and current submittal are preserved. Please retry, or use Recheck missing documents below." }]);
+        return;
+      } finally { setBusy(false); }
+    }
+    const repairing = intent === "repair";
+    const continuingRevision = repairing || followUp || /\b(?:revise|revision|update)\b/i.test(question);
     const isNewRequest = !continuingRevision && (freshSession || completed);
     const requestMessages = isNewRequest ? [] : messages;
+    const explicitWorkflow=typedWorkflowChoice(question);
+    const effectiveWorkflow=explicitWorkflow ?? workflowChoice;
     const customSections = parsePastedIndexSections(customIndexText);
-    if (indexChoice === "customer" && !customSections.length && !uploads.some(upload => upload.kind === "index")) {
+    if ((effectiveWorkflow==="Material"||effectiveWorkflow==="PQ"||effectiveWorkflow==="O&M") && indexChoice === "customer" && !customSections.length && !uploads.some(upload => upload.kind === "index")) {
       setMessages(items => [...items, { role: "assistant", text: "Please paste your custom index headings or upload the customer index, then press Send." }]);
       return;
     }
     const indexInstruction = indexChoice === "project" ? "Use Project Specification index." : indexChoice === "customer" ? "Use Custom Index." : indexChoice === "general" ? "Use General Specification index." : "";
-    const text = [question.trim() || `Build ${submittalKind} submittal.`, `Submittal type: ${submittalKind}. Use this selected type.`, coverDetailsText.trim(), indexInstruction, indexChoice === "customer" && customSections.length ? customSections.map((line, i) => `${i + 1}. ${line}`).join("\n") : ""].filter(Boolean).join("\n");
+    const coreKind:Kind=effectiveWorkflow==="Compliance"||effectiveWorkflow==="RTCC"?submittalKind:effectiveWorkflow;
+    const text = [question.trim() || (effectiveWorkflow==="Compliance"?"Prepare Compliance Statement.":effectiveWorkflow==="RTCC"?"Prepare RTCC.":`Build ${coreKind} submittal.`), `Selected workflow: ${effectiveWorkflow}. Use this selected workflow.`, coverDetailsText.trim(), companyOptions ? `Supplier company: ${companyOptions.find(item => item.id === selectedCompanyId)?.name ?? ""}. Brand: ${brandOptions?.find(item => item.id === selectedBrandId)?.name ?? ""}. Use only this selected company and brand.` : "", (effectiveWorkflow==="Material"||effectiveWorkflow==="PQ"||effectiveWorkflow==="O&M")?indexInstruction:"", (effectiveWorkflow==="Material"||effectiveWorkflow==="PQ"||effectiveWorkflow==="O&M")&&indexChoice === "customer" && customSections.length ? customSections.map((line, i) => `${i + 1}. ${line}`).join("\n") : ""].filter(Boolean).join("\n");
     if (!text || busy || applying) return;
     setShareResult(null); setShareError(""); setShareCopied(false); setTdsWarnings([]);
     setInput(""); setBusy(true); setSetupOpen(false);
     setCompleted(false); setShowSavedPdf(false);
-    setMessages([...requestMessages, { role: "user", text }]);
+    setMessages(items => [...(isNewRequest ? [] : items), { role: "user", text: question.trim() || text }]);
+    if (repairing) {
+      autoFinish.current = false;
+      setMessages(items => [...items, { role: "assistant", text: "I'll recheck the uploaded files and saved document matches, retry matching TDS from the schedule, and list anything that still needs uploading. I will keep your supplied models, parameters and custom index." }]);
+    }
     try {
       const requestUploads = await prepareUploadsForSend();
+      const consultantSource=requestUploads.find(upload=>/\b(?:consultant(?:[’']s)?\s+comments?|comments?\s+by\s+consultant|reply\s+to\s+consultant\s+comments?|rtcc)\b/i.test(upload.sectionTitle+"\n"+(upload.documentText??"")));
+      const specificationSource=requestUploads.find(upload=>!consultantSource||upload!==consultantSource
+        ? /project\s*specification/i.test(upload.sectionTitle+"\n"+(upload.documentText??"")) || (/^\s*SECTION\s+\d{4,}\b/im.test(upload.documentText??"")&&/^\s*PART\s+\d+\b/im.test(upload.documentText??""))
+        : false);
+      if(effectiveWorkflow==="Compliance"||effectiveWorkflow==="RTCC"){
+        const preferred=effectiveWorkflow==="Compliance"?specificationSource:consultantSource;
+        const fallback=requestUploads.find(upload=>upload.kind!=="cover"&&upload.kind!=="index"&&upload.uploadPurpose!=="Quotation");
+        const source=preferred??fallback;
+        if(!source)throw new Error(effectiveWorkflow==="Compliance"?"Upload the project specification first.":"Upload the consultant comments first.");
+        await prepareReplyWorkflow(effectiveWorkflow==="Compliance"?"compliance":"rtcc",source);
+        return;
+      }
+      if (companyOptions && (!companyOptions.some(item => item.id === selectedCompanyId) || !brandOptions?.some(item => item.id === selectedBrandId))) {
+        setSetupOpen(true);
+        setMessages(items => [...items, { role: "assistant", text: "Please select the supplier company and brand in Project setup before preparing this submittal." }]);
+        return;
+      }
       const supportingUploadsSnapshot = requestUploads.filter((upload) => upload.kind !== "cover" && upload.kind !== "index" && !upload.excludeFromPdf);
       const userConversation = [...requestMessages.filter((message) => message.role === "user").map((message) => message.text), text].join("\n");
-      const explicitlyWantsSubmittal = /\b(?:material\s+)?submittal\b/i.test(userConversation);
       const hasCustomerIndex = requestUploads.some((upload) => upload.kind === "index");
       const hasProjectSpecification = requestUploads.some((upload) => /project\s*specification/i.test(upload.sectionTitle + "\n" + (upload.documentText ?? "")));
       const hasCompliance = requestUploads.some((upload) => /\b(?:compliance|conformity|deviation)\b/i.test(upload.sectionTitle + "\n" + (upload.documentText ?? "")));
@@ -348,13 +428,22 @@ function SubmittalChatSession({ open, onOpenChange, records, brands, seriesCatal
           const unreadSchedule = requestUploads.find((item) =>
             (item.sourceRole === "schedule" || item.sectionTitle === "Material schedule" || /\bschedule\b/i.test(item.file.name)) &&
             !(item.scheduleText ?? item.documentText ?? "").trim());
-          selection = unreadSchedule
-            ? await readSelectionAssistantAttachment(
-                unreadSchedule.file,
-                "Read every real fan/air-curtain schedule row from this original attachment. Preserve tag, quantity, units, exact selected model and duty. Ignore commercial terms.",
-                aiMode,
-              )
-            : await readSelectionAssistantSchedule(selectionText, text, aiMode);
+          try {
+            selection = unreadSchedule
+              ? await readSelectionAssistantAttachment(unreadSchedule.file, "Read every real equipment row. Preserve tag, quantity, units, selected model and duty.", aiMode)
+              : await readSelectionAssistantSchedule(selectionText, text, aiMode);
+          } catch (textError) {
+            const originals = requestUploads.filter(item => item.sourceRole || item.sectionTitle === "Material schedule" || /schedule|quotation/i.test(item.file.name));
+            if (!originals.length) throw textError;
+            setMessages(items => [...items,{role:"assistant",text:"The text reader could not identify schedule rows. Re-reading the original attachment visually before generating TDS…"}]);
+            const recovered = [];
+            for (const original of originals) {
+              const result = await readSelectionAssistantAttachment(original.file, "Read every equipment row directly from the original table image. Preserve row tags, quantities, model codes and units. Distinguish equipment tags from proposed model codes. Return all rows, not a summary.", aiMode, true);
+              if (!result.items.length) throw new Error(`No equipment rows could be verified in ${original.file.name}. Upload a clearer original schedule.`);
+              recovered.push(result);
+            }
+            selection = {items:recovered.flatMap(result=>result.items),provider:recovered.map(result=>result.provider).filter(Boolean).join(", "),optimizeFor:recovered[0]?.optimizeFor};
+          }
           if (unreadSchedule && selection.items.length) {
             const recoveredText = selection.items.map((item) => [item.tag, item.product, item.series_name, item.existing_selection].filter(Boolean).join(" | ")).join("\n");
             setUploads((items) => items.map((item) => item.file === unreadSchedule.file ? {
@@ -399,6 +488,18 @@ function SubmittalChatSession({ open, onOpenChange, records, brands, seriesCatal
           if (!selection.items.some(needsDimensions)) break;
           }
         }
+        const correctionCatalog = modelCatalog.length ? modelCatalog : await loadSelectorModelCatalogue(tenantId);
+        const corrections: string[] = [];
+        selection.items = selection.items.map(item => {
+          const original = item.existing_selection || "";
+          const corrected = normalizeOcrModelCodes(original, correctionCatalog);
+          if (!original || corrected === original) return item;
+          corrections.push(`${item.tag || "Item"}: ${original} → ${corrected}`);
+          const matched = correctionCatalog.find(model => model.code === corrected);
+          return {...item, existing_selection:corrected, ...(matched ? {series_name:matched.series} : {}),
+            ...(item.proposed?.model === original ? {proposed:{...item.proposed,model:corrected}} : {})};
+        });
+        if (corrections.length) setMessages(items => [...items,{role:"assistant",text:"Catalogue-verified OCR corrections (original uploaded schedule unchanged): " + corrections.join("; ")}]);
         const generated = await makeAssistantSubmittalTds(
           selection.items,
           { database, airModels, airBrands, airSeries, airDimensions, dimensionsMap,
@@ -407,6 +508,7 @@ function SubmittalChatSession({ open, onOpenChange, records, brands, seriesCatal
             ? selection.optimizeFor : "balanced") as import("@/lib/chatOptimize").FanOptimizeFor,
         );
         setTdsWarnings([...generated.missing, ...recoveryWarnings]);
+        currentTechnicalIssues = [...generated.missing];
         return { selection, generated };
       };
 
@@ -451,7 +553,7 @@ function SubmittalChatSession({ open, onOpenChange, records, brands, seriesCatal
         ...parseClientProjectFields(sourceTextForMetadata),
       ]);
       const asksRevision = /\b(?:revise|revision|rev\.?\s*\d+|update\s+(?:the\s+)?(?:submittal|revision))\b/i.test(text);
-      const fastLocalPlan = wantsSubmittal && !asksRevision && (clientFields.length > 0 || hasSelectionInput || hasCustomerIndex || hasProjectSpecification)
+      const fastLocalPlan = repairing && plan ? { ...plan, reply: "Recheck complete. Review the updated checklist below." } : wantsSubmittal && !asksRevision && !followUp && (clientFields.length > 0 || hasSelectionInput || hasCustomerIndex || hasProjectSpecification)
         ? {
             action: "create" as const,
             sourceRecordId: "",
@@ -476,7 +578,7 @@ function SubmittalChatSession({ open, onOpenChange, records, brands, seriesCatal
         setActiveProvider("KINAIR Selection Assistant + Core Builder · instant");
       } else {
         const result = await supabase.functions.invoke("submittal-assistant", {
-          body: { message: text, aiMode, documents: requestUploads.slice(0, 15).map((item) => ({ filename: item.file.name, section: item.sectionTitle, text: (item.scheduleText ?? item.documentText ?? "").slice(0, 6000) })), records: (isNewRequest ? [] : candidates).map((r) => ({ id: r.id, ref: r.ref, rev: r.rev, title: r.title, project: r.project, status: r.status })), brands, catalogueSeries: seriesCatalogue, verifiedSeries: detectScheduleSeries(requestUploads.map((upload) => upload.scheduleText ?? upload.documentText ?? "").join("\n"), seriesCatalogue, activeCatalog).series, scheduleExtracts: requestUploads.filter((upload) => upload.scheduleText).slice(0, 5).map((upload) => ({ filename: upload.file.name, text: upload.scheduleText!.slice(0, 4500) })), currentRecordId: isNewRequest ? undefined : currentRecordId, draftPlan: plan, history: requestMessages.slice(-6) },
+          body: { message: text, forceReasoning: followUp, aiMode, documents: requestUploads.slice(0, 15).map((item) => ({ filename: item.file.name, section: item.sectionTitle, text: (item.scheduleText ?? item.documentText ?? "").slice(0, 6000) })), records: (isNewRequest ? [] : candidates).map((r) => ({ id: r.id, ref: r.ref, rev: r.rev, title: r.title, project: r.project, status: r.status })), brands, catalogueSeries: seriesCatalogue, verifiedSeries: detectScheduleSeries(requestUploads.map((upload) => upload.scheduleText ?? upload.documentText ?? "").join("\n"), seriesCatalogue, activeCatalog).series, scheduleExtracts: requestUploads.filter((upload) => upload.scheduleText).slice(0, 5).map((upload) => ({ filename: upload.file.name, text: upload.scheduleText!.slice(0, 4500) })), currentRecordId: isNewRequest ? undefined : currentRecordId, draftPlan: plan, history: requestMessages.slice(-6) },
         });
         if (result.error) {
           const context = "context" in result.error ? (result.error as { context?: Response }).context : undefined;
@@ -496,6 +598,11 @@ function SubmittalChatSession({ open, onOpenChange, records, brands, seriesCatal
         nextPlan.indexMode = indexChoice;
         nextPlan.explicitIndexMode = true;
         if (indexChoice === "customer" && customSections.length) nextPlan.sections = customSections;
+      }
+      if (nextPlan && companyOptions) {
+        nextPlan.companyId = selectedCompanyId;
+        nextPlan.brandId = selectedBrandId;
+        nextPlan.brand = brandOptions?.find(item => item.id === selectedBrandId)?.name ?? "";
       }
       setPlan(nextPlan);
       setComposePending(false);
@@ -566,6 +673,7 @@ function SubmittalChatSession({ open, onOpenChange, records, brands, seriesCatal
               setPlan({ ...nextPlan });
             }
 
+            currentTechnicalIssues = [...generated.missing];
             if (generated.missing.length) setMessages((items) => [...items, { role: "assistant", text: `Matching TDS needs review for: ${generated.missing.join("; ")}. Scheduled models and quantities are preserved; no substitutes were selected.` }]);
             const generatedUploads: ChatUpload[] = [];
             const hasOriginalMaterialSchedule = scheduleMode === "uploaded" && supportingUploadsSnapshot.some((item) =>
@@ -590,8 +698,7 @@ function SubmittalChatSession({ open, onOpenChange, records, brands, seriesCatal
               // builder. Replace only old/generated TDS pages. A clean generated
               // schedule is used only when the source was a quotation/offer.
               effectiveUploads = [
-                ...supportingUploadsSnapshot.filter((item) =>
-                  !/technical data sheet|datasheet|\btds\b/i.test(item.sectionTitle + " " + item.file.name) &&
+                ...effectiveUploads.filter((item) =>
                   !/^KINAIR-(?:Material-Schedule|Selector-TDS)/i.test(item.file.name)),
                 ...generatedUploads,
               ];
@@ -611,7 +718,8 @@ function SubmittalChatSession({ open, onOpenChange, records, brands, seriesCatal
               setMessages((items) => [...items, { role: "assistant", text: `Read ${selection.items.length} scheduled row${selection.items.length === 1 ? "" : "s"}, preserved supplied models and arrangements, and generated matching TDS for ${uniqueModels.join(", ")}.${correctionText}` }]);
             }
           } catch (tdsError) {
-            setTdsWarnings([tdsError instanceof Error ? tdsError.message : "TDS generation failed"]);
+            currentTechnicalIssues = [tdsError instanceof Error ? tdsError.message : "TDS generation failed"];
+            setTdsWarnings(currentTechnicalIssues);
             setMessages((items) => [...items, {
               role: "assistant",
               text: `Selection Assistant could not generate the TDS: ${tdsError instanceof Error ? tdsError.message : "selection data was unavailable"}.`,
@@ -654,11 +762,13 @@ function SubmittalChatSession({ open, onOpenChange, records, brands, seriesCatal
           }
         }
       }
-      const blocking = check ? [...check.unassignedFiles] : [];
+      const technical = [...currentTechnicalIssues, ...(check?.unresolvedModels ?? []), ...(check?.unreadableSchedules ?? []), ...(check?.seriesConflicts ?? [])];
+      if (nextPlan) { nextPlan.technicalIssues = [...new Set(technical)]; setPlan({ ...nextPlan }); }
+      const blocking = check ? [...check.unassignedFiles, ...technical] : [];
       const missingSections = check?.sectionStatus.filter(section => !section.count).map(section => section.title) ?? [];
       const complete = Boolean(nextPlan && nextPlan.action !== "clarify" && check && !blocking.length && !missingSections.length);
       if (/\b(?:preview only|do not save|don't save|do not download|don't download)\b/i.test(text)) autoFinish.current = false;
-      else if (/\b(?:create|build|generate|download|final|finish)\b/i.test(text)) autoFinish.current = true;
+      else if (!repairing && /\b(?:create|build|generate|download|final|finish)\b/i.test(question)) autoFinish.current = true;
       if (autoFinish.current && complete && nextPlan) {
         setMessages((items) => [...items, { role: "assistant", text: "Assembling the available sections. Any unresolved TDS items remain flagged for review below." }]);
         setApplying(true);
@@ -671,7 +781,7 @@ function SubmittalChatSession({ open, onOpenChange, records, brands, seriesCatal
           setMessages((items) => [...items, { role: "assistant", text: assembleError instanceof Error ? assembleError.message : String((assembleError as { message?: string })?.message ?? assembleError ?? "Could not assemble the PDF. Please review the files.") }]);
         } finally { setApplying(false); }
       } else {
-        const guidance = (blocking.length ? `\nPlease choose a divider for: ${[...new Set(blocking)].join(", ")}.` : "") + (missingSections.length ? `\nPlease upload the missing documents for: ${missingSections.join(", ")}. You can upload them here and press Send, or open the manual builder to add them.` : "");
+        const guidance = (blocking.length ? `\nResolve these document/technical checks before final assembly: ${[...new Set(blocking)].join(", ")}.` : "") + (missingSections.length ? `\nPlease upload the missing documents for: ${missingSections.join(", ")}. You can upload them here and press Send, or open the manual builder to add them.` : "");
         setMessages((items) => [...items, { role: "assistant", text: `${data.plan.reply}${guidance}` }]);
       }
     } catch (error) {
@@ -690,6 +800,13 @@ function SubmittalChatSession({ open, onOpenChange, records, brands, seriesCatal
       action: "create", sourceRecordId: "", kind: submittalKind, title: `${submittalKind} Submittal`, coverHeading: "",
       brand: "", product: "", indexMode: "general", fields: [], sections: [], omitSections: [], reply: "",
     };
+    if (companyOptions) {
+      if (!companyOptions.some(item => item.id === selectedCompanyId) || !brandOptions?.some(item => item.id === selectedBrandId)) {
+        setSetupOpen(true); setMessages(items => [...items, { role: "assistant", text: "Select the supplier company and brand in Project setup first." }]); return;
+      }
+      draft.companyId = selectedCompanyId; draft.brandId = selectedBrandId;
+      draft.brand = brandOptions?.find(item => item.id === selectedBrandId)?.name ?? "";
+    }
     setApplying(true);
     try {
       const reply = await onApply(draft, uploads.filter((item) => !item.excludeFromPdf), omitEmpty, destination, confirmedCertificateMapping);
@@ -707,6 +824,76 @@ function SubmittalChatSession({ open, onOpenChange, records, brands, seriesCatal
     anchor.href = url; anchor.download = file.name; anchor.click();
     window.setTimeout(() => URL.revokeObjectURL(url), 1000);
   };
+
+  const replyProjectFields = (): Field[] => {
+    const supplier=companyOptions?.find(item=>item.id===selectedCompanyId)?.name??scheduleBranding?.companyName??"";
+    const brand=brandOptions?.find(item=>item.id===selectedBrandId)?.name??"";
+    return normalizeCoverFields([
+      ...parseClientProjectFields(coverDetailsText),
+      ...(supplier?[{label:"Supplier Name",value:supplier}]:[]),
+      ...(brand?[{label:"Brand Name",value:brand}]:[]),
+    ]);
+  };
+  const prepareReplyWorkflow = async (kind:"compliance"|"rtcc", source:ChatUpload) => {
+    setReplyWorkflowBusy(true);setReplyWorkflowProgress("");
+    try{
+      const fields=replyProjectFields();
+      if(kind==="compliance"){
+        const result=await readSpecification(source.file,setReplyWorkflowProgress);
+        const sheet:ComplianceSheet={id:crypto.randomUUID(),title:"COMPLIANCE STATEMENT",sourceText:result.text,source:{id:"chat-source",name:source.file.name,type:source.file.type,size:source.file.size},sourceChecked:false,rows:result.rows,provider:"KINAIR specification parser"};
+        setReplyWorkflow({kind:"compliance",sourceName:source.file.name,fields,sheet,excelImported:false});
+        setMessages(items=>[...items,{role:"assistant",text:`Read ${result.rows.length} specification points from ${source.file.name}. The editable Compliance Excel is ready below. Download it, edit the Reply column, then upload the same Excel here to generate the branded PDF.`}]);
+      }else{
+        const result=await readConsultantComments(source.file,setReplyWorkflowProgress);
+        const round:RtccRound={id:crypto.randomUUID(),number:1,date:new Date().toISOString(),sourceText:result.text,rows:result.rows,provider:"KINAIR RTCC parser"};
+        setReplyWorkflow({kind:"rtcc",sourceName:source.file.name,fields,rounds:[round],excelImported:false});
+        setMessages(items=>[...items,{role:"assistant",text:`Read ${result.rows.length} consultant comments from ${source.file.name}. The editable RTCC Excel is ready below. Download it, edit the Reply column, then upload the same Excel here to generate the branded PDF.`}]);
+      }
+      setComposePending(false);setPlan(null);
+    }finally{setReplyWorkflowBusy(false);setReplyWorkflowProgress("");}
+  };
+  const downloadReplyExcel = async () => {
+    if(!replyWorkflow)return;
+    if(replyWorkflow.kind==="compliance")await downloadReviewExcel(complianceExportTables(replyWorkflow.sheet,replyWorkflow.fields,[]),"Compliance-Statement.xlsx");
+    else await downloadReviewExcel(rtccExportTables(replyWorkflow.rounds,replyWorkflow.fields,[]),"Reply-to-Consultant-Comments.xlsx");
+  };
+  const importReplyExcel = async (file?:File) => {
+    if(!file||!replyWorkflow)return;
+    setReplyWorkflowBusy(true);setReplyWorkflowProgress("Reading completed Excel…");
+    try{
+      const sheets=await readReplyWorkbook(await file.arrayBuffer());
+      const imported=sheets.find(sheet=>sheet.kind===replyWorkflow.kind);
+      if(!imported)throw new Error(`This workbook does not contain a ${replyWorkflow.kind==="compliance"?"Compliance":"RTCC"} reply sheet.`);
+      if(replyWorkflow.kind==="compliance"){
+        const changes=matchImportedReplies(imported.rows,replyWorkflow.sheet.rows.filter(r=>r.included).map(r=>({...r,number:r.clause,comment:specificationBody(r)})));
+        setReplyWorkflow({...replyWorkflow,excelImported:true,sheet:{...replyWorkflow.sheet,rows:replyWorkflow.sheet.rows.map(r=>{const change=changes.find(item=>item.id===r.id);return change?{...r,reply:change.reply,reviewed:false}:r;})}});
+      }else{
+        const round=replyWorkflow.rounds[0];
+        if(!round)throw new Error("Create the RTCC Excel first.");
+        const changes=matchImportedReplies(imported.rows,round.rows.map((r,i)=>({...r,number:r.sourceNumber||String(i+1),comment:rtccCommentBody(r)})));
+        setReplyWorkflow({...replyWorkflow,excelImported:true,rounds:[{...round,rows:round.rows.map(r=>{const change=changes.find(item=>item.id===r.id);return change?{...r,reply:change.reply,reviewed:false}:r;})}]});
+      }
+      setMessages(items=>[...items,{role:"assistant",text:"Completed Excel read successfully. The replies are loaded. You can now generate the branded PDF with the selected company/brand logos and company stamp."}]);
+    }finally{setReplyWorkflowBusy(false);setReplyWorkflowProgress("");if(replyExcelInputRef.current)replyExcelInputRef.current.value="";}
+  };
+  const downloadReplyPdf = async () => {
+    if(!replyWorkflow)return;
+    if(!selectedCompanyId||!selectedBrandId)throw new Error("Select the company and brand in Project setup before generating the PDF.");
+    setReplyWorkflowBusy(true);setReplyWorkflowProgress("Generating branded PDF…");
+    try{
+      const branding={companyLogo:scheduleBranding?.companyLogo,brandLogo:scheduleBranding?.brandLogo,stamp:scheduleBranding?.stamp};
+      const fields=replyProjectFields();
+      const bytes=replyWorkflow.kind==="compliance"
+        ? await buildCompliancePdf(replyWorkflow.sheet,fields,{},branding)
+        : await buildReviewPdf(rtccExportTables(replyWorkflow.rounds,fields,[]),branding);
+      const name=replyWorkflow.kind==="compliance"?"Compliance-Statement.pdf":"Reply-to-Consultant-Comments.pdf";
+      const url=URL.createObjectURL(new Blob([new Uint8Array(bytes)],{type:"application/pdf"}));
+      const anchor=document.createElement("a");anchor.href=url;anchor.download=name;anchor.click();
+      window.setTimeout(()=>URL.revokeObjectURL(url),1000);
+      setMessages(items=>[...items,{role:"assistant",text:`${name} generated using the same builder PDF format and the selected company/brand branding.`}]);
+    }finally{setReplyWorkflowBusy(false);setReplyWorkflowProgress("");}
+  };
+
   const prepareUploadsForSend = async (): Promise<ChatUpload[]> => {
     // A prior timeout is retryable; do not permanently skip the attachment.
     const pending = uploads.filter((item) => !item.scheduleText && !item.documentText);
@@ -731,7 +918,10 @@ function SubmittalChatSession({ open, onOpenChange, records, brands, seriesCatal
 
         try {
           let readResult: { text: string; methods: string[]; warnings: string[]; directProvider?: string };
-          if (/\.docx$/i.test(file.name)) {
+          const setupPurpose = uploads.find(upload => upload.file === file)?.uploadPurpose;
+          if ((setupPurpose === "Cover" || setupPurpose === "Customer index") && /\.(pdf|txt|png|jpe?g)$/i.test(file.name)) {
+            readResult = { text: await extractSetupText(file, readScannedPage), methods: ["Structured cover/index reading"], warnings: [] };
+          } else if (/\.docx$/i.test(file.name)) {
             readResult = { text: await readWordInquiry(file), methods: ["Word document text and tables"], warnings: [] };
           } else if (isSpreadsheet(file)) {
             readResult = { text: await spreadsheetToText(file, 500), methods: ["spreadsheet cells"], warnings: [] };
@@ -890,19 +1080,19 @@ function SubmittalChatSession({ open, onOpenChange, records, brands, seriesCatal
     }
   };
 
-  const addFiles = (files: File[], purpose?: "Cover" | "Project Specification" | "Compliance Statement" | "Customer index" | "Quotation") => {
+  const addFiles = (files: File[], purpose?: string) => {
     const supported = files.filter((file) => /\.(pdf|png|jpe?g|txt|docx|xlsx|xlsm|xls|csv)$/i.test(file.name) || ["application/pdf", "image/png", "image/jpeg", "text/plain", "text/csv"].includes(file.type));
     if (supported.length !== files.length) setMessages((items) => [...items, { role: "assistant", text: "Upload PDF, PNG, JPG, DOCX, Excel/CSV or TXT. Older DOC files must be saved as DOCX or PDF." }]);
     if (!supported.length) return;
     if (completed) {
       if (onRestart) {
-        onRestart({ input, coverDetailsText, customIndexText, indexChoice, submittalKind, scheduleMode,
+        onRestart({ input, coverDetailsText, customIndexText, indexChoice, submittalKind, workflowChoice, scheduleMode,
           uploads: supported.map(file => ({ file, sectionTitle: purpose ?? "", kind: purpose === "Cover" ? "cover" : purpose === "Customer index" ? "index" : "support", uploadPurpose: purpose, excludeFromPdf: purpose === "Quotation" })) });
         return;
       }
       startNewSubmittal();
       // Users may enter the next project's details before attaching its files.
-      setCoverDetailsText(coverDetailsText); setCustomIndexText(customIndexText); setIndexChoice(indexChoice); setSubmittalKind(submittalKind); setScheduleMode(scheduleMode);
+      setCoverDetailsText(coverDetailsText); setCustomIndexText(customIndexText); setIndexChoice(indexChoice); setSubmittalKind(submittalKind); setWorkflowChoice(workflowChoice); setScheduleMode(scheduleMode);
       setInput(input);
     }
     setConfirmedCertificateMapping(false);
@@ -918,24 +1108,43 @@ function SubmittalChatSession({ open, onOpenChange, records, brands, seriesCatal
     <SheetContent side="right" className="flex h-[100dvh] w-full max-w-none flex-col gap-0 overflow-hidden p-0 sm:max-w-2xl" style={visualViewport ? { height: `${visualViewport.height}px`, top: `${visualViewport.top}px`, bottom: "auto" } : undefined}>
           <input ref={targetedUploadRef} type="file" multiple accept=".pdf,.png,.jpg,.jpeg,.txt,.docx,.xlsx,.xlsm,.xls,.csv" className="sr-only" aria-label="Upload index-specific documents" onChange={event => { addFiles(Array.from(event.target.files ?? []), uploadTarget.current); event.target.value = ""; }} />
           <input ref={coverUploadRef} type="file" accept=".pdf,.png,.jpg,.jpeg,application/pdf,image/png,image/jpeg" className="sr-only" aria-label="Select cover page" onChange={event => { addFiles(Array.from(event.target.files ?? []), "Cover"); event.target.value = ""; }} />
-      <SheetHeader className="border-b border-border px-4 py-3 pr-12"><SheetTitle className="flex items-center gap-2 text-base"><Sparkles className="size-5 text-primary" /> KINAIR Submittal AI</SheetTitle><Button type="button" variant="outline" size="sm" className="mt-2 w-fit" disabled={!completed && (busy || applying || !!readingUploads)} onClick={startNewSubmittal}>New submittal</Button></SheetHeader>
+      <SheetHeader className="border-b border-border px-4 py-3 pr-12"><SheetTitle className="flex items-center gap-2 text-base"><Sparkles className="size-5 text-primary" /> KINAIR Submittal AI</SheetTitle><Button type="button" variant="outline" size="sm" className="mt-2 w-fit" disabled={!completed && (busy || applying || !!readingUploads)} onClick={startNewSubmittal}>New submittal</Button>{onOpenRtcc && <Button type="button" variant="outline" size="sm" className="mt-2 ml-2" disabled={busy || applying || !!readingUploads} onClick={onOpenRtcc}>Consultant comments / RTCC</Button>}{onOpenCompliance && <Button type="button" variant="outline" size="sm" className="mt-2" disabled={busy || applying || !!readingUploads} onClick={onOpenCompliance}>Specification compliance & library</Button>}</SheetHeader>
       <div className="min-h-0 flex-1 space-y-3 overflow-y-auto overscroll-contain px-3 py-3 sm:px-4 sm:py-5">
         {completed && <div role="status" className="rounded-xl border bg-secondary p-3 text-sm">Submittal saved. Choose <button type="button" className="font-semibold underline" onClick={startNewSubmittal}>New submittal</button> or upload files below to start another project.</div>}
         {!messages.length && <div className="rounded-2xl bg-secondary p-4 text-sm">
           <p className="font-semibold">Hi, I'm KINAIR Submittal AI.</p>
-          <p className="mt-1 text-muted-foreground">Choose your submittal type and index, attach your documents and paste the client project details, then Send. Files are read only after you send your message.</p>
+          <p className="mt-1 text-muted-foreground">Material Submittal is the default. Choose Compliance Statement or RTCC only when you want those workflows. You may also type the workflow name; typing is otherwise optional.</p>
         </div>}
         <details open={setupOpen} onToggle={event => setSetupOpen(event.currentTarget.open)} className="rounded-xl border bg-background">
           <summary className="cursor-pointer px-4 py-3 text-sm font-semibold">Project setup · Type, index &amp; cover details</summary>
         <div className="space-y-3 border-t p-3">
-          <label className="block text-sm font-semibold">Submittal type
-            <select aria-label="Submittal type" value={submittalKind} disabled={busy || applying} className="mt-1 w-full rounded-md border bg-background p-2 text-base sm:text-sm" onChange={event => { setSubmittalKind(event.target.value as Kind); setPlan(null); setComposePending(true); }}>
-              <option value="Material">Material Submittal</option>
+          {companyOptions && <div className="grid gap-3 sm:grid-cols-2">
+            <label className="block text-sm font-semibold">Supplier company
+              <select aria-label="Chat supplier company" value={selectedCompanyId ?? ""} disabled={busy || applying} className="mt-1 w-full rounded-md border bg-background p-2 text-base" onChange={event => { onCompanyChange?.(event.target.value); setPlan(null); setComposePending(true); }}>
+                <option value="">Select company</option>{companyOptions.map(item => <option key={item.id} value={item.id}>{item.name}</option>)}
+              </select>
+            </label>
+            <label className="block text-sm font-semibold">Brand
+              <select aria-label="Chat brand" value={selectedBrandId ?? ""} disabled={busy || applying} className="mt-1 w-full rounded-md border bg-background p-2 text-base" onChange={event => { onBrandChange?.(event.target.value); setPlan(null); setComposePending(true); }}>
+                <option value="">Select brand</option>{brandOptions?.map(item => <option key={item.id} value={item.id}>{item.name}</option>)}
+              </select>
+            </label>
+            <p className="text-xs text-muted-foreground sm:col-span-2">Your selection controls the company and brand documents, logos and supplier details. Company certificates apply across the selected company's products.</p>
+          </div>}
+          <label className="block text-sm font-semibold">What do you want to prepare? <span className="font-normal text-muted-foreground">(Default: Material Submittal)</span>
+            <select aria-label="Document workflow" value={workflowChoice} disabled={busy || applying || replyWorkflowBusy} className="mt-1 w-full rounded-md border bg-background p-2 text-base sm:text-sm" onChange={event => {
+              const value=event.target.value as ChatWorkflowChoice;setWorkflowChoice(value);setReplyWorkflow(null);setPlan(null);
+              if(value==="Material"||value==="PQ"||value==="O&M")setSubmittalKind(value);
+              setComposePending(uploads.length>0);
+            }}>
+              <option value="Material">Material Submittal — Default</option>
               <option value="PQ">PQ Submittal</option>
               <option value="O&M">O&amp;M Submittal</option>
+              <option value="Compliance">Compliance Statement</option>
+              <option value="RTCC">RTCC - Reply to Consultant Comments</option>
             </select>
           </label>
-          {submittalKind === "Material" && <label className="block text-sm font-semibold">Material schedule
+          {workflowChoice === "Material" && <label className="block text-sm font-semibold">Material schedule
             <select aria-label="Material schedule source" value={scheduleMode} disabled={busy || applying || !!readingUploads} className="mt-1 w-full rounded-md border bg-background p-2 text-base sm:text-sm" onChange={event => {
               setScheduleMode(event.target.value as "uploaded" | "ai"); setPlan(null); setComposePending(true);
               setUploads(items => items.map(item => ({ ...item, scheduleText: undefined, documentText: undefined, selectionItems: undefined })));
@@ -945,28 +1154,29 @@ function SubmittalChatSession({ open, onOpenChange, records, brands, seriesCatal
             </select>
             <span className="mt-2 block text-xs font-normal text-muted-foreground">Unpriced PDF/image schedules stay as supplied. Inquiries, priced quotations and AI mode produce a new schedule. Word/Excel schedules are converted to PDF.</span>
           </label>}
-          <label className="block text-sm font-semibold">Submittal index
+          {(workflowChoice==="Material"||workflowChoice==="PQ"||workflowChoice==="O&M")&&<label className="block text-sm font-semibold">Submittal index
             <select aria-label="Submittal index type" value={indexChoice ?? "general"} disabled={busy || applying} className="mt-1 w-full rounded-md border bg-background p-2 text-base sm:text-sm" onChange={event => { setIndexChoice(event.target.value as "general" | "project" | "customer"); setPlan(null); setComposePending(true); }}>
-              <option value="general">General Specification</option>
-              <option value="project">Project Specification</option>
-              <option value="customer">Custom Index</option>
+              <option value="general">General specification — no client index</option>
+              <option value="project">Project specification — no client index</option>
+              <option value="customer">Project specification — custom client index</option>
             </select>
-          </label>
-          {(indexChoice ?? "general") === "general" && <p className="text-xs text-muted-foreground">Uses your saved General Specification index.</p>}
-          {indexChoice === "project" && <div className="space-y-2">
-            <p className="text-xs text-muted-foreground">Attach the project specification and its compliance statement. Missing documents will be flagged for review.</p>
+          </label>}
+          {(workflowChoice==="Material"||workflowChoice==="PQ"||workflowChoice==="O&M")&&(indexChoice ?? "general") === "general" && <p className="text-xs text-muted-foreground">No client index supplied. Uses your saved General Specification index.</p>}
+          {(workflowChoice==="Material"||workflowChoice==="PQ"||workflowChoice==="O&M")&&indexChoice === "project" && <div className="space-y-2">
+            <p className="text-xs text-muted-foreground">No client index supplied. Uses your saved Project Specification index. Attach the project specification and its compliance statement.</p>
             {(["Project Specification", "Compliance Statement"] as const).map(purpose => <Button key={purpose} type="button" variant="outline" className="w-full justify-start whitespace-normal text-left" disabled={busy || applying} onClick={() => { uploadTarget.current = purpose; targetedUploadRef.current?.click(); }}><FileUp className="size-4 shrink-0" /> Upload {purpose}</Button>)}
           </div>}
-          {indexChoice === "customer" && <div className="space-y-2">
+          {(workflowChoice==="Material"||workflowChoice==="PQ"||workflowChoice==="O&M")&&indexChoice === "customer" && <div className="space-y-2">
             <label className="block text-xs font-medium">Paste your custom index
               <textarea aria-label="Custom index headings" rows={4} value={customIndexText} disabled={busy || applying} className="mt-1 w-full rounded-md border bg-background p-2 text-base sm:text-sm" placeholder={"1. Company profile\n2. Material schedule\n3. Technical data sheet"} onChange={event => { setCustomIndexText(event.target.value); setPlan(null); setComposePending(true); }} />
             </label>
-            <p className="text-xs text-muted-foreground">One heading per line, in your required order. Or upload your customer's index format.</p>
+            <p className="text-xs text-muted-foreground">Use the client's exact headings and order. Paste one heading per line or upload the client's index. Missing documents can be uploaded against each divider.</p>
             <Button type="button" variant="outline" className="w-full" disabled={busy || applying} onClick={() => { uploadTarget.current = "Customer index"; targetedUploadRef.current?.click(); }}><FileUp className="size-4" /> Upload Custom Index</Button>
           </div>}
         </div>
         <div className="space-y-2 rounded-xl border bg-background p-3">
           <p className="text-sm font-semibold">Cover / project details</p>
+          <ProjectDetailsReuse records={records} disabled={busy || applying || !!readingUploads || uploads.some(u=>u.kind === "cover")} onApply={fields=>{setCoverDetailsText(fields.map(f=>`${f.label}: ${f.value}`).join("\n"));setPlan(null);setComposePending(true);}}/>
           <label className="block text-xs font-medium">Paste client project details
             <textarea aria-label="Cover project details" rows={5} value={coverDetailsText} disabled={busy || applying} className="mt-1 w-full rounded-md border bg-background p-2 text-base sm:text-sm" placeholder={"Project Name: Warehouse in Al Quoz\nClient: ...\nConsultant: ...\nMain Contractor: ...\nMEP Contractor: ..."} onChange={event => { setCoverDetailsText(event.target.value); setPlan(null); setComposePending(true); }} />
           </label>
@@ -1007,7 +1217,7 @@ function SubmittalChatSession({ open, onOpenChange, records, brands, seriesCatal
           </label>}
           {!!plan.confirmedSeries && <p className="text-emerald-700">Series confirmed by you: {plan.confirmedSeries}</p>}
           {plan.fields.length > 0 && <dl className="mt-3 overflow-hidden rounded-lg border bg-background">{normalizeCoverFields(plan.fields).map(field => <div key={field.label} className="grid grid-cols-[38%_minmax(0,1fr)] border-b last:border-0"><dt className="bg-secondary px-3 py-2 text-xs font-semibold break-words">{field.label}</dt><dd className="px-3 py-2 text-xs break-words">{field.value}</dd></div>)}</dl>}
-          <p className="mt-2">Index: {review?.indexMode === "keep" ? "Keep previous" : review?.indexMode ?? plan.indexMode} · {review?.sectionStatus.length ?? 0} sections</p>
+          <p className="mt-2">Index: {review?.indexMode === "keep" ? "Keep previous" : (review?.indexMode ?? plan.indexMode) === "general" ? "General specification — no client index" : (review?.indexMode ?? plan.indexMode) === "project" ? "Project specification — no client index" : "Project specification — custom client index"} · {review?.sectionStatus.length ?? 0} sections</p>
           {plan.brand && !brands.some((brand) => brand.toLowerCase() === plan.brand.toLowerCase()) && <p className="mt-2 text-xs font-medium text-amber-700">This brand is not in your saved document library. Upload its certificates and catalogues here, or add them in the builder.</p>}
           {!!plan.omitSections?.length && <p className="mt-2 text-xs">Excluded by request: {plan.omitSections.join(", ")}</p>}
           {review && <div className="mt-3 space-y-2 rounded-xl bg-background p-3">
@@ -1015,9 +1225,14 @@ function SubmittalChatSession({ open, onOpenChange, records, brands, seriesCatal
             <ol className="space-y-2 rounded-lg border p-2 text-xs">
               {review.sectionStatus.map((section, index) => <li key={index} className="grid grid-cols-[minmax(0,1fr)_auto] items-start gap-2">
                 <span>{index + 1}. {section.title}</span>
-                <span className={section.count ? "shrink-0 text-emerald-700" : "shrink-0 text-amber-700"}>{section.count ? `Included · ${section.count}` : "Not included"}</span>
+                <div className="flex flex-col items-end gap-1">
+                  <span className={section.count ? "text-emerald-700" : "text-amber-700"}>{section.count ? `Included · ${section.count}` : "Upload required"}</span>
+                  {!section.count && <Button type="button" variant="outline" size="sm" disabled={busy || applying || !!readingUploads} aria-label={`Upload ${section.title}`} onClick={() => { uploadTarget.current = section.title; targetedUploadRef.current?.click(); }}><FileUp className="size-4" /> Upload</Button>}
+                </div>
               </li>)}
             </ol>
+            <Button type="button" variant="outline" size="sm" disabled={busy || applying || !!readingUploads} onClick={() => void ask("Recheck missing documents and retry missing TDS")}>Recheck missing documents</Button>
+            <p className="text-xs text-muted-foreground">Each Upload button assigns files to that exact divider. Attach missing files, then press Send. Or use the manual builder below.</p>
             {!!review.detectedSeries.length && <p className="text-emerald-700">Series found in uploaded files: {review.detectedSeries.join(", ")}. Related saved series documents will be used where available.</p>}
             {!!review.unresolvedModels.length && <p className="text-amber-700">Unverified schedule code(s): {review.unresolvedModels.join(", ")}. Please confirm the exact series; I will not attach a guessed TDS.</p>}
             {!!review.unreadableSchedules.length && <p className="text-amber-700">Schedule text is unreadable or still loading: {review.unreadableSchedules.join(", ")}.</p>}
@@ -1035,22 +1250,23 @@ function SubmittalChatSession({ open, onOpenChange, records, brands, seriesCatal
           <p className="mt-2 text-xs text-muted-foreground">The saved draft remains editable in the builder. Downloading the PDF does not mark it as sent to the customer.</p>
         </div>}
       <div className="rounded-xl border border-border p-3">
-        <label className={`relative flex min-h-12 w-full items-center justify-center gap-2 rounded-md border bg-background px-4 py-3 text-sm font-medium ${busy || applying || !!readingUploads ? "opacity-50" : "cursor-pointer"}`}>
+        {(workflowChoice==="Compliance"||workflowChoice==="RTCC")&&<div className="mb-3 rounded-lg bg-primary/5 p-3 text-sm"><p className="font-semibold">{workflowChoice==="Compliance"?"Upload Project Specification":"Upload Consultant Comments"}</p><p className="text-xs text-muted-foreground">No message is required. Upload the source file and press Send; KINAIR will create the editable {workflowChoice==="Compliance"?"Compliance":"RTCC"} Excel using the same builder engine.</p></div>}
+        {(workflowChoice==="Material"||workflowChoice==="PQ"||workflowChoice==="O&M")&&<label className={`relative flex min-h-12 w-full items-center justify-center gap-2 rounded-md border bg-background px-4 py-3 text-sm font-medium ${busy || applying || !!readingUploads ? "opacity-50" : "cursor-pointer"}`}>
           <FileUp className="size-4" /> Upload quotation / priced schedule
           <input key={completed ? "completed-quotation" : "compose-quotation"} type="file" multiple accept=".pdf,.png,.jpg,.jpeg,.txt,.docx,.xlsx,.xlsm,.xls,.csv" className="absolute inset-0 h-full w-full cursor-pointer opacity-0" aria-label="Upload quotation / priced schedule" disabled={busy || applying || !!readingUploads} onChange={event => { const files = Array.from(event.currentTarget.files ?? []); event.currentTarget.value = ""; addFiles(files, "Quotation"); }} />
-        </label>
-        <p className="text-xs text-muted-foreground">Priced originals are excluded from the PDF and converted to a clean technical schedule. Without prices, your uploaded schedule is kept unless you select AI preparation.</p>
+        </label>}
+        {(workflowChoice==="Material"||workflowChoice==="PQ"||workflowChoice==="O&M")&&<p className="text-xs text-muted-foreground">Priced originals are excluded from the PDF and converted to a clean technical schedule. Without prices, your uploaded schedule is kept unless you select AI preparation.</p>}
         <label className={`relative flex min-h-12 w-full items-center justify-center gap-2 rounded-md border bg-background px-4 py-3 text-sm font-medium ${applying || busy ? "opacity-50" : "cursor-pointer"}`}>
-          <FileUp className="size-4" /> Upload files
-          <input key={completed ? "completed-files" : "compose-files"} ref={uploadInputRef} type="file" multiple accept=".pdf,.png,.jpg,.jpeg,.txt,.docx,.xlsx,.xlsm,.xls,.csv" className="absolute inset-0 h-full w-full cursor-pointer opacity-0" aria-label="Upload files" disabled={applying || busy} onChange={event => { const files = Array.from(event.currentTarget.files ?? []); event.currentTarget.value = ""; addFiles(files); }} />
+          <FileUp className="size-4" /> {workflowChoice==="Compliance"?"Upload Project Specification":workflowChoice==="RTCC"?"Upload Consultant Comments":"Upload files"}
+          <input key={completed ? "completed-files" : "compose-files"} ref={uploadInputRef} type="file" multiple={workflowChoice!=="Compliance"&&workflowChoice!=="RTCC"} accept=".pdf,.png,.jpg,.jpeg,.txt,.docx,.xlsx,.xlsm,.xls,.csv" className="absolute inset-0 h-full w-full cursor-pointer opacity-0" aria-label="Upload files" disabled={applying || busy} onChange={event => { const files = Array.from(event.currentTarget.files ?? []); event.currentTarget.value = ""; addFiles(files); }} />
         </label>
-        <p className="mt-1 text-xs text-muted-foreground">Cover, index, schedule, datasheets and certificates: upload together. I'll read and sort them.</p>
+        <p className="mt-1 text-xs text-muted-foreground">{workflowChoice==="Compliance"?"PDF, scanned PDF, image, Word or Excel specification supported.":workflowChoice==="RTCC"?"Upload the consultant comment PDF or image.":"Cover, index, schedule, datasheets and certificates: upload together. I'll read and sort them."}</p>
         {!!uploads.length && <div className="mt-2 space-y-2">
           <p className="text-xs font-semibold">{uploads.length} file(s) attached. {readingUploads ? (mobileMode ? "Reading document securely on server…" : "Reading/OCR and identifying document type…") : "Add your message, then press Send."}</p>
           {uploads.map((upload, index) => <div key={index}><div className="flex items-center gap-2 rounded-lg bg-secondary p-2 text-xs">
             <span className="min-w-0 flex-1 truncate" title={upload.file.name}>{upload.file.name}</span>
             {composePending ? <span className="shrink-0 text-muted-foreground">Attached · waiting for Send</span> :
-              upload.kind === "cover" || upload.kind === "index" ? <span className="text-primary">{upload.kind === "cover" ? "Cover" : "Index"}</span> : review ? <select aria-label={"Divider for " + upload.file.name} className="max-w-32 rounded-md border bg-background p-1 text-xs" value={upload.sectionTitle.startsWith("new:") ? upload.sectionTitle : assignmentForUpload(upload) || review.sections.find((title) => title.toLowerCase().includes(upload.sectionTitle.toLowerCase()) || upload.sectionTitle.toLowerCase().includes(title.toLowerCase())) || ""} onChange={(event) => setUploads((items) => items.map((item, i) => i === index ? { ...item, sectionTitle: event.target.value } : item))}>
+              upload.kind === "cover" || upload.kind === "index" ? <label className="text-primary">{upload.kind === "cover" ? "Cover" : "Index"}<select aria-label={`${upload.kind} page output for ${upload.file.name}`} className="ml-2 max-w-48 rounded border bg-background p-1 text-xs" value={upload.pageMode ?? "uploaded"} disabled={busy || applying} onChange={event => setUploads(items => items.map((item, i) => i === index ? {...item,pageMode:event.target.value as "uploaded" | "generated"} : item))}><option value="uploaded">Use uploaded page layout</option><option value="generated">Generate our branded page</option></select></label> : review ? <select aria-label={"Divider for " + upload.file.name} className="max-w-32 rounded-md border bg-background p-1 text-xs" value={upload.sectionTitle.startsWith("new:") ? upload.sectionTitle : assignmentForUpload(upload) || review.sections.find((title) => title.toLowerCase().includes(upload.sectionTitle.toLowerCase()) || upload.sectionTitle.toLowerCase().includes(title.toLowerCase())) || ""} onChange={(event) => setUploads((items) => items.map((item, i) => i === index ? { ...item, sectionTitle: event.target.value } : item))}>
               <option value="">Select divider</option>
               {review.sections.map((title) => <option key={title} value={title}>{title}</option>)}
               <option value={"new:" + upload.file.name.replace(/\.[^.]+$/, "").replace(/[_-]+/g, " ").trim().slice(0, 100)}>Create divider from filename</option>
@@ -1069,7 +1285,23 @@ function SubmittalChatSession({ open, onOpenChange, records, brands, seriesCatal
             <pre className="mt-2 max-h-48 overflow-auto whitespace-pre-wrap">{(upload.scheduleText ?? upload.documentText ?? "").slice(0, 3000)}</pre>
           </details>}</div>)}
         </div>}
-        {!composePending && <Button type="button" variant="secondary" size="sm" className="mt-2 w-full" onClick={() => void apply("builder")} disabled={applying || busy || !!readingUploads}>
+        {replyWorkflow && <div className="mt-3 rounded-xl border border-primary/30 bg-primary/5 p-3 space-y-2">
+          <div><p className="font-semibold">{replyWorkflow.kind==="compliance"?"Specification → Compliance Excel":"Consultant Comments → RTCC Excel"}</p><p className="text-xs text-muted-foreground">Source: {replyWorkflow.sourceName} · {replyWorkflow.kind==="compliance"?replyWorkflow.sheet.rows.length:replyWorkflow.rounds[0]?.rows.length??0} point(s)</p></div>
+          {replyWorkflowBusy&&<p role="status" className="text-sm text-primary">{replyWorkflowProgress||"Working…"}</p>}
+          <div className="grid gap-2 sm:grid-cols-2">
+            <Button type="button" variant="outline" disabled={replyWorkflowBusy} onClick={()=>void downloadReplyExcel()}><FileUp className="size-4" /> Download editable Excel</Button>
+            <Button type="button" variant="outline" disabled={replyWorkflowBusy} onClick={()=>replyExcelInputRef.current?.click()}><FileUp className="size-4" /> Upload completed Excel</Button>
+            <input ref={replyExcelInputRef} type="file" accept=".xlsx,.xlsm,.xls" className="hidden" aria-label="Upload completed Compliance or RTCC Excel" onChange={event=>{const file=event.target.files?.[0];void importReplyExcel(file);}}/>
+            <Button type="button" className="sm:col-span-2" disabled={replyWorkflowBusy||!replyWorkflow.excelImported||!selectedCompanyId||!selectedBrandId} onClick={()=>void downloadReplyPdf()}><Sparkles className="size-4" /> Generate & download branded PDF</Button>
+          </div>
+          {!replyWorkflow.excelImported&&<p className="text-xs text-muted-foreground">Edit only the Reply column in the downloaded KINAIR Excel, save it, then upload it here. The source clause/comment columns are used to verify the workbook before replies are accepted.</p>}
+          {replyWorkflow.excelImported&&<p className="text-xs text-emerald-700">Excel replies loaded. PDF will use the selected company logo, brand logo and company stamp.</p>}
+          <div className="flex flex-wrap gap-2">
+            {replyWorkflow.kind==="compliance"&&onOpenCompliance&&<Button type="button" variant="ghost" size="sm" onClick={onOpenCompliance}>Open full Compliance Builder</Button>}
+            {replyWorkflow.kind==="rtcc"&&onOpenRtcc&&<Button type="button" variant="ghost" size="sm" onClick={onOpenRtcc}>Open full RTCC Builder</Button>}
+          </div>
+        </div>}
+        {!composePending && !replyWorkflow && <Button type="button" variant="secondary" size="sm" className="mt-2 w-full" onClick={() => void apply("builder")} disabled={applying || busy || !!readingUploads}>
           {applying ? <Loader2 className="size-4 animate-spin" /> : <FileUp className="size-4" />} Open full submittal builder {plan ? "with this plan" : ""}
         </Button>}
       </div>
@@ -1080,7 +1312,7 @@ function SubmittalChatSession({ open, onOpenChange, records, brands, seriesCatal
       {!composePending && selectorLoading && uploads.some((item) => item.sectionTitle === "Material schedule" || Boolean(item.selectionItems?.length)) && <p role="status" className="px-4 text-xs text-muted-foreground">Loading fan and air curtain selector data…</p>}
       {(applying || (showSavedPdf && pdfBuilding)) && <p role="status" className="px-4 py-2 text-sm text-primary">{pdfBuilding ? "Building the final PDF with the core submittal engine…" : "Preparing the submittal…"}</p>}
       {showSavedPdf && pdfPrepared && !pdfBuilding && !pdfReady && <Button type="button" className="mx-4 my-2 shrink-0" onClick={onDownloadPdf}><FileUp className="size-4" /> Build & download final submittal PDF</Button>}
-      {showSavedPdf && pdfFailed && <p role="alert" className="px-4 py-2 text-sm text-destructive">Some pages could not be included. Check the builder notice and correct those files.</p>}
+      {showSavedPdf && pdfFailed && <div className="px-4 py-2 text-sm text-destructive"><p role="alert">{pdfError || "PDF could not be built. Review the document files."}</p><Button variant="outline" onClick={onDownloadPdf}>Retry PDF build</Button></div>}
       {!!tdsWarnings.length && <div role="alert" className="mx-4 my-2 rounded-lg border border-amber-400 bg-amber-50 p-3 text-sm text-amber-950">
         <p className="font-semibold">TDS incomplete — review before issuing</p>
         <p>{tdsWarnings.join("; ")}</p>

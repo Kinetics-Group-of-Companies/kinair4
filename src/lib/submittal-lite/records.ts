@@ -1,18 +1,27 @@
+import type { RtccRound } from "./rtcc";
 export type IndexMode = "general" | "project" | "customer";
 export type Kind = "Material" | "PQ" | "O&M";
 export type StampMode = "all" | "divider" | "none";
 export type DocRef = { id: string; name: string; type: string; size?: number; pages?: number; auto?: boolean };
-export type Section = { id: string; title: string; docs: DocRef[]; auto?: boolean; stamp?: StampMode };
+export type Section = { id: string; title: string; docs: DocRef[]; notApplicableReason?: string; auto?: boolean; stamp?: StampMode };
 export type Field = { label: string; value: string };
 export const statuses = ["Draft", "Submitted", "Under review", "Approved", "Approved as noted", "Revise & resubmit", "Rejected"] as const;
 export type Status = (typeof statuses)[number];
 export type HistoryItem = { status: Status; at: string; note?: string };
 
 export type SubmittalRecord = {
+  replyDocumentIds?: string[];
+  rtcc?: RtccRound[];
+  compliance?: import("./compliance").ComplianceSheet;
+  issuedPdf?: DocRef;
+  issuedLabels?: { label: string; kind: "cover" | "index" | "divider" | "doc"; docId?: string }[];
+  issuedAt?: string;
+  technicalIssues?: string[];
   id: string; ref: string; rev: number; kind: Kind; status: Status; title: string; coverHeading?: string; project: string;
   companyId: string; brandId: string; seriesIds: string[]; customProducts?: string[]; stampAll: boolean; stampCover?: boolean; stampIndex?: boolean;
   useDefaultCover?: boolean; useDefaultIndex?: boolean; indexMode?: IndexMode;
-  coverText: string; indexText: string; coverDoc?: DocRef; indexDoc?: DocRef; fields: Field[]; sections: Section[];
+  coverPageMode?: "uploaded" | "generated"; indexPageMode?: "uploaded" | "generated"; dividerPageMode?: "uploaded" | "generated";
+  coverText: string; indexText: string; coverDoc?: DocRef; indexDoc?: DocRef; dividerDoc?: DocRef; fields: Field[]; sections: Section[];
   createdAt: string; updatedAt: string; history: HistoryItem[];
 };
 
@@ -41,3 +50,5 @@ export function loadRecords(): SubmittalRecord[] {
   try { return JSON.parse(localStorage.getItem("submittals:records") ?? "[]"); } catch { return []; }
 }
 export const saveRecords = (r: SubmittalRecord[]) => localStorage.setItem("submittals:records", JSON.stringify(r));
+
+

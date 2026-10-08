@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { useAuth } from '@/lib/authContext';
 import { supabase } from '@/integrations/backend/client';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -63,11 +64,18 @@ interface UserProfile {
   };
   user_email?: string;
   can_access_lpo?: boolean;
+  can_access_submittal?: boolean;
   receive_lpo_emails?: boolean;
   notification_email?: string | null;
 }
 
 export function UserApprovalManager() {
+  const { isSuperAdmin: canMoveWorkspace } = useAuth();
+  const [workspaces, setWorkspaces] = useState<{id: string; name: string}[]>([]);
+  const [workspaceChoices, setWorkspaceChoices] = useState<Record<string, string>>({});
+  const [workspaceMove, setWorkspaceMove] = useState<UserProfile | null>(null);
+  const [memberCounts, setMemberCounts] = useState<Record<string, number>>({});
+  const isSharedWorkspace = (id: string | null) => id === '00000000-0000-0000-0000-000000000001' || Boolean(id && memberCounts[id] > 1);
   const [users, setUsers] = useState<UserProfile[]>([]);
   const [lpoUsers, setLpoUsers] = useState<UserProfile[]>([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -98,6 +106,14 @@ export function UserApprovalManager() {
 
       if (error) throw error;
 
+      const counts: Record<string, number> = {};
+      for (const p of profiles || []) if (p.tenant_id) counts[p.tenant_id] = (counts[p.tenant_id] || 0) + 1;
+      setMemberCounts(counts);
+      if (canMoveWorkspace) {
+        const {data: available, error: workspaceError} = await supabase.from('tenants').select('id,name').eq('is_active', true).order('name');
+        if (workspaceError) throw workspaceError;
+        setWorkspaces(available || []);
+      }
       // Fetch user roles
       const { data: roles } = await supabase
         .from('user_roles')
@@ -107,7 +123,7 @@ export function UserApprovalManager() {
 
       const { data: lpoPermissions, error: permissionsError } = await supabase
         .from('user_lpo_permissions')
-        .select('user_id, can_access_lpo, receive_lpo_emails, notification_email');
+        .select('user_id, can_access_lpo, can_access_submittal, receive_lpo_emails, notification_email');
 
       if (permissionsError) throw permissionsError;
 
@@ -128,6 +144,7 @@ export function UserApprovalManager() {
           user_email: (p as any).email || (Array.isArray(p.tenant) ? p.tenant[0]?.email : (p.tenant as any)?.email),
           role: roleMap.get(p.user_id) as 'admin' | 'user' | undefined,
           can_access_lpo: permission?.can_access_lpo ?? false,
+          can_access_submittal: permission?.can_access_submittal ?? false,
           receive_lpo_emails: permission?.receive_lpo_emails ?? false,
           notification_email: permission?.notification_email ?? null,
         };
@@ -150,6 +167,25 @@ export function UserApprovalManager() {
   useEffect(() => {
     fetchUsers();
   }, []);
+
+  const moveWorkspace = async () => {
+    if (!workspaceMove || !canMoveWorkspace) return;
+    const target = workspaceChoices[workspaceMove.id];
+    if (!target || target === workspaceMove.tenant_id) return;
+    setActionLoading(workspaceMove.id);
+    try {
+      let request = supabase.from('profiles').update({tenant_id: target}).eq('user_id', workspaceMove.user_id);
+      request = workspaceMove.tenant_id ? request.eq('tenant_id', workspaceMove.tenant_id) : request.is('tenant_id', null);
+      const {data, error} = await request.select('tenant_id').single();
+      if (error) throw error;
+      if (data?.tenant_id !== target) throw new Error('Workspace change was not saved');
+      toast.success('Workspace changed. Ask the user to sign out and sign in again.');
+      setWorkspaceMove(null);
+      await fetchUsers();
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Unable to change workspace');
+    } finally { setActionLoading(null); }
+  };
 
   const handleApprove = async (profile: UserProfile, days: number) => {
     // SECURITY: Force minimum 30 days, never allow unlimited (0)
@@ -174,6 +210,11 @@ export function UserApprovalManager() {
 
       if (profileError) throw profileError;
 
+      if (isSharedWorkspace(profile.tenant_id)) {
+        toast.success('User approved in the shared workspace');
+        await fetchUsers();
+        return;
+      }
       // Update tenant subscription - ALWAYS set expiry date, never null
       const subscriptionEnd = new Date(Date.now() + safeDays * 24 * 60 * 60 * 1000).toISOString();
       
@@ -227,13 +268,15 @@ export function UserApprovalManager() {
 
     setActionLoading(profile.id);
     try {
-      // Deactivate tenant
+      // Shared workspace subscriptions must not be changed when revoking one user.
+      if (!isSharedWorkspace(profile.tenant_id)) {
       const { error } = await supabase
         .from('tenants')
         .update({ is_active: false })
         .eq('id', profile.tenant_id);
 
       if (error) throw error;
+      }
 
       // Update profile
       const { error: profileError } = await supabase
@@ -273,7 +316,7 @@ export function UserApprovalManager() {
       if (profileError) throw profileError;
 
       // Delete tenant if it exists
-      if (profile.tenant_id) {
+      if (profile.tenant_id && !isSharedWorkspace(profile.tenant_id)) {
         await supabase
           .from('tenants')
           .delete()
@@ -318,6 +361,7 @@ export function UserApprovalManager() {
 
   const handleExtendSubscription = async (profile: UserProfile, days: number) => {
     if (!profile.tenant_id) return;
+    if (isSharedWorkspace(profile.tenant_id)) { toast.error('Shared workspace subscription is managed for the whole company.'); return; }
     
     // SECURITY: Force minimum 30 days for extension
     const safeDays = days > 0 ? days : 30;
@@ -357,6 +401,7 @@ export function UserApprovalManager() {
   // Set subscription to a specific date - SECURITY: only super admins can set unlimited via this
   const handleSetSubscriptionDate = async (profile: UserProfile, date: Date | null) => {
     if (!profile.tenant_id) return;
+    if (isSharedWorkspace(profile.tenant_id)) { toast.error('Shared workspace subscription is managed for the whole company.'); return; }
 
     // SECURITY: If null (unlimited) is requested, set to 30 days instead
     const safeDate = date || new Date(Date.now() + 30 * 24 * 60 * 60 * 1000);
@@ -461,15 +506,16 @@ export function UserApprovalManager() {
     }
   };
 
-  const handleLpoPermissionChange = async (
+  const handlePortalPermissionChange = async (
     profile: UserProfile,
-    changes: Partial<Pick<UserProfile, 'can_access_lpo' | 'receive_lpo_emails' | 'notification_email'>>,
+    changes: Partial<Pick<UserProfile, 'can_access_lpo' | 'can_access_submittal' | 'receive_lpo_emails' | 'notification_email'>>,
   ) => {
-    setActionLoading(`lpo-${profile.user_id}`);
+    setActionLoading(`portal-${profile.user_id}`);
     try {
-      const { data, error } = await supabase.rpc('admin_set_lpo_permission', {
+      const { data, error } = await supabase.rpc('admin_set_portal_permission', {
         _target_user_id: profile.user_id,
         _can_access_lpo: changes.can_access_lpo ?? null,
+        _can_access_submittal: changes.can_access_submittal ?? null,
         _receive_lpo_emails: changes.receive_lpo_emails ?? null,
         _notification_email: changes.notification_email ?? null,
       });
@@ -477,11 +523,11 @@ export function UserApprovalManager() {
       if (error) throw error;
       if (!data) throw new Error('Permission update returned no result');
 
-      toast.success('LPO permissions updated');
+      toast.success('Portal permissions updated');
       await fetchUsers();
     } catch (error) {
-      console.error('Error updating LPO permissions:', error);
-      toast.error(error instanceof Error ? error.message : 'Failed to update LPO permissions');
+      console.error('Error updating portal permissions:', error);
+      toast.error(error instanceof Error ? error.message : 'Failed to update portal permissions');
     } finally {
       setActionLoading(null);
     }
@@ -553,10 +599,10 @@ export function UserApprovalManager() {
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
             <Truck className="h-5 w-5 text-primary" />
-            LPO Tracker &amp; Email Permissions
+            Portal Feature Access
           </CardTitle>
           <CardDescription>
-            Select LPO Tracker access and email notifications independently for each approved user. Users granted Tracker access share the same company LPO register.
+            Control LPO Tracker and Submittal Control access for each approved user. LPO email alerts remain independent.
           </CardDescription>
         </CardHeader>
         <CardContent>
@@ -569,7 +615,8 @@ export function UserApprovalManager() {
                   <TableHead>User</TableHead>
                   <TableHead>Alert email</TableHead>
                   <TableHead className="text-center">LPO Tracker</TableHead>
-                  <TableHead className="text-center">User alerts</TableHead>
+                  <TableHead className="text-center">Submittal Control</TableHead>
+                  <TableHead className="text-center">LPO alerts</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -592,7 +639,7 @@ export function UserApprovalManager() {
                             const value = event.currentTarget.value.trim();
                             const current = profile.notification_email || profile.user_email || '';
                             if (value && value !== current) {
-                              void handleLpoPermissionChange(profile, { notification_email: value });
+                              void handlePortalPermissionChange(profile, { notification_email: value });
                             }
                           }}
                         />
@@ -603,7 +650,18 @@ export function UserApprovalManager() {
                             checked={superAdmin || Boolean(profile.can_access_lpo)}
                             disabled={superAdmin || loading}
                             aria-label={`Allow LPO Tracker access for ${profile.user_email}`}
-                            onCheckedChange={(checked) => void handleLpoPermissionChange(profile, { can_access_lpo: checked })}
+                            onCheckedChange={(checked) => void handlePortalPermissionChange(profile, { can_access_lpo: checked })}
+                          />
+                          {superAdmin && <Badge variant="secondary">Always on</Badge>}
+                        </div>
+                      </TableCell>
+                      <TableCell className="text-center">
+                        <div className="inline-flex items-center gap-2">
+                          <Switch
+                            checked={superAdmin || Boolean(profile.can_access_submittal)}
+                            disabled={superAdmin || loading}
+                            aria-label={`Allow Submittal Control access for ${profile.user_email}`}
+                            onCheckedChange={(checked) => void handlePortalPermissionChange(profile, { can_access_submittal: checked })}
                           />
                           {superAdmin && <Badge variant="secondary">Always on</Badge>}
                         </div>
@@ -615,7 +673,7 @@ export function UserApprovalManager() {
                             checked={Boolean(profile.receive_lpo_emails)}
                             disabled={loading}
                             aria-label={`Send LPO email to ${profile.user_email}`}
-                            onCheckedChange={(checked) => void handleLpoPermissionChange(profile, { receive_lpo_emails: checked })}
+                            onCheckedChange={(checked) => void handlePortalPermissionChange(profile, { receive_lpo_emails: checked })}
                           />
                         </div>
                       </TableCell>
@@ -627,6 +685,27 @@ export function UserApprovalManager() {
           )}
         </CardContent>
       </Card>
+
+      {canMoveWorkspace && <Card>
+        <CardHeader><CardTitle>User workspace access</CardTitle>
+          <CardDescription>Choose the company workspace whose submittals and document library this user can access. Existing documents stay in their original workspace. Approval and admin role remain unchanged.</CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-3">
+          {users.map(profile => <div key={profile.id} className="flex flex-col gap-2 rounded-lg border p-3 sm:flex-row sm:items-center">
+            <div className="min-w-0 flex-1"><p className="break-all font-medium">{profile.user_email}</p><p className="text-sm text-muted-foreground">Current: {profile.tenant?.name || 'Unassigned'}</p></div>
+            <Select value={workspaceChoices[profile.id] || profile.tenant_id || ''} onValueChange={value => setWorkspaceChoices(prev => ({...prev, [profile.id]: value}))}>
+              <SelectTrigger className="w-full sm:w-48" aria-label={`Workspace for ${profile.user_email}`}><SelectValue placeholder="Choose workspace" /></SelectTrigger>
+              <SelectContent>{workspaces.map(w => <SelectItem key={w.id} value={w.id}>{w.name}</SelectItem>)}</SelectContent>
+            </Select>
+            <Button disabled={Boolean(actionLoading) || !workspaceChoices[profile.id] || workspaceChoices[profile.id] === profile.tenant_id} onClick={() => setWorkspaceMove(profile)}>Change workspace</Button>
+          </div>)}
+        </CardContent>
+      </Card>}
+      <AlertDialog open={!!workspaceMove} onOpenChange={open => { if (!open && !actionLoading) setWorkspaceMove(null); }}>
+        <AlertDialogContent><AlertDialogHeader><AlertDialogTitle>Change user workspace?</AlertDialogTitle>
+          <AlertDialogDescription>{workspaceMove?.user_email} will use {workspaces.find(w => w.id === workspaceChoices[workspaceMove?.id || ''])?.name}. They will gain access to its shared data and lose access to the previous workspace. Existing documents will not be moved or deleted.</AlertDialogDescription>
+        </AlertDialogHeader><AlertDialogFooter><AlertDialogCancel disabled={Boolean(actionLoading)}>Cancel</AlertDialogCancel><Button disabled={Boolean(actionLoading)} onClick={() => void moveWorkspace()}>{actionLoading ? 'Saving…' : 'Confirm workspace change'}</Button></AlertDialogFooter></AlertDialogContent>
+      </AlertDialog>
 
       {/* Pending Approvals */}
       <Card>

@@ -55,8 +55,8 @@ function classify(provider: Provider, rawId: string, metadata: Record<string, un
     tier,
     cost_rank: rank,
     supports_tools: true,
-    enabled: safe,
-    metadata,
+    enabled: false, // New IDs require a configured rate before automatic submittal use.
+    metadata: { ...metadata, auto_discovered: true, pricing_status: "unverified" },
   };
 }
 
@@ -76,6 +76,8 @@ Deno.serve(async (req) => {
     });
   }
 
+  const {data:profile} = await authClient.from("profiles").select("is_approved,tenant_id").eq("user_id",userData.user.id).maybeSingle();
+  if(!profile?.is_approved || !profile?.tenant_id)return new Response(JSON.stringify({error:"Workspace unavailable."}),{status:403,headers:{...corsHeaders,"Content-Type":"application/json"}});
   const admin = createClient(url, serviceKey);
   const { data: latest } = await admin
     .from("ai_models")
@@ -84,7 +86,8 @@ Deno.serve(async (req) => {
     .limit(1)
     .maybeSingle();
 
-  const force = new URL(req.url).searchParams.get("refresh") === "1";
+  const age = latest?.last_seen_at ? Date.now() - new Date(latest.last_seen_at).getTime() : Infinity;
+  const force = new URL(req.url).searchParams.get("refresh") === "1" && age > 5 * 60 * 1000;
   const stale = !latest?.last_seen_at || Date.now() - new Date(latest.last_seen_at).getTime() > 24 * 60 * 60 * 1000;
 
   if (force || stale) {
@@ -93,20 +96,29 @@ Deno.serve(async (req) => {
 
     const googleKey = Deno.env.get("GEMINI_API_KEY");
     if (googleKey) tasks.push((async () => {
-      const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models?key=${encodeURIComponent(googleKey)}`);
-      if (!response.ok) throw new Error(`Google models API: ${response.status}`);
-      const json = await response.json();
-      for (const model of json.models ?? []) {
-        if (!(model.supportedGenerationMethods ?? []).includes("generateContent")) continue;
-        const item = classify("google", model.name ?? "", model);
-        if (item) discovered.push(item);
-      }
+      let pageToken = "";
+      const found: Candidate[] = [];
+      do {
+        const endpoint = new URL("https://generativelanguage.googleapis.com/v1beta/models");
+        endpoint.searchParams.set("pageSize", "1000");
+        if (pageToken) endpoint.searchParams.set("pageToken", pageToken);
+        const response = await fetch(endpoint, {headers:{"x-goog-api-key":googleKey}, signal:AbortSignal.timeout(8000)});
+        if (!response.ok) throw new Error(`Google models API: ${response.status}`);
+        const json = await response.json();
+        for (const model of json.models ?? []) {
+          if (!(model.supportedGenerationMethods ?? []).includes("generateContent")) continue;
+          const item = classify("google", model.name ?? "", model);
+          if (item) found.push(item);
+        }
+        pageToken = json.nextPageToken || "";
+      } while (pageToken);
+      discovered.push(...found);
     })().catch((error) => console.warn("Google model discovery failed", String(error))));
 
     const openaiKey = Deno.env.get("OPENAI_API_KEY");
     if (openaiKey) tasks.push((async () => {
       const response = await fetch("https://api.openai.com/v1/models", {
-        headers: { Authorization: `Bearer ${openaiKey}` },
+        headers: { Authorization: `Bearer ${openaiKey}` }, signal:AbortSignal.timeout(8000),
       });
       if (!response.ok) throw new Error(`OpenAI models API: ${response.status}`);
       const json = await response.json();
@@ -118,28 +130,41 @@ Deno.serve(async (req) => {
 
     const anthropicKey = Deno.env.get("ANTHROPIC_API_KEY");
     if (anthropicKey) tasks.push((async () => {
-      const response = await fetch("https://api.anthropic.com/v1/models?limit=100", {
-        headers: { "x-api-key": anthropicKey, "anthropic-version": "2023-06-01" },
-      });
-      if (!response.ok) throw new Error(`Anthropic models API: ${response.status}`);
-      const json = await response.json();
-      for (const model of json.data ?? []) {
-        const item = classify("anthropic", model.id ?? "", model);
-        if (item) discovered.push(item);
-      }
+      let after = "";
+      const found: Candidate[] = [];
+      do {
+        const response = await fetch("https://api.anthropic.com/v1/models?limit=100" + (after ? "&after_id=" + encodeURIComponent(after) : ""), {
+          headers: { "x-api-key": anthropicKey, "anthropic-version": "2023-06-01" }, signal:AbortSignal.timeout(8000),
+        });
+        if (!response.ok) throw new Error(`Anthropic models API: ${response.status}`);
+        const json = await response.json();
+        for (const model of json.data ?? []) {
+          const item = classify("anthropic", model.id ?? "", model);
+          if (item) found.push(item);
+        }
+        after = json.has_more ? json.last_id : "";
+        if (json.has_more && !after) throw new Error("Incomplete model list");
+      } while (after);
+      discovered.push(...found);
     })().catch((error) => console.warn("Anthropic model discovery failed", String(error))));
 
     await Promise.all(tasks);
     if (discovered.length) {
       const ids = discovered.map((item) => `${item.provider}:${item.model_id}`);
-      const { data: existing } = await admin.from("ai_models").select("provider,model_id,enabled");
-      const enabled = new Map((existing ?? []).map((row) => [`${row.provider}:${row.model_id}`, row.enabled]));
+      const { data: existing } = await admin.from("ai_models").select("provider,model_id,enabled,tier,cost_rank,metadata");
+      const enabled = new Map((existing ?? []).map((row) => [`${row.provider}:${row.model_id}`, row]));
       const now = new Date().toISOString();
-      const rows = discovered.map((item) => ({
-        ...item,
-        enabled: enabled.get(`${item.provider}:${item.model_id}`) ?? item.enabled,
-        last_seen_at: now,
-      }));
+      const rows = discovered.map((item) => {
+        const previous = enabled.get(`${item.provider}:${item.model_id}`);
+        return {
+          ...item,
+          enabled: previous?.enabled ?? false,
+          tier: previous?.tier ?? item.tier,
+          cost_rank: previous?.cost_rank ?? item.cost_rank,
+          metadata: previous ? { ...item.metadata, ...(previous.metadata || {}), pricing_status: previous.metadata?.pricing_status || "configured" } : item.metadata,
+          last_seen_at: now,
+        };
+      });
       const { error } = await admin.from("ai_models").upsert(rows, { onConflict: "provider,model_id" });
       if (error) console.error("AI model registry upsert failed", error.message);
       console.info("AI model registry refreshed", { discovered: ids.length });
@@ -158,3 +183,4 @@ Deno.serve(async (req) => {
     headers: { ...corsHeaders, "Content-Type": "application/json", "Cache-Control": "private, max-age=300" },
   });
 });
+

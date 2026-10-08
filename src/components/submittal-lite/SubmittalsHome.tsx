@@ -9,8 +9,9 @@ import type { Brand, Company } from "@/lib/submittal-lite/library";
 type Props = {
   records: SubmittalRecord[]; companies: Company[]; brands: Brand[];
   onNew: () => void; onEdit: (r: SubmittalRecord) => void; onDuplicate: (r: SubmittalRecord) => void; onDelete: (id: string) => void;
+  onNoClientSpecification: (record: SubmittalRecord) => Promise<void>;
   onShare: (record: SubmittalRecord) => Promise<{ url: string; expiresAt: string }>;
-  onStatus: (id: string, s: Status, note: string) => void;
+  onStatus: (id: string, s: Status, note: string) => Promise<void>;
 };
 
 function ShareRecordAction({ record, onShare }: Pick<Props, "onShare"> & { record: SubmittalRecord }) {
@@ -20,8 +21,10 @@ function ShareRecordAction({ record, onShare }: Pick<Props, "onShare"> & { recor
   const [failed, setFailed] = useState(false);
   const lock = useRef(false);
   const input = useRef<HTMLInputElement>(null);
+  const [allowIncomplete, setAllowIncomplete] = useState(false);
+  const missing = record.issuedPdf ? [] : record.sections.filter(s => !s.auto && !s.docs.length && !s.notApplicableReason?.trim()).map(s => s.title);
   const copy = async () => {
-    if (lock.current) return;
+    if (lock.current || (missing.length > 0 && !allowIncomplete)) return;
     if (result && Date.parse(result.expiresAt) > Date.now() + 60_000) {
       input.current?.select();
       try {
@@ -46,7 +49,8 @@ function ShareRecordAction({ record, onShare }: Pick<Props, "onShare"> & { recor
     finally { lock.current = false; setBusy(false); }
   };
   return <div className="mt-4 rounded-2xl border bg-primary/5 p-3">
-    <Button variant="outline" className="w-full" disabled={busy} onClick={() => void copy()}><Link />{busy ? "Preparing link…" : "Copy share link"}</Button>
+    {missing.length > 0 && <div className="mb-3 rounded-xl border border-amber-400 p-3 text-sm"><p className="font-semibold">Missing documents</p><ul className="list-disc pl-5">{missing.map((title, i) => <li key={i}>{title}</li>)}</ul><label className="mt-2 flex items-start gap-2"><input type="checkbox" checked={allowIncomplete} onChange={e => setAllowIncomplete(e.target.checked)} />Share as incomplete draft using available documents</label><p className="mt-1 text-xs">This does not mark the submittal Submitted. Upload the missing documents in Edit before issuing.</p></div>}
+    <Button variant="outline" className="w-full" disabled={busy || (missing.length > 0 && !allowIncomplete)} onClick={() => void copy()}><Link />{busy ? "Preparing link…" : "Copy share link"}</Button>
     <p className="mt-2 text-center text-xs text-muted-foreground">{result ? `Valid until ${new Date(result.expiresAt).toLocaleDateString()}` : "Branded link · valid for 7 days"}</p>
     {message && <p role="status" className={`mt-2 text-sm ${failed ? "text-destructive" : "text-muted-foreground"}`}>{message}</p>}
     {result && <Input ref={input} readOnly value={result.url} aria-label="Submittal share link" onFocus={(event) => event.target.select()} className="mt-2 text-xs" />}
@@ -61,13 +65,25 @@ const groups: { label: string; match: (s: Status) => boolean }[] = [
   { label: "Action needed", match: (s) => s === "Revise & resubmit" || s === "Rejected" },
 ];
 
-export function SubmittalsHome({ records, companies, brands, onNew, onEdit, onDuplicate, onDelete, onStatus, onShare }: Props) {
+export function SubmittalsHome({ records, companies, brands, onNew, onEdit, onDuplicate, onDelete, onStatus, onShare, onNoClientSpecification }: Props) {
   const [q, setQ] = useState("");
   const [group, setGroup] = useState("All");
   const [kind, setKind] = useState<"All" | Kind>("All");
   const [openId, setOpenId] = useState<string>();
   const [pendingDeleteId, setPendingDeleteId] = useState<string>();
   const [note, setNote] = useState("");
+  const [statusBusy, setStatusBusy] = useState(false);
+  const [statusMessage, setStatusMessage] = useState("");
+  const [statusFailed, setStatusFailed] = useState(false);
+  const statusLock = useRef(false);
+  const updateStatus = async (id: string, status: Status) => {
+    if (statusLock.current) return;
+    statusLock.current = true; setStatusBusy(true); setStatusFailed(false);
+    setStatusMessage(status === "Submitted" ? "Preparing issued PDF and saving status…" : "Saving status…");
+    try { await onStatus(id, status, note.trim()); setNote(""); setStatusMessage(`Status updated: ${status}`); }
+    catch(error) { setStatusFailed(true); setStatusMessage(error instanceof Error ? error.message : "Status update failed. Please retry."); }
+    finally { statusLock.current = false; setStatusBusy(false); }
+  };
   const name = (list: { id: string; name: string }[], id: string) => list.find((x) => x.id === id)?.name ?? "";
 
   const shown = useMemo(() => {
@@ -110,7 +126,7 @@ export function SubmittalsHome({ records, companies, brands, onNew, onEdit, onDu
 
       <div className="mt-4 grid gap-3 lg:grid-cols-2">
         {shown.map((r) => (
-          <button key={r.id} type="button" onClick={() => { setOpenId(r.id); setNote(""); }} className="group relative overflow-hidden rounded-3xl bg-card p-4 pl-5 text-left shadow-clay-sm ring-1 ring-border/60 transition duration-200 hover:-translate-y-1 hover:shadow-clay hover:ring-primary/50">
+          <button key={r.id} type="button" onClick={() => { setOpenId(r.id); setNote(""); setStatusMessage(""); }} className="group relative overflow-hidden rounded-3xl bg-card p-4 pl-5 text-left shadow-clay-sm ring-1 ring-border/60 transition duration-200 hover:-translate-y-1 hover:shadow-clay hover:ring-primary/50">
             <span className={`absolute inset-y-0 left-0 w-1.5 ${statusDot(r.status)}`} aria-hidden />
             <div className="flex items-center gap-2">
               <span className="rounded-lg bg-primary px-2 py-1 font-mono text-[11px] font-bold text-primary-foreground">{r.ref}{r.rev ? ` · R${r.rev}` : ""}</span>
@@ -150,6 +166,14 @@ export function SubmittalsHome({ records, companies, brands, onNew, onEdit, onDu
               <Button variant="outline" className="text-destructive" onClick={() => setPendingDeleteId(open.id)}><Trash2 /> Delete</Button>
             </div>
 
+            {!open.issuedPdf && open.sections.some(s => !s.docs.length && !s.notApplicableReason && /specification|compliance/i.test(s.title)) && <div className="mt-3 rounded-xl border p-3 text-sm"><p>Client included specification/compliance in the index but did not provide a project specification?</p><Button variant="outline" className="mt-2 h-auto whitespace-normal" disabled={statusBusy} onClick={async () => {
+              if (statusLock.current) return;
+              statusLock.current=true;setStatusBusy(true);setStatusMessage("");
+              try {await onNoClientSpecification(open);setStatusFailed(false);setStatusMessage("Saved: client specification not provided. The index dividers will show the reason.");}
+              catch(error){setStatusFailed(true);setStatusMessage(error instanceof Error ? error.message : "Could not save exception.");}
+              finally{statusLock.current=false;setStatusBusy(false);}
+            }}>Confirm client specification not provided</Button></div>}
+            {open.sections.filter(s => !s.docs.length && s.notApplicableReason).map(s => <p key={s.id} className="mt-2 text-xs text-muted-foreground">{s.title}: {s.notApplicableReason}</p>)}
             <ShareRecordAction key={JSON.stringify(open)} record={open} onShare={onShare} />
 
             {pendingDeleteId === open.id && (
@@ -173,11 +197,13 @@ export function SubmittalsHome({ records, companies, brands, onNew, onEdit, onDu
             )}
 
             <p className="mt-5 text-[11px] font-extrabold uppercase text-muted-foreground">Update status</p>
-            <div className="mt-2 flex flex-wrap gap-1.5">{statuses.map((s) => <button key={s} type="button" onClick={() => { onStatus(open.id, s, note.trim()); setNote(""); }} className={`rounded-full px-3 py-1.5 text-xs font-bold ${open.status === s ? "bg-grad-primary text-primary-foreground shadow-glow" : "bg-background"}`}>{s}</button>)}</div>
-            <Textarea value={note} onChange={(e) => setNote(e.target.value)} placeholder="Optional note or consultant comment (saved with the next status)" className="mt-2 min-h-16 rounded-2xl border-0 bg-background text-sm" />
+            <div className="mt-2 flex flex-wrap gap-1.5">{statuses.map((s) => <button key={s} type="button" disabled={statusBusy} onClick={() => void updateStatus(open.id, s)} className={`rounded-full px-3 py-1.5 text-xs font-bold ${open.status === s ? "bg-grad-primary text-primary-foreground shadow-glow" : "bg-background"}`}>{s}</button>)}</div>
+            {statusMessage && <p role={statusFailed ? "alert" : "status"} className={`mt-3 rounded-xl border p-3 text-sm ${statusFailed ? "border-destructive/40 text-destructive" : "text-muted-foreground"}`}>{statusMessage}</p>}
+            {!open.issuedPdf && <p className="mt-2 text-xs text-muted-foreground">Submitted saves a fixed PDF of this revision. Review documents before submitting; later changes require a new revision.</p>}
+            <Textarea disabled={statusBusy} value={note} onChange={(e) => setNote(e.target.value)} placeholder="Optional note or consultant comment (saved with the next status)" className="mt-2 min-h-16 rounded-2xl border-0 bg-background text-sm" />
 
             <p className="mt-5 text-[11px] font-extrabold uppercase text-muted-foreground">Revisions of {open.ref}</p>
-            <div className="mt-2 flex flex-wrap gap-2">{revisions.map((r) => <button key={r.id} type="button" onClick={() => { setOpenId(r.id); setNote(""); }} className={`rounded-xl px-3 py-2 text-left text-xs font-bold ${r.id === open.id ? "bg-primary text-primary-foreground" : "bg-background hover:bg-accent"}`} aria-label={`Open revision ${r.rev} of ${r.ref}`}><span className="block">Rev {r.rev}</span><span className="block text-[10px] opacity-75">{r.status} · {fmtDate(r.createdAt)}</span></button>)}</div>
+            <div className="mt-2 flex flex-wrap gap-2">{revisions.map((r) => <button key={r.id} type="button" onClick={() => { setOpenId(r.id); setNote(""); setStatusMessage(""); }} className={`rounded-xl px-3 py-2 text-left text-xs font-bold ${r.id === open.id ? "bg-primary text-primary-foreground" : "bg-background hover:bg-accent"}`} aria-label={`Open revision ${r.rev} of ${r.ref}`}><span className="block">Rev {r.rev}</span><span className="block text-[10px] opacity-75">{r.status} · {fmtDate(r.createdAt)}</span></button>)}</div>
             <p className="mt-2 text-xs text-muted-foreground">Open any earlier revision, then choose Edit or New revision to reuse its contents.</p>
             <p className="mt-5 text-[11px] font-extrabold uppercase text-muted-foreground">Tracking</p>
             <ol className="mt-2 space-y-0">

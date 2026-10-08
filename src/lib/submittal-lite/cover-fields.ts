@@ -20,3 +20,13 @@ export function normalizeCoverFields(fields: CoverField[], keepEmpty = false): C
   }
   return [...unique.values()].filter(field => keepEmpty || field.value);
 }
+
+
+/** A replacement client cover must not inherit old project fields or empty defaults. */
+export function replaceImportedCoverFields(current: CoverField[], imported: CoverField[]): CoverField[] {
+  const source = normalizeCoverFields(imported);
+  const keys = new Set(source.map(field => coverFieldKey(field.label)));
+  const supplierFields = normalizeCoverFields(current).filter(field =>
+    ["suppliername", "brandname", "product"].includes(coverFieldKey(field.label)) && !keys.has(coverFieldKey(field.label)));
+  return [...source, ...supplierFields];
+}

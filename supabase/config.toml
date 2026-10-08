@@ -2,6 +2,10 @@ project_id = "bfofrgqdvqehdsiccyhk"
 
 [functions]
   [functions.migrate-database]
-    verify_jwt = false
+    verify_jwt = true
   [functions.lpo-alerts]
+    verify_jwt = false
+  [functions.lpo-deepak-alerts]
+    verify_jwt = false
+  [functions.storytoon-ai]
     verify_jwt = false

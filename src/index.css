@@ -264,3 +264,46 @@
 ::-webkit-scrollbar-thumb:hover {
   background: hsl(var(--muted-foreground) / 0.5);
 }
+
+
+/* Compliance Statement + RTCC editor: large, easy-to-grab table scrollbars. */
+[aria-label="Editable specification compliance table"],
+[aria-label="RTCC editing table"] {
+  scrollbar-width: auto;
+  scrollbar-color: hsl(var(--primary) / 0.72) hsl(var(--muted));
+  scrollbar-gutter: stable;
+  overscroll-behavior: contain;
+}
+
+[aria-label="Editable specification compliance table"]::-webkit-scrollbar,
+[aria-label="RTCC editing table"]::-webkit-scrollbar {
+  width: 18px;
+  height: 18px;
+}
+
+[aria-label="Editable specification compliance table"]::-webkit-scrollbar-track,
+[aria-label="RTCC editing table"]::-webkit-scrollbar-track {
+  background: hsl(var(--muted));
+  border: 1px solid hsl(var(--border));
+  border-radius: 999px;
+}
+
+[aria-label="Editable specification compliance table"]::-webkit-scrollbar-thumb,
+[aria-label="RTCC editing table"]::-webkit-scrollbar-thumb {
+  min-height: 56px;
+  background: hsl(var(--primary) / 0.72);
+  border: 3px solid hsl(var(--muted));
+  border-radius: 999px;
+  background-clip: padding-box;
+}
+
+[aria-label="Editable specification compliance table"]::-webkit-scrollbar-thumb:hover,
+[aria-label="RTCC editing table"]::-webkit-scrollbar-thumb:hover {
+  background: hsl(var(--primary) / 0.92);
+  background-clip: padding-box;
+}
+
+[aria-label="Editable specification compliance table"]::-webkit-scrollbar-corner,
+[aria-label="RTCC editing table"]::-webkit-scrollbar-corner {
+  background: hsl(var(--muted));
+}

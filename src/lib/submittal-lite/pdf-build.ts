@@ -1,8 +1,11 @@
+import { buildWithRtcc, type RtccBuildRound } from "./rtcc-pdf";
 import { coverFieldKey, normalizeCoverFields } from "./cover-fields";
 import type { PDFDocument as PDFDoc, PDFFont, PDFImage, PDFPage } from "pdf-lib";
 
-export type FileData = { bytes: ArrayBuffer; type: string; name: string };
+export type FileData = { id?: string; bytes: ArrayBuffer; type: string; name: string };
 export type BuildInput = {
+  rtcc?: RtccBuildRound[];
+  pageOffset?: number;
   kindLabel: string;
   coverLabel?: string | undefined;
   title: string;
@@ -10,7 +13,7 @@ export type BuildInput = {
   brandName?: string | undefined;
   productName?: string | undefined;
   fields: { label: string; value: string }[];
-  sections: { title: string; files: FileData[]; stamp?: "all" | "divider" | "none" | undefined }[];
+  sections: { title: string; notApplicableReason?: string; files: FileData[]; stamp?: "all" | "divider" | "none" | undefined }[];
   stampCover?: boolean;
   stampIndex?: boolean;
   templates: { cover?: FileData | undefined; index?: FileData | undefined; divider?: FileData | undefined };
@@ -23,7 +26,7 @@ export type BuildInput = {
   stamp?: FileData | undefined;
   stampEveryPage: boolean;
 };
-export type PageLabel = { label: string; kind: "cover" | "index" | "divider" | "doc" };
+export type PageLabel = { docId?: string; label: string; kind: "cover" | "index" | "divider" | "doc" };
 
 const DEFAULT_W = 595.28;
 const DEFAULT_H = 841.89;
@@ -52,7 +55,8 @@ export const isPdf = (f: FileData) => f.type === "application/pdf" || f.name.toL
 export const isImg = (f: FileData) => /image\/(png|jpe?g)/.test(f.type) || /\.(png|jpe?g)$/i.test(f.name);
 
 export async function buildSubmittalPdf(input: BuildInput): Promise<{ bytes: Uint8Array; labels: PageLabel[]; skipped: string[] }> {
-  const { PDFDocument, StandardFonts, rgb } = await import("pdf-lib");
+  if (input.rtcc?.length) return buildWithRtcc(input, buildSubmittalPdf);
+  const { PDFDocument, StandardFonts, rgb, degrees } = await import("pdf-lib");
   const doc: PDFDoc = await PDFDocument.create();
   const font = await doc.embedFont(StandardFonts.Helvetica);
   const bold = await doc.embedFont(StandardFonts.HelveticaBold);
@@ -137,38 +141,47 @@ export async function buildSubmittalPdf(input: BuildInput): Promise<{ bytes: Uin
 
   const attachmentFooters = new WeakMap<PDFPage, { x: number; y: number; width: number }>();
   const addAttachmentFooter = (page: PDFPage, withStamp: boolean) => {
-    // Never guess that a certificate's blank-looking area is safe to stamp.
-    // Extend the visible page outside its original crop; content/annotations
-    // and rotation retain their original coordinates.
+    // Keep the original source-page dimensions. Stamps and page numbers are
+    // overlaid inside the existing page; never add a separate footer band.
     const box = page.getCropBox();
-    const band = withStamp && stamp ? 90 : 40;
-    const footerY = box.y - band;
-    page.setMediaBox(box.x, footerY, box.width, box.height + band);
-    page.setCropBox(box.x, footerY, box.width, box.height + band);
-    page.drawRectangle({ x: box.x, y: footerY, width: box.width, height: band, color: rgb(1, 1, 1) });
-    page.drawLine({ start: { x: box.x, y: box.y }, end: { x: box.x + box.width, y: box.y }, color: line, thickness: 0.5 });
-    attachmentFooters.set(page, { x: box.x, y: footerY, width: box.width });
+    attachmentFooters.set(page, { x: box.x, y: box.y, width: box.width });
     if (withStamp && stamp) {
-      const ratio = Math.min(64 / stamp.width, 64 / stamp.height);
-      page.drawImage(stamp, { x: box.x + box.width - 24 - stamp.width * ratio, y: footerY + 14,
-        width: stamp.width * ratio, height: stamp.height * ratio, opacity: 0.92 });
+      const maxStamp = Math.min(72, box.width * 0.14, box.height * 0.11);
+      const ratio = Math.min(maxStamp / stamp.width, maxStamp / stamp.height);
+      const stampW = stamp.width * ratio, stampH = stamp.height * ratio;
+      page.drawImage(stamp, {
+        x: box.x + box.width - stampW - 18,
+        y: box.y + 18,
+        width: stampW,
+        height: stampH,
+        opacity: 0.88
+      });
     }
   };
 
   // Load attachments first so the index can show page numbers.
-  const loaded: { title: string; stamp: "all" | "divider" | "none"; parts: ({ pdf: PDFDoc; name: string } | { img: PDFImage; name: string })[]; pages: number }[] = [];
+  const loaded: { title: string; notApplicableReason?: string; stamp: "all" | "divider" | "none"; parts: ({ pdf: PDFDoc; name: string; id?: string } | { img: PDFImage; name: string; id?: string })[]; pages: number }[] = [];
+  const isMaterialScheduleSection = (title:string) => /\bmaterial\s+schedules?\b|\bschedule\s+of\s+materials?\b/i.test(title);
+  const normalizeMaterialScheduleOrientation = (page:PDFPage) => {
+    const {width,height}=page.getSize();
+    const angle=((page.getRotation().angle%360)+360)%360;
+    const rotated=angle===90||angle===270;
+    const displayedWidth=rotated?height:width;
+    const displayedHeight=rotated?width:height;
+    if(displayedWidth<displayedHeight) page.setRotation(degrees((angle+90)%360));
+  };
   for (const sec of input.sections) {
-    const parts: ({ pdf: PDFDoc; name: string } | { img: PDFImage; name: string })[] = [];
+    const parts: ({ pdf: PDFDoc; name: string; id?: string } | { img: PDFImage; name: string; id?: string })[] = [];
     let pages = 0;
     for (const f of sec.files) {
       if (isPdf(f)) {
-        try { const pdf = await PDFDocument.load(f.bytes, { ignoreEncryption: true }); parts.push({ pdf, name: f.name }); pages += pdf.getPageCount(); } catch { skipped.push(f.name); }
+        try { const pdf = await PDFDocument.load(f.bytes, { ignoreEncryption: true }); parts.push({ pdf, name: f.name, id: f.id }); pages += pdf.getPageCount(); } catch { skipped.push(f.name); }
       } else if (isImg(f)) {
         const img = await embedImg(f);
-        if (img) { parts.push({ img, name: f.name }); pages += 1; } else skipped.push(f.name);
+        if (img) { parts.push({ img, name: f.name, id: f.id }); pages += 1; } else skipped.push(f.name);
       } else skipped.push(f.name);
     }
-    loaded.push({ title: sec.title, stamp: sec.stamp ?? (input.stampEveryPage ? "all" : "divider"), parts, pages });
+    loaded.push({ title: sec.title, notApplicableReason: sec.files.length ? undefined : sec.notApplicableReason, stamp: sec.stamp ?? (input.stampEveryPage ? "all" : "divider"), parts, pages });
   }
 
   const appendSourcePages = async (source: Bg, label: string, kind: "cover" | "index") => {
@@ -283,7 +296,7 @@ export async function buildSubmittalPdf(input: BuildInput): Promise<{ bytes: Uin
   const indexPageCount = sourceIndex
     ? ("pdf" in sourceIndex ? sourceIndex.pdf.getPageCount() : 1)
     : indexPages.length;
-  let pageNo = coverPageCount + indexPageCount + 1; // source/generated cover + index pages, then first divider
+  let pageNo = (input.pageOffset || 0) + coverPageCount + indexPageCount + 1; // source/generated cover + index pages, then first divider
   const starts = loaded.map((s) => { const start = pageNo; pageNo += 1 + s.pages; return start; });
   if (sourceIndex) {
     // Client-supplied index is copied exactly; parsed headings are used only to build divider order.
@@ -343,6 +356,12 @@ export async function buildSubmittalPdf(input: BuildInput): Promise<{ bytes: Uin
       page.drawLine({ start: { x: (width - textW) / 2, y: dy - 3 }, end: { x: (width + textW) / 2, y: dy - 3 }, color: ink, thickness: 1 });
       dy -= 30;
     }
+    if (s.notApplicableReason) {
+      dy -= 20;
+      for (const line of wrap("NOT APPLICABLE: " + s.notApplicableReason, font, 11, width - 2 * x)) {
+        page.drawText(line, {x, y:dy, size:11, font, color:ink}); dy -= 16;
+      }
+    }
     drawLogos(page);
     if (s.stamp !== "none") drawStamp(page);
 
@@ -364,24 +383,25 @@ export async function buildSubmittalPdf(input: BuildInput): Promise<{ bytes: Uin
         }
         const copied = await doc.copyPages(part.pdf, pageIndices);
         copied.forEach((p, k) => {
-          // Preserve the source page rotation exactly. Material schedules must
-          // never be forced to landscape just because they are schedule pages.
-          // If a source page is actually sideways, the manual/core builder
-          // rotation control remains the final correction and is applied at download.
+          // Only Material Schedule pages are auto-normalized. If the effective
+          // page is portrait/sideways, rotate it to landscape for readable tables.
+          // All other submitted documents preserve their original orientation.
+          if (isMaterialScheduleSection(s.title)) normalizeMaterialScheduleOrientation(p);
           doc.addPage(p);
-          if (/^KINAIR-Material-Schedule(?:\.|$)/i.test(part.name)) {
+          if (isMaterialScheduleSection(s.title) || /^KINAIR-Material-Schedule(?:\.|$)/i.test(part.name)) {
             if (s.stamp === "all") drawStamp(p, true);
           } else addAttachmentFooter(p, s.stamp === "all");
-          labels.push({ label: `${i + 1}.${k + 1} ${part.name}`, kind: "doc" });
+          labels.push({ label: `${i + 1}.${k + 1} ${part.name}`, kind: "doc", docId: part.id });
         });
       } else {
-        const [width, height] = sizeOf(dividerBg);
+        let [width, height] = sizeOf(dividerBg);
+        if (isMaterialScheduleSection(s.title) && width < height && part.img.width >= part.img.height) [width,height]=[height,width];
         const p = doc.addPage([width, height]);
         const r = Math.min((width - 60) / part.img.width, (height - 60) / part.img.height);
         const w = part.img.width * r, h = part.img.height * r;
         p.drawImage(part.img, { x: (width - w) / 2, y: (height - h) / 2, width: w, height: h });
         addAttachmentFooter(p, s.stamp === "all");
-        labels.push({ label: `${i + 1} ${part.name}`, kind: "doc" });
+        labels.push({ label: `${i + 1} ${part.name}`, kind: "doc", docId: part.id });
       }
     }
   }
@@ -393,7 +413,7 @@ export async function buildSubmittalPdf(input: BuildInput): Promise<{ bytes: Uin
     const footer = attachmentFooters.get(p);
     const width = footer?.width ?? p.getSize().width;
     const offsetX = footer?.x ?? 0, offsetY = footer?.y ?? 0;
-    const text = `PAGE ${i + 1} / ${totalPages}`;
+    const text = `PAGE ${i + 1 + (input.pageOffset || 0)} / ${totalPages + (input.pageOffset || 0)}`;
     const textW = bold.widthOfTextAtSize(text, 10);
     const x = offsetX + (width - textW) / 2;
     p.drawRectangle({ x: x - 12, y: offsetY + 10, width: textW + 24, height: 24, color: rgb(1, 1, 1), opacity: 0.94, borderColor: line, borderWidth: 0.5 });

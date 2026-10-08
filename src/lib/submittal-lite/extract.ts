@@ -1,12 +1,13 @@
+import { setupPdfLines } from "./setup-parser";
 import { openPdfBlob } from "./pdf-range";
 import { detectScheduleSeries } from "./schedule-series";
 import { supabase } from "@/integrations/backend/client";
 // Browser-side text extraction for cover/index uploads.
 export type AiReader = (f: { name: string; mediaType: string; base64: string }) => Promise<{ ok: true; text: string } | { ok: false; error: string }>;
 
-export async function readScannedPage(file: { name: string; mediaType: string; base64: string }): Promise<{ ok: true; text: string } | { ok: false; error: string }> {
+async function readOcrPage(file: { name: string; mediaType: string; base64: string }, mode?: "transcription"): Promise<{ ok: true; text: string } | { ok: false; error: string }> {
   const { data, error } = await supabase.functions.invoke("submittal-assistant", {
-    body: { action: "ocr", mediaType: file.mediaType, image: file.base64 },
+    body: { action: "ocr", mode, mediaType: file.mediaType, image: file.base64 },
   });
   if (error) {
     const context = "context" in error ? (error as { context?: Response }).context : undefined;
@@ -15,6 +16,15 @@ export async function readScannedPage(file: { name: string; mediaType: string; b
   }
   if (!data?.ok || typeof data.text !== "string") return { ok: false, error: data?.error ?? "Could not read the scanned page." };
   return { ok: true, text: data.text };
+}
+
+export async function readScannedPage(file: { name: string; mediaType: string; base64: string }) {
+  return readOcrPage(file);
+}
+
+/** Pure visible-text transcription for Compliance/RTCC. No classifier/model-code preamble. */
+export async function readPlainTextPage(file: { name: string; mediaType: string; base64: string }) {
+  return readOcrPage(file, "transcription");
 }
 
 type ServerRead = { text: string; provider?: string };
@@ -242,4 +252,61 @@ export async function extractTextAdvanced(
 export async function extractText(file: File, ai: AiReader, options?: { mobileFast?: boolean }): Promise<string> {
   const result = await extractTextAdvanced(file, ai, { ...options, directAi: true });
   return result.text;
+}
+
+// Setup documents need one coherent reading, not concatenated AI/OCR variants.
+export async function extractSetupText(file: File, ai: AiReader): Promise<string> {
+  if (file.type === "application/pdf" || /\.pdf$/i.test(file.name)) {
+    const task = await openPdfBlob(file);
+    try {
+      const pdf = await task.promise;
+      const pages: string[] = [];
+      for (let n = 1; n <= pdf.numPages; n++) {
+        const page = await pdf.getPage(n);
+        const content = await page.getTextContent();
+        const text = setupPdfLines(content.items as {str?: string; transform?: number[]; width?: number}[]);
+        page.cleanup();
+        if (text.replace(/\s/g, "").length < 30) {
+          const result = await extractTextAdvanced(file, ai, { firstReadable: true });
+          return result.text;
+        }
+        pages.push(text);
+      }
+      return pages.join("\n");
+    } finally { await task.destroy(); }
+  }
+  return (await extractTextAdvanced(file, ai, { firstReadable: true })).text;
+}
+
+// Consultant notes can live in PDF annotations, outside the searchable text layer.
+// Render the page (including annotations) when the comment area has no readable text.
+export async function readConsultantPage(file: File, ai: AiReader): Promise<string> {
+  const task = await openPdfBlob(file);
+  try {
+    const pdf = await task.promise;
+    const page = await pdf.getPage(1);
+    const viewport = page.getViewport({scale: Math.min(3, 2600 / Math.max(page.getViewport({scale:1}).width,page.getViewport({scale:1}).height))});
+    const canvas=document.createElement('canvas');canvas.width=Math.ceil(viewport.width);canvas.height=Math.ceil(viewport.height);
+    try {
+      const ctx=canvas.getContext('2d',{alpha:false});if(!ctx)throw new Error('Cannot render consultant comments.');
+      await page.render({canvasContext:ctx,canvas,viewport}).promise;
+      const result=await ai({name:file.name,mediaType:'image/jpeg',base64:canvas.toDataURL('image/jpeg',0.95).split(',')[1]});
+      if(!result.ok)throw new Error(result.error);
+      return result.text;
+    } finally {canvas.width=0;canvas.height=0;page.cleanup();}
+  } finally {await task.destroy();}
+}
+
+
+export async function extractClausePage(file:File, ai:AiReader):Promise<string>{
+ if(file.type==='application/pdf'||/\.pdf$/i.test(file.name)){
+  const task=await openPdfBlob(file);
+  try {
+   const pdf=await task.promise;const page=await pdf.getPage(1);const content=await page.getTextContent();
+   const text=setupPdfLines(content.items as {str?:string;transform?:number[];width?:number}[]);page.cleanup();
+   if(text.replace(/\s/g,'').length>=30)return text;
+  }finally{await task.destroy();}
+  return readConsultantPage(file,ai);
+ }
+ return extractSetupText(file,ai);
 }

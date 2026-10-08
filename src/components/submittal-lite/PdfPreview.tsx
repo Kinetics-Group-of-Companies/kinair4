@@ -13,6 +13,7 @@ type PdfDoc = { numPages: number; getPage: (n: number) => Promise<Page> };
 
 function CurrentPage({ doc, number, rotation }: { doc: PdfDoc; number: number; rotation: number }) {
   const [src, setSrc] = useState<string>();
+  const [error, setError] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -20,30 +21,31 @@ function CurrentPage({ doc, number, rotation }: { doc: PdfDoc; number: number; r
     let rendering: ReturnType<Page["render"]> | undefined;
     let pdfPage: Page | undefined;
     setSrc(undefined);
+    setError(false);
     void (async () => {
       pdfPage = await doc.getPage(number);
       if (cancelled) return;
       const original = pdfPage.getViewport({ scale: 1 });
       // Cap pixels so even a huge drawing sheet cannot allocate a huge canvas.
-      const scale = Math.min(0.85, 900 / original.width, Math.sqrt(1_500_000 / (original.width * original.height)));
+      const scale = Math.min(2, 1800 / original.width, Math.sqrt(4_000_000 / (original.width * original.height)));
       const viewport = pdfPage.getViewport({ scale });
       const canvas = document.createElement("canvas");
       canvas.width = Math.max(1, Math.floor(viewport.width));
       canvas.height = Math.max(1, Math.floor(viewport.height));
       const context = canvas.getContext("2d");
-      if (!context) return;
+      if (!context) throw new Error("Canvas is unavailable");
       rendering = pdfPage.render({ canvasContext: context, viewport });
       await rendering.promise;
       if (cancelled) return;
-      const blob = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, "image/jpeg", 0.76));
+      const blob = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, "image/png"));
       if (blob && !cancelled) { url = URL.createObjectURL(blob); setSrc(url); }
       canvas.width = 0; canvas.height = 0;
-    })().catch((error) => { if (!cancelled && error?.name !== "RenderingCancelledException") console.error("Page preview failed", error); });
+    })().catch((error) => { if (!cancelled && error?.name !== "RenderingCancelledException") setError(true); });
     return () => { cancelled = true; rendering?.cancel(); pdfPage?.cleanup?.(); if (url) URL.revokeObjectURL(url); };
   }, [doc, number]);
   return (
     <div className="mx-auto flex h-[calc(78vh-112px)] min-h-56 w-full items-center justify-center overflow-hidden">
-      {src ? <img src={src} alt={`Page ${number}`} className="max-h-full max-w-full rounded-sm bg-background object-contain shadow-clay-sm" style={{ transform: `rotate(${rotation}deg)` }} />
+      {error ? <p role="alert" className="p-4 text-sm text-destructive">Unable to render this page. Download the PDF to view it, or close and reopen the preview.</p> : src ? <img src={src} alt={`Page ${number}`} className="max-h-full max-w-full rounded-sm bg-background object-contain shadow-clay-sm" style={{ transform: `rotate(${rotation}deg)` }} />
         : <div className="h-full w-full animate-pulse rounded-sm bg-background/80" />}
     </div>
   );
@@ -51,22 +53,24 @@ function CurrentPage({ doc, number, rotation }: { doc: PdfDoc; number: number; r
 
 export function PdfPreview({ bytes, labels, building, rotations = {}, onRotate }: Props) {
   const [doc, setDoc] = useState<PdfDoc>();
+  const [loadError, setLoadError] = useState(false);
   const [page, setPage] = useState(1);
   const lastWheelAt = useRef(0);
   const previewRef = useRef<HTMLDivElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
     setDoc(undefined);
+    setLoadError(false);
     setPage(1);
     if (!bytes) return;
     let cancelled = false;
     let task: { promise: Promise<unknown>; destroy: () => Promise<void> } | undefined;
     void (async () => {
-      task = await openPdfBlob(new Blob([bytes], { type: "application/pdf" }));
+      task = await openPdfBlob(new Blob([new Uint8Array(bytes)], { type: "application/pdf" }));
       if (cancelled) { await task.destroy(); return; }
       const parsed = await task.promise as PdfDoc;
       if (!cancelled) setDoc(parsed);
-    })().catch((error) => { if (!cancelled) console.error("Preview failed", error); });
+    })().catch((error) => { if (!cancelled) setLoadError(true); });
     return () => { cancelled = true; void task?.destroy(); };
   }, [bytes]);
 
@@ -102,7 +106,7 @@ export function PdfPreview({ bytes, labels, building, rotations = {}, onRotate }
         <span className="text-[11px] font-bold text-muted-foreground">{building ? "Updating…" : `${count} pages`}</span>
       </div>
       <div ref={scrollRef} className="h-[78vh] overflow-hidden rounded-2xl bg-secondary/60 p-3">
-        {!count ? <p className="p-8 text-center text-sm font-semibold text-muted-foreground">Build a PDF to preview the submittal here.</p> : <>
+        {!count ? <p className="p-8 text-center text-sm font-semibold text-muted-foreground">{loadError ? "Unable to open the preview. Download the PDF to view it, or close and reopen the preview." : bytes ? "Loading PDF preview…" : "Build a PDF to preview the submittal here."}</p> : <>
           <div className="mb-3 flex items-center justify-center gap-2 text-xs font-bold">
             <button type="button" className="rounded-lg bg-card px-3 py-2" disabled={current <= 1} onClick={() => setPage(current - 1)}>Previous</button>
             <label className="flex items-center gap-1">Page <input aria-label="Preview page number" className="w-16 rounded-lg bg-card p-2 text-center" type="number" min={1} max={count} value={current} onChange={(event) => setPage(Math.min(count, Math.max(1, Number(event.target.value) || 1)))} /> of {count}</label>
@@ -129,3 +133,4 @@ export function PdfPreview({ bytes, labels, building, rotations = {}, onRotate }
     </div>
   );
 }
+

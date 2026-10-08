@@ -1,0 +1,1 @@
+alter table public.submittal_documents add column if not exists package_id uuid references public.submittal_packages(id) on delete cascade; create index if not exists submittal_documents_package_idx on public.submittal_documents(tenant_id, package_id, category);

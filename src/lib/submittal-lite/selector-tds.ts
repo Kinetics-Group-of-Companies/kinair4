@@ -201,16 +201,24 @@ export async function makeAssistantSubmittalTds(
   const models: string[] = [];
   const missing: string[] = [];
   const corrections: string[] = [];
+  const unresolved = new Set<number>();
 
   for (const [index, item] of items.entries()) {
     const tag = item.tag?.trim() || `Item ${index + 1}`;
+    if (item.product !== "fan" && item.product !== "air_curtain") {
+      missing.push(`${tag}: unsupported equipment type; upload its verified TDS`);
+      unresolved.add(index); continue;
+    }
+    if (!Number.isInteger(item.quantity) || Number(item.quantity) <= 0) {
+      missing.push(`${tag}: confirm a positive whole-number quantity; no default quantity has been assumed`);
+      unresolved.add(index); continue;
+    }
     if (item.product === "fan") {
-      // Never invent a duty from the printed model. A schedule/quotation model
-      // may itself contain a human error, so engineering parameters are required
-      // to validate and correct it.
+      // Validate the supplied model without substituting another model.
       const resolvedItem = { ...item, existing_selection: canonicalFanSelection(item.existing_selection, context) };
       if (!resolvedItem.airflow || resolvedItem.static_pressure == null) {
         missing.push(`${tag}: airflow and static pressure are required to validate the fan selection`);
+      unresolved.add(index);
         continue;
       }
       const flowUnit = AIRFLOW_UNITS[resolvedItem.airflow_unit ?? "CMH"] ? resolvedItem.airflow_unit ?? "CMH" : "CMH";
@@ -225,6 +233,7 @@ export async function makeAssistantSubmittalTds(
       );
       if (!best) {
         missing.push(`${tag}: Matching TDS unavailable for ${resolvedItem.existing_selection || resolvedItem.series_name || "KINAIR fan"} at ${resolvedItem.airflow} ${flowUnit} / ${resolvedItem.static_pressure} ${pressureUnit}`);
+      unresolved.add(index);
         continue;
       }
       models.push(best.nomenclature);
@@ -234,7 +243,7 @@ export async function makeAssistantSubmittalTds(
       }
       fanRows.push({
         tag,
-        quantity: item.quantity && item.quantity > 0 ? Math.round(item.quantity) : 1,
+        quantity: item.quantity!,
         duty: `${resolvedItem.airflow} ${flowUnit} @ ${resolvedItem.static_pressure} ${pressureUnit}`,
         selection: best,
         airflowUnit: flowUnit,
@@ -261,6 +270,7 @@ export async function makeAssistantSubmittalTds(
     const units = { mm: 1, cm: 10, m: 1000, in: 25.4 };
     if (!item.door_width || !item.door_height) {
       missing.push(`${tag}: door width and mounting height with units`);
+      unresolved.add(index);
       continue;
     }
     const doorWidthMm = item.door_width * units[item.door_width_unit ?? "mm"];
@@ -276,13 +286,18 @@ export async function makeAssistantSubmittalTds(
     );
     if (!result) {
       missing.push(`${tag}: Matching TDS unavailable for ${item.existing_selection || item.series_name || "KINAIR air curtain"} ; scheduled model retained without substitution`);
+      unresolved.add(index);
       continue;
     }
     const best = result.selection;
     models.push(best.arrangement);
+    const printedAir = String(item.existing_selection ?? "").trim();
+    if (printedAir && normalize(printedAir.replace(/^1\s*[x×]\s*/i, "")) !== normalize(best.arrangement.replace(/^1\s*[x×]\s*/i, ""))) {
+      corrections.push(`${tag}: ${printedAir} → ${best.arrangement}`);
+    }
     airRows.push({
       tag,
-      quantity: item.quantity && item.quantity > 0 ? Math.round(item.quantity) : 1,
+      quantity: item.quantity!,
       duty: `${doorWidthMm} mm x ${doorHeightM} m opening`,
       label: best.arrangement,
       selection: best,
@@ -298,8 +313,8 @@ export async function makeAssistantSubmittalTds(
 
   const unresolvedRows = items.flatMap((item, index) => {
     const tag = item.tag?.trim() || `Item ${index + 1}`;
-    const issue = missing.find(message => message.startsWith(`${tag}:`));
-    if (!issue) return [];
+    if (!unresolved.has(index)) return [];
+    const issue = missing.filter(message => message.startsWith(`${tag}:`)).join("; ");
     const duty = item.product === "fan"
       ? [item.airflow == null ? "" : `${item.airflow} ${item.airflow_unit ?? "CMH"}`, item.static_pressure == null ? "" : `${item.static_pressure} ${item.pressure_unit ?? "Pa"}`].filter(Boolean).join(" @ ")
       : [item.door_width == null ? "" : `${item.door_width} ${item.door_width_unit ?? "mm"}`, item.door_height == null ? "" : `${item.door_height} ${item.door_height_unit ?? "m"}`].filter(Boolean).join(" x ");

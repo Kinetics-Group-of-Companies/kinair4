@@ -1,12 +1,20 @@
-import { useRef, useState } from "react";
+import { createContext, useContext, useRef, useState } from "react";
 import { Building2, ChevronDown, FileText, ImagePlus, Plus, Stamp, Tag, Trash2, Upload, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { useToast } from "@/hooks/use-toast";
 import { idbDel, idbSet, uploadSubmittalFile } from "@/lib/submittal-lite/idb";
-import { brandCategories, companyCategories, productCategories, tplKey, uid, type Brand, type Company, type Doc, type Slot } from "@/lib/submittal-lite/library";
+import { brandCategories, companyCategories, productCategories, matches, tplKey, uid, type Brand, type Company, type Doc, type Slot } from "@/lib/submittal-lite/library";
 import { normalizeUpload, normalizeUploads, uploadAccept } from "@/lib/submittal-lite/uploads";
 import { countPdfPages } from "@/lib/submittal-lite/pdf-pages";
+
+type UploadMode = "general" | "project" | "custom";
+const UploadModeContext = createContext<UploadMode>("general");
+const uploadModes: { value: UploadMode; title: string; detail: string }[] = [
+  { value: "general", title: "General specification — no client index", detail: "Use the saved General index. Add reusable company, brand and series documents, including General Compliance Statement. Upload this project's schedule in the submittal." },
+  { value: "project", title: "Project specification — no client index", detail: "Use the saved Project index. Add reusable library documents here. Upload the client's project specification and its matching project compliance statement in the submittal chat or manual builder." },
+  { value: "custom", title: "Project specification — custom client index", detail: "Paste or upload the client's index in project setup. Its headings and order control the submittal. Add reusable documents here; upload the project specification, project compliance and any missing custom sections in that submittal." },
+];
 
 const readImage = (file: File | undefined, set: (v: string) => void) => {
   if (!file) return;
@@ -41,18 +49,31 @@ async function storeFiles(files: File[], category: string, onProgress: (percent:
 }
 
 function DocList({ docs, categories, onChange, label }: { docs: Doc[]; categories: string[]; onChange: (d: Doc[]) => void; label: string }) {
-  const [cat, setCat] = useState(categories[0] ?? "Other");
+  const mode = useContext(UploadModeContext);
+  const available = categories.filter(category => mode === "general" || category !== "General Compliance Statement");
+  const [cat, setCat] = useState("");
+  const [customHeading, setCustomHeading] = useState("");
+  const selectedType = available.includes(cat) ? (cat === "Other" ? customHeading.trim() : cat) : "";
   const { toast } = useToast();
   const [progress, setProgress] = useState<number | null>(null);
   return (
     <div className="space-y-2">
       <div className="flex gap-2">
-        <select aria-label={`${label} document type`} value={cat} onChange={(e) => setCat(e.target.value)} className="h-10 min-w-0 flex-1 rounded-xl border-0 bg-card px-2 text-xs font-bold shadow-clay-sm">{categories.map((c) => <option key={c}>{c}</option>)}</select>
+        <select aria-label={`${label} document type`} value={cat} onChange={(e) => setCat(e.target.value)} className="h-10 min-w-0 flex-1 rounded-xl border-0 bg-card px-2 text-xs font-bold shadow-clay-sm"><option value="">Choose document type first</option>{available.map((c) => <option key={c}>{c}</option>)}</select>
         <label className="flex h-10 cursor-pointer items-center gap-1.5 rounded-xl bg-primary px-3 text-xs font-bold text-primary-foreground shadow-clay-sm">
           <Upload className="size-3.5" /> Add files
-          <input type="file" multiple disabled={progress !== null} accept={uploadAccept} className="hidden" aria-label={`Upload ${label} documents`} onChange={async (e) => { const f = Array.from(e.target.files ?? []); e.target.value = ""; if (f.length) { try { setProgress(0); onChange([...docs, ...(await storeFiles(f, cat, setProgress))]); } catch (error) { toast({ title: "Upload failed", description: error instanceof Error ? error.message : "Please try again.", variant: "destructive" }); } finally { setProgress(null); } } }} />
+          <input type="file" multiple disabled={progress !== null || !selectedType} accept={uploadAccept} className="hidden" aria-label={`Upload ${label} documents`} onChange={async (e) => { const f = Array.from(e.target.files ?? []); e.target.value = ""; if (f.length && selectedType) { try { setProgress(0); onChange([...docs, ...(await storeFiles(f, selectedType, setProgress))]); } catch (error) { toast({ title: "Upload failed", description: error instanceof Error ? error.message : "Please try again.", variant: "destructive" }); } finally { setProgress(null); } } }} />
         </label>
       </div>
+      {cat === "Other" && <Input value={customHeading} onChange={e => setCustomHeading(e.target.value)} maxLength={100} placeholder="Exact document / custom index heading" aria-label="Custom document heading" />}
+      <p className="text-xs text-muted-foreground">Upload files of one document type together. Use each product series for its own catalogue, TDS and test certificates.</p>
+      <div className="grid grid-cols-1 gap-1 sm:grid-cols-2">
+        {available.filter(type => type !== "Other").map(type => {
+          const count = docs.filter(doc => matches(type, doc)).length;
+          return <button type="button" key={type} onClick={() => setCat(type)} className={`flex items-center justify-between gap-2 rounded-lg border px-2 py-2 text-left text-xs ${cat === type ? "border-primary bg-primary/10" : "bg-background"}`}><span>{type}</span><span className={count ? "text-emerald-700" : "text-muted-foreground"}>{count ? `${count} file(s)` : "Add"}</span></button>;
+        })}
+      </div>
+      {docs.some(doc => doc.category === "Compliance Statement") && <p className="text-xs text-amber-700">Review older “Compliance Statement” files: use General Compliance Statement only for reusable general documents. Keep project-specific compliance with its project.</p>}
       {progress !== null && <p role="status" className="text-xs">Uploading document: {progress}%</p>}
       {docs.length > 0 ? (
         <ul className="space-y-1">{docs.map((d) => (
@@ -166,14 +187,21 @@ type Props = {
 
 export function LibraryManager({ open, onClose, tab, setTab, companies, setCompanies, brands, setBrands }: Props) {
   const [openId, setOpenId] = useState<string>();
+  const [uploadMode, setUploadMode] = useState<UploadMode>("general");
   if (!open) return null;
   return (
-    <div className="fixed inset-0 z-50 grid place-items-end bg-foreground/35 sm:place-items-center sm:p-5" role="dialog" aria-modal="true" aria-labelledby="mgr-title">
+    <UploadModeContext.Provider value={uploadMode}><div className="fixed inset-0 z-50 grid place-items-end bg-foreground/35 sm:place-items-center sm:p-5" role="dialog" aria-modal="true" aria-labelledby="mgr-title">
       <div className="max-h-[92vh] w-full max-w-xl overflow-y-auto rounded-t-3xl bg-card p-5 shadow-clay sm:rounded-3xl">
         <div className="mb-4 flex items-center justify-between">
           <div><p className="text-[11px] font-bold uppercase text-primary">KINAIR workspace · cloud synced</p><h2 id="mgr-title" className="font-display text-xl font-semibold">Companies & brands</h2></div>
           <Button variant="ghost" size="icon" onClick={onClose} aria-label="Close"><X /></Button>
         </div>
+        <section className="mb-4 rounded-xl border bg-background p-3">
+          <label htmlFor="library-upload-mode" className="text-sm font-semibold">Document preparation</label>
+          <select id="library-upload-mode" value={uploadMode} onChange={e => setUploadMode(e.target.value as UploadMode)} className="mt-2 w-full rounded-lg border bg-card p-2 text-xs">{uploadModes.map(mode => <option key={mode.value} value={mode.value}>{mode.title}</option>)}</select>
+          <p className="mt-2 text-xs text-muted-foreground">{uploadModes.find(mode => mode.value === uploadMode)?.detail}</p>
+          <p className="mt-2 text-xs font-medium">Shared library files can be reused. Project-specific files belong in the current submittal. This guide does not change a saved project's index.</p>
+        </section>
         <div className="mb-4 grid grid-cols-2 gap-1.5 rounded-2xl bg-background/70 p-1.5">
           {(["companies", "brands"] as const).map((t) => <Button key={t} variant={t === tab ? "default" : "ghost"} className="h-10 rounded-xl text-xs font-bold capitalize" onClick={() => setTab(t)}>{t === "companies" ? <Building2 /> : <Tag />} {t}</Button>)}
         </div>
@@ -190,7 +218,7 @@ export function LibraryManager({ open, onClose, tab, setTab, companies, setCompa
         )}
         <Button variant="default" size="default" className="mt-5 w-full" onClick={onClose}>Done</Button>
       </div>
-    </div>
+    </div></UploadModeContext.Provider>
   );
 }
 
@@ -211,3 +239,4 @@ export function DocPicker({ open, onClose, title, groups, onPick }: { open: bool
     </div>
   );
 }
+

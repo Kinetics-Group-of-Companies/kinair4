@@ -2803,6 +2803,7 @@ export type Database = {
       user_lpo_permissions: {
         Row: {
           can_access_lpo: boolean
+          can_access_submittal: boolean
           notification_email: string | null
           receive_lpo_emails: boolean
           updated_at: string
@@ -2811,6 +2812,7 @@ export type Database = {
         }
         Insert: {
           can_access_lpo?: boolean
+          can_access_submittal?: boolean
           notification_email?: string | null
           receive_lpo_emails?: boolean
           updated_at?: string
@@ -2819,6 +2821,7 @@ export type Database = {
         }
         Update: {
           can_access_lpo?: boolean
+          can_access_submittal?: boolean
           notification_email?: string | null
           receive_lpo_emails?: boolean
           updated_at?: string
@@ -2873,6 +2876,20 @@ export type Database = {
       can_access_lpo: {
         Args: { _user_id: string }
         Returns: boolean
+      }
+      can_access_submittal: {
+        Args: { _user_id: string }
+        Returns: boolean
+      }
+      admin_set_portal_permission: {
+        Args: {
+          _target_user_id: string
+          _can_access_lpo?: boolean | null
+          _can_access_submittal?: boolean | null
+          _receive_lpo_emails?: boolean | null
+          _notification_email?: string | null
+        }
+        Returns: Database["public"]["Tables"]["user_lpo_permissions"]["Row"]
       }
       update_lpo_email_schedule: {
         Args: {

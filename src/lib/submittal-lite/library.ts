@@ -1,14 +1,14 @@
 import { idbGet, idbSet } from "@/lib/submittal-lite/idb";
 
 export type Slot = "cover" | "index" | "divider";
-export type Doc = { id: string; name: string; type: string; category: string; size?: number; pages?: number };
+export type Doc = { libraryScope?: "company"; id: string; name: string; type: string; category: string; size?: number; pages?: number };
 export type Company = { id: string; name: string; logo?: string | undefined; stamp?: string | undefined; tpl: Partial<Record<Slot, { name: string; type: string; size?: number | undefined }>>; docs: Doc[] };
 export type Series = { id: string; name: string; docs: Doc[] };
 export type Brand = { id: string; name: string; logo?: string | undefined; docs: Doc[]; series: Series[] };
 
-export const companyCategories = ["Company Profile", "Trade License", "Organization Chart", "ISO Certificate", "Draft Warranty Certificate", "Product Certificate", "Test Certificate", "Other"];
-export const brandCategories = ["Manufacturer Profile", "ISO Certificate", "Product Certificate", "Country of Origin", "Manufacturer Authorization Letter", "Approval Copies", "Project Reference List", "Other"];
-export const productCategories = ["Catalogue", "Technical Data Sheet", "O&M Manual", "Test Certificate", "Approval Copy", "Project Reference List", "Warranty", "Compliance Statement", "Other"];
+export const companyCategories = ["Company Profile", "Trade License", "Organization Chart", "ISO Certificate", "Draft Warranty Certificate", "Product Certificate", "Test Certificate", "Membership Certificate", "Previous Project Approvals", "Project Reference List", "Other"];
+export const brandCategories = ["Manufacturer Profile", "ISO Certificate", "Product Certificate", "Country of Origin", "Manufacturer Authorization Letter", "Approval Copies", "Project Reference List", "Catalogue", "Installation Guide", "General Compliance Statement", "Test Certificate", "Draft Warranty Certificate", "Other"];
+export const productCategories = ["Catalogue", "Technical Data Sheet", "O&M Manual", "Test Certificate", "Approval Copy", "Project Reference List", "Warranty", "General Compliance Statement", "Installation Guide", "Country of Origin", "Other"];
 
 export const uid = () => Math.random().toString(36).slice(2, 10);
 export const tplKey = (companyId: string, slot: Slot) => `tpl:${companyId}:${slot}`;
@@ -600,8 +600,18 @@ function intent(value: string): Intent | undefined {
 const generic = new Set(["certificate", "letter", "report", "document", "sheet", "draft", "the", "and", "for", "copy", "list", "other", "product", "project", "general"]);
 const distinct = (text: string) => normalize(text).split(" ").filter((w) => w.length > 2 && !generic.has(w));
 
+export function isCompanyCertificate(doc: Doc): boolean {
+  if (doc.libraryScope !== "company") return false;
+  const purpose = intent(doc.category !== "Other" ? doc.category : doc.name);
+  // Scope applies across products; it does not change a document's purpose.
+  if (["warranty", "trade", "origin", "authorization"].includes(purpose ?? "") ||
+      /warranty|trade\s*(?:licen[cs]e|certificat)|country\s*of\s*origin|authori[sz]ation/i.test(`${doc.category} ${doc.name}`)) return false;
+  return /certificat|membership|member[ -]?plaque/i.test(`${doc.category} ${doc.name}`);
+}
+
 export function matches(sectionTitle: string, d: Doc) {
-  const sectionType = intent(sectionTitle);
+  const detectedSectionType = intent(sectionTitle);
+  const sectionType = detectedSectionType === "product-cert" ? "test" : detectedSectionType;
   // A deliberate library category takes priority over a possibly vague filename.
   const categoryType = d.category && d.category !== "Other" ? intent(d.category) : undefined;
   const filenameType = intent(d.name);
@@ -609,6 +619,9 @@ export function matches(sectionTitle: string, d: Doc) {
   const typedDocument = filenameType === "membership" || (filenameType && (categoryType === "company-profile" || categoryType === "manufacturer-profile") && filenameType !== categoryType)
     ? filenameType : (categoryType ?? filenameType);
   const documentType = typedDocument === "product-cert" ? (filenameType === "iso" ? "iso" : "test") : typedDocument;
+  // Company-level uploads are explicitly shared across all products. Include
+  // certificates in the test/certificate package without relabelling their content.
+  if (isCompanyCertificate(d) && (sectionType === "test" || (!sectionType && /^certificates?$/i.test(sectionTitle.trim())))) return true;
   if (sectionType === "compliance" && documentType === "compliance") {
     const requested = complianceScope(sectionTitle);
     const supplied = complianceScope(d.name) ?? complianceScope(d.category);

@@ -1,7 +1,17 @@
+import { StandaloneReplyBuilder } from '@/components/submittal-lite/StandaloneReplyBuilder';
+import type { ComplianceSheet } from "@/lib/submittal-lite/compliance";
+import { TeamWorkflow } from "@/components/submittal-lite/TeamWorkflow";
+import { assertInternalReview } from "@/lib/submittal-lite/workflow";
+import { EngineerReview } from "@/components/submittal-lite/EngineerReview";
+import { ProjectDetailsReuse } from "@/components/submittal-lite/ProjectDetailsReuse";
+import { AiUsageDashboard } from '@/components/submittal-lite/AiUsageDashboard';
+import { RevisionComparison } from '@/components/submittal-lite/RevisionComparison';
+import { rtccReady, type RtccRound } from "@/lib/submittal-lite/rtcc";
+import { parseIndexHeadings, parseCoverDetails } from "@/lib/submittal-lite/setup-parser";
 import { shareSubmittalPdf, shareFingerprint, cachedSubmittalShare, rememberSubmittalShare } from "@/lib/submittal-lite/share";
-import { coverFieldKey as coverKey, normalizeCoverFields, isProvidedCoverValue } from "@/lib/submittal-lite/cover-fields";
+import { coverFieldKey as coverKey, normalizeCoverFields, replaceImportedCoverFields, isProvidedCoverValue } from "@/lib/submittal-lite/cover-fields";
 import { useEffect, useMemo, useRef, useState, type DragEvent, type MutableRefObject } from "react";
-import { ArrowDown, ArrowLeft, ArrowUp, Building2, Check, Download, FilePlus2, FileText, FileUp, GripVertical, ImagePlus, LayoutGrid, Library, Loader2, Paperclip, Plus, Save, Settings2, Sparkles, Tag, Wand2, X } from "lucide-react";
+import { ArrowDown, ArrowLeft, ArrowUp, Building2, Check, Download, FilePlus2, FileText, FileUp, GripVertical, ImagePlus, LayoutGrid, Library, Link as LinkIcon, Loader2, Maximize2, Minimize2, Paperclip, Plus, Save, Settings2, Sparkles, Tag, Wand2, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
@@ -10,13 +20,13 @@ import { PdfPreview } from "@/components/submittal-lite/PdfPreview";
 import { DocPicker, LibraryManager } from "@/components/submittal-lite/LibraryManager";
 import { SubmittalsHome } from "@/components/submittal-lite/SubmittalsHome";
 import { SubmittalChat, type SubmittalChatPlan, type ChatUpload, type ChatInspection } from "@/components/submittal-lite/SubmittalChat";
-import { extractText, readScannedPage } from "@/lib/submittal-lite/extract";
+import { extractSetupText, readScannedPage } from "@/lib/submittal-lite/extract";
 import { detectScheduleSeries, seriesProductType, type SeriesModel } from "@/lib/submittal-lite/schedule-series";
 import { loadSelectorModelCatalogue } from "@/lib/submittal-lite/selector-models";
 import { countPdfPages } from "@/lib/submittal-lite/pdf-pages";
 import { buildPdfInWorker } from "@/lib/submittal-lite/pdf-worker-client";
 import { idbDel, idbGet, uploadSubmittalFile, setSubmittalStorageTenantId } from "@/lib/submittal-lite/idb";
-import { indexHeadingIntent, loadLibrary, matches, saveLibrary, tplKey, uid, type Brand, type Company, type Doc, type Slot } from "@/lib/submittal-lite/library";
+import { indexHeadingIntent, isCompanyCertificate, loadLibrary, matches, saveLibrary, tplKey, uid, type Brand, type Company, type Doc, type Slot } from "@/lib/submittal-lite/library";
 import { loadCloudRecords, putCloudRecord, removeCloudRecord, loadCloudSettings, putCloudSettings } from "@/lib/submittal-lite/cloud";
 import { nextRef, saveRecords, statusDot, type DocRef, type Field, type IndexMode, type Kind, type Section, type Status, type StampMode, type SubmittalRecord } from "@/lib/submittal-lite/records";
 import type { FileData, PageLabel } from "@/lib/submittal-lite/pdf-build";
@@ -26,7 +36,7 @@ import { Navigate } from "react-router-dom";
 import { useAuth } from "@/lib/authContext";
 import "@/submittal-lite.css";
 
-type View = "list" | "edit";
+type View = "list" | "edit" | "compliance" | "rtcc";
 
 const kindLabel: Record<Kind, string> = { Material: "Material Submittal", PQ: "Prequalification Submittal", "O&M": "Operation & Maintenance Manual" };
 const sectionDefaults: Record<Kind, string[]> = {
@@ -84,24 +94,9 @@ const mkSections = (titles: string[], prev: Section[] = []) => {
 const near = (a: string, b: string) => { const x = a.trim().toLowerCase(), y = b.trim().toLowerCase(); return !!x && !!y && (x.includes(y) || y.includes(x)); };
 
 function localParse(cover: string, index: string) {
-  const fields: Field[] = [];
-  for (const raw of cover.split(/\r?\n/)) {
-    const line = raw.trim();
-    if (!line) continue;
-    const m = line.match(/^([^:\t]{2,40})[:\t]+\s*(.+)$/);
-    const last = fields[fields.length - 1];
-    if (m) fields.push({ label: (m[1] ?? "").trim(), value: (m[2] ?? "").trim() });
-    else if (last) last.value += ` ${line}`;
-  }
+  const fields: Field[] = parseCoverDetails(cover);
   const find = (re: RegExp) => fields.find((f) => re.test(f.label))?.value ?? null;
-  const sections = index.split(/\r?\n/).map((raw) => raw
-    .replace(/^\s*\d+(?:\.\d+)*[.)-]\s*(?=[A-Za-z])/, "")
-    .replace(/^\s*(?:(?:\d+(?:\.\d+)+|\d+)[.)-]?|[A-Za-z][.)]|[-•*])\s+/, "")
-    .replace(/^\s*\|\s*/, "")
-    .replace(/\s*(?:\.{2,}|\||\t)\s*\d+\s*$/, "")
-    .replace(/\s+[1-9]\d{0,2}\s*$/, "")
-    .trim())
-    .filter((line) => line && !/^(?:index|contents|table of contents|sr\.?\s*no\.?|s\.?\s*no\.?|description|page(?: no\.?)?)(?:\s+|$)/i.test(line));
+  const sections = parseIndexHeadings(index);
   return { fields, sections, title: find(/title|subject|description/i), brand: find(/brand|manufacturer|make/i), product: find(/product|model|series/i) };
 }
 
@@ -189,12 +184,12 @@ function docsForSelection(company: Company | undefined, brand: Brand | undefined
   const catalogueKeys = new Set<string>();
   const selectedModelNames = selectedSeries.map((series) => series.name.toUpperCase());
   const explicitlyAssigned = new Set(selectedSeries.flatMap((series) => series.docs.map((doc) => doc.id)));
-  for (const doc of [...(company?.docs ?? []), ...(brand?.docs ?? []), ...selectedSeries.flatMap((series) => series.docs), ...sharedApprovals]) {
+  for (const doc of [...(company?.docs ?? []).map(doc => ({ ...doc, libraryScope: "company" as const })), ...(brand?.docs ?? []), ...selectedSeries.flatMap((series) => series.docs), ...sharedApprovals]) {
     // The Admin/Library series assignment is the source of truth. Only use
     // filename series guards for company/brand-level documents that were not
     // explicitly assigned to the selected product series.
     const namedSeries = detectScheduleSeries(doc.name, brand?.series.map((series) => series.name) ?? []).series;
-    if (!explicitlyAssigned.has(doc.id) && namedSeries.length &&
+    if (!isCompanyCertificate(doc) && !explicitlyAssigned.has(doc.id) && namedSeries.length &&
         !namedSeries.some((name) => selectedModelNames.includes(name.toUpperCase()))) continue;
     // Trust explicit series/library assignment. A shared OEM certificate can
     // legitimately contain "Cross Flow" in its filename while being mapped to
@@ -216,7 +211,8 @@ function docsForSelection(company: Company | undefined, brand: Brand | undefined
 }
 
 function verifiedAiLibraryDoc(doc: Doc, brand: Brand | undefined, selectedIds: string[], seriesNames: string[]) {
-  // AMCA membership is company evidence, not a product test certificate.
+  if (isCompanyCertificate(doc)) return true;
+  // Brand/series membership is not product performance evidence.
   if (/AMCA.*(?:MEMBER|PLAQUE)/i.test(doc.name)) return false;
   const certificate = /(?:test|performance|product).*?(?:report|certificat)/i.test(`${doc.category ?? ""} ${doc.name}`);
   if (!certificate) return true;
@@ -229,15 +225,21 @@ function verifiedAiLibraryDoc(doc: Doc, brand: Brand | undefined, selectedIds: s
 // Saved company, brand and series documents only fill headings in the chosen index.
 // Manually uploaded files from removed headings stay visible for reassignment.
 function attach(sections: Section[], pool: Doc[]) {
+  const projectIndex = sections.some(section => indexHeadingIntent(section.title) === "project-spec");
+  const libraryMatch = (title: string, doc: Doc) => {
+    // Generic compliance under a project index must be project-specific.
+    const heading = projectIndex && isComplianceStatement(title) && !/general/i.test(title) ? "Project Compliance Statement" : title;
+    return matches(heading, doc);
+  };
   const ids = new Set(pool.map((d) => d.id));
   return sections
     .filter((section) => !section.auto || section.docs.some((d) => !d.auto))
     .map((section) => {
       const seen = new Set<string>();
       const kept = section.docs
-        .filter((d) => !d.auto || (!section.auto && ids.has(d.id) && matches(section.title, pool.find((doc) => doc.id === d.id)!)))
+        .filter((d) => !d.auto || (!section.auto && ids.has(d.id) && libraryMatch(section.title, pool.find((doc) => doc.id === d.id)!)))
         .filter((d) => {
-          const key = logicalFileNameKey(d.name);
+          const key = d.id;
           if (!key) return true;
           if (seen.has(key)) return false;
           seen.add(key);
@@ -245,9 +247,9 @@ function attach(sections: Section[], pool: Doc[]) {
         });
       if (section.auto) return { ...section, docs: kept };
       const add = pool
-        .filter((d) => matches(section.title, d))
+        .filter((d) => libraryMatch(section.title, d))
         .filter((d) => {
-          const key = logicalFileNameKey(d.name);
+          const key = d.id;
           if (!key || seen.has(key)) return false;
           seen.add(key);
           return true;
@@ -305,6 +307,19 @@ function Bar({ s, i, onRename, onRemove, onInsert, onMove, onDefault, onUpload, 
 
 function SimpleSubmittalBuilder({ tenantId }: { tenantId: string }) {
   const [view, setView] = useState<View>("list");
+  const [openedReplyBuilders,setOpenedReplyBuilders]=useState<string[]>([]);
+  useEffect(()=>{if(view==='compliance'||view==='rtcc')setOpenedReplyBuilders(current=>current.includes(view)?current:[...current,view]);},[view]);
+  const [fullWindow, setFullWindow] = useState(false);
+  const [previewInFullWindow, setPreviewInFullWindow] = useState(false);
+  const focusedEditor = view === "edit" && fullWindow;
+  useEffect(() => {
+    if (!focusedEditor) return;
+    const escape = (event: KeyboardEvent) => {
+      if (event.key === "Escape" && !event.defaultPrevented && !document.querySelector('[role="dialog"], [role="alertdialog"], [role="listbox"]')) setFullWindow(false);
+    };
+    window.addEventListener("keydown", escape);
+    return () => window.removeEventListener("keydown", escape);
+  }, [focusedEditor]);
   const [kind, setKind] = useState<Kind>("Material");
   const [companies, setCompanies] = useState<Company[]>([]);
   const [brands, setBrands] = useState<Brand[]>([]);
@@ -320,7 +335,14 @@ function SimpleSubmittalBuilder({ tenantId }: { tenantId: string }) {
   const [useDefaultIndex, setUseDefaultIndex] = useState(false);
   const [coverText, setCoverText] = useState("");
   const [indexText, setIndexText] = useState("");
+  const [uploadedCoverDoc, setUploadedCoverDoc] = useState<DocRef | null>(null);
+  const [coverPageMode, setCoverPageMode] = useState<"uploaded" | "generated">("generated");
+  const [indexPageMode, setIndexPageMode] = useState<"uploaded" | "generated">("generated");
+  const [uploadedIndexDoc, setUploadedIndexDoc] = useState<DocRef | null>(null);
+  const [uploadedDividerDoc, setUploadedDividerDoc] = useState<DocRef | null>(null);
+  const [dividerPageMode, setDividerPageMode] = useState<"uploaded" | "generated">("generated");
   const appliedCustomerIndexText = useRef("");
+  const appliedCoverText = useRef("");
   const [fields, setFields] = useState<Field[]>(() => coverDefaults.map((f) => ({ ...f })));
   const [indexMode, setIndexMode] = useState<IndexMode>("general");
   const [indexTemplates, setIndexTemplates] = useState<{ general: string[]; project: string[] }>({ general: sectionDefaults.Material, project: projectIndex });
@@ -334,21 +356,32 @@ function SimpleSubmittalBuilder({ tenantId }: { tenantId: string }) {
   const [chatMounted, setChatMounted] = useState(false);
   const [modelCatalog, setModelCatalog] = useState<SeriesModel[]>([]);
   const [pendingChatDownloadId, setPendingChatDownloadId] = useState<string>();
+  const [failedChatPdfId, setFailedChatPdfId] = useState<string>();
+  const [chatPdfError, setChatPdfError] = useState("");
   const [preparedChatPdfId, setPreparedChatPdfId] = useState<string>();
   const [lastChatPdfReadyId, setLastChatPdfReadyId] = useState<string>();
   const [mobileMode, setMobileMode] = useState(() => typeof window !== "undefined" && window.matchMedia("(max-width: 767px), (pointer: coarse)").matches);
   const [mgrTab, setMgrTab] = useState<"companies" | "brands">("companies");
   const [pickFor, setPickFor] = useState<string>();
   const [records, setRecords] = useState<SubmittalRecord[]>([]);
+  const [compliance,setCompliance] = useState<ComplianceSheet>();
+  const [rtcc, setRtcc] = useState<RtccRound[]>([]);
+  const savingRecord = useRef(false);
+  const [technicalResolution, setTechnicalResolution] = useState("");
+  const [rtccSession, setRtccSession] = useState(0);
+  const [rtccBusy, setRtccBusy] = useState(false);
   const [editingId, setEditingId] = useState<string>();
   const [status, setStatus] = useState("All");
   const [notice, setNotice] = useState("");
   const [hasPdfIssues, setHasPdfIssues] = useState(false);
-  const [reading, setReading] = useState<"" | "cover" | "index" | "build">("");
+  const [reading, setReading] = useState<"" | "cover" | "index" | "divider" | "build">("");
   const [building, setBuilding] = useState(false);
   const [uploadProgress, setUploadProgress] = useState<number | null>(null);
   const [manualBuildKey, setManualBuildKey] = useState("");
   const [pdf, setPdf] = useState<{ bytes: Uint8Array; labels: PageLabel[] }>();
+  const [manualSharing, setManualSharing] = useState(false);
+  const [manualShare, setManualShare] = useState<{key: string; url: string; expiresAt: string} | null>(null);
+  const [manualShareMessage, setManualShareMessage] = useState("");
   const [rotations, setRotations] = useState<Record<number, number>>({});
   const [loaded, setLoaded] = useState(false);
   const mem = useRef(new Map<string, ArrayBuffer>());
@@ -432,7 +465,7 @@ function SimpleSubmittalBuilder({ tenantId }: { tenantId: string }) {
   const poolKey = pool.map((d) => d.id + d.category).join();
 
   // Auto-load documents whenever company / brand / series or their documents change.
-  useEffect(() => { if (loaded) setSections((s) => attach(s, pool)); }, [poolKey, loaded]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { if (loaded && !records.find(r => r.id === editingId)?.issuedPdf) setSections((s) => attach(s, pool)); }, [poolKey, loaded]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Pasted or uploaded customer indexes create dividers without a second Build click.
   useEffect(() => {
@@ -448,10 +481,46 @@ function SimpleSubmittalBuilder({ tenantId }: { tenantId: string }) {
   }, [indexText, indexMode]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const editing = records.find((r) => r.id === editingId);
+  const releaseIssues = editing?.issuedPdf ? [] : [
+    ...(editing?.technicalIssues ?? []),
+    ...sections.filter(s => !s.auto && !s.docs.length && !s.notApplicableReason?.trim()).map(s => `Missing documents: ${s.title}`),
+    ...(!rtccReady(rtcc) ? ["Review all RTCC replies"] : []),
+  ];
   const allDocs = sections.filter((section) => !section.auto).flatMap((section) => section.docs);
   const pageTotal = allDocs.reduce((sum, doc) => sum + (doc.pages ?? 1), 0);
   const largeMode = mobileMode || allDocs.some((doc) => (doc.size ?? 0) > 20 * 1024 * 1024) || pageTotal > 100;
-  const buildKey = JSON.stringify({ kind, title, coverHeading, fields, sections, indexMode, companyId, brandId, stampAll, stampCover, stampIndex, useDefaultCover, useDefaultIndex, coverDoc: editing?.coverDoc?.id, indexDoc: editing?.indexDoc?.id });
+  const buildKey = JSON.stringify({ rtcc, compliance, kind, title, coverHeading, fields, sections, indexMode, companyId, brandId, stampAll, stampCover, stampIndex, useDefaultCover, useDefaultIndex, coverPageMode, indexPageMode, dividerPageMode, coverDoc: uploadedCoverDoc?.id, indexDoc: uploadedIndexDoc?.id, dividerDoc: uploadedDividerDoc?.id, issuedPdf: editing?.issuedPdf?.id });
+
+  const recoveryKey = `submittal-recovery:${tenantId}`;
+  const [recoveryNotice, setRecoveryNotice] = useState("");
+  useEffect(() => {
+    if (!loaded || view !== "edit" || editing?.issuedPdf) return;
+    const timer = setTimeout(() => {
+      try {
+        localStorage.setItem(recoveryKey, JSON.stringify({ editingId, expectedUpdatedAt: editing?.updatedAt, at: new Date().toISOString(),
+          kind, title, coverHeading, fields, sections, indexMode, companyId, brandId, seriesIds, customProducts,
+          stampAll, stampCover, stampIndex, coverText, indexText, uploadedCoverDoc, uploadedIndexDoc, uploadedDividerDoc, coverPageMode, indexPageMode, dividerPageMode, rtcc, compliance }));
+        setRecoveryNotice("Unsaved work backed up on this device. Press Save to sync to your workspace.");
+      } catch { setRecoveryNotice("Device backup unavailable. Press Save to protect your changes."); }
+    }, 700);
+    return () => clearTimeout(timer);
+  }, [loaded, view, buildKey, coverText, indexText, seriesIds, customProducts, editingId, editing?.updatedAt]);
+  const recoverEditor = () => {
+    try {
+      const raw = localStorage.getItem(recoveryKey);
+      if (!raw) { setNotice("No unsaved work is available on this device."); return; }
+      const draft = JSON.parse(raw);
+      const existing = records.find(r => r.id === draft.editingId);
+      if (draft.editingId && (!existing || existing.issuedPdf || existing.updatedAt !== draft.expectedUpdatedAt)) {
+        setNotice("This draft was deleted, issued or changed elsewhere. Recovery will not overwrite it. Your device backup remains available."); return;
+      }
+      setEditingId(draft.editingId); setKind(draft.kind); setTitle(draft.title); setCoverHeading(draft.coverHeading);
+      setFields(draft.fields); setSections(draft.sections); setIndexMode(draft.indexMode); setCompanyId(draft.companyId); setBrandId(draft.brandId);
+      setSeriesIds(draft.seriesIds); setCustomProducts(draft.customProducts); setStampAll(draft.stampAll); setStampCover(draft.stampCover); setStampIndex(draft.stampIndex);
+      setCoverText(draft.coverText); appliedCoverText.current = draft.coverText; setIndexText(draft.indexText); setUploadedIndexDoc(draft.uploadedIndexDoc); setUploadedCoverDoc(draft.uploadedCoverDoc ?? null); setUploadedDividerDoc(draft.uploadedDividerDoc ?? null); setCoverPageMode(draft.coverPageMode ?? "generated"); setIndexPageMode(draft.indexPageMode ?? "generated"); setDividerPageMode(draft.dividerPageMode ?? "generated");
+      setCompliance(draft.compliance); setRtcc(draft.rtcc ?? []); setRtccSession(n=>n+1); setView("edit"); setNotice("Unsaved work recovered. Review it and press Save.");
+    } catch { setNotice("The device backup could not be recovered. Your saved workspace records are unchanged."); }
+  };
 
   const normCache = useRef(new Map<string, FileData>());
   const bytesOf = async (id: string) => mem.current.get(id) ?? (await idbGet(`doc:${id}`));
@@ -459,6 +528,16 @@ function SimpleSubmittalBuilder({ tenantId }: { tenantId: string }) {
 
   useEffect(() => {
     if (!loaded) return;
+    if (editing?.issuedPdf) {
+      let cancelled = false; setBuilding(true);
+      void bytesOf(editing.issuedPdf.id).then(bytes => {
+        if (cancelled) return;
+        if (!bytes) throw new Error("Issued PDF is missing. Re-upload the original issued copy; it will not be silently rebuilt.");
+        setPdf({ bytes: new Uint8Array(bytes), labels: editing.issuedLabels ?? [] }); setHasPdfIssues(false);
+      }).catch(error => { if (!cancelled) { setPdf(undefined); setHasPdfIssues(true); setNotice(error.message); } })
+        .finally(() => { if (!cancelled) setBuilding(false); });
+      return () => { cancelled = true; };
+    }
     if (largeMode && manualBuildKey !== buildKey) { setPdf(undefined); setBuilding(false); return; }
     let cancelled = false;
     const buildController = new AbortController();
@@ -479,21 +558,26 @@ function SimpleSubmittalBuilder({ tenantId }: { tenantId: string }) {
           if (!bytes) { missingFiles.push(ref.name); return undefined; }
           return normalizeUploadData({ bytes, type: ref.type, name: ref.name });
         };
-        const sourceCover = await loadSourceDoc(editing?.coverDoc);
-        const sourceIndex = await loadSourceDoc(editing?.indexDoc);
-        const secs: { title: string; stamp: StampMode | undefined; files: FileData[] }[] = [];
+        const sourceCover = await loadSourceDoc(coverPageMode === "uploaded" ? uploadedCoverDoc ?? undefined : undefined);
+        const sourceIndex = indexMode === "customer" && indexPageMode === "uploaded" ? await loadSourceDoc(uploadedIndexDoc ?? undefined) : undefined;
+        if (dividerPageMode === "generated") delete templates.divider;
+        else if (uploadedDividerDoc) {
+          const customDivider = await loadSourceDoc(uploadedDividerDoc);
+          if (customDivider) templates.divider = customDivider;
+        }
+        const secs: { title: string; notApplicableReason?: string; stamp: StampMode | undefined; files: FileData[] }[] = [];
         for (const section of sections.filter((item) => !item.auto)) {
           const files: FileData[] = [];
           for (const d of section.docs) {
             const hit = normCache.current.get(d.id);
-            if (hit) { files.push(hit); continue; }
+            if (hit) { files.push({ ...hit, id: d.id }); continue; }
             const bytes = await bytesOf(d.id);
             if (!bytes) { missingFiles.push(d.name); continue; }
             const normalized = await normalizeUploadData({ bytes, type: d.type, name: d.name });
             if (bytes.byteLength <= 1024 * 1024) normCache.current.set(d.id, normalized);
-            files.push(normalized);
+            files.push({ ...normalized, id: d.id });
           }
-          secs.push({ title: section.title, stamp: section.stamp, files });
+          secs.push({ title: section.title, notApplicableReason: section.docs.length ? undefined : section.notApplicableReason, stamp: section.stamp, files });
           if (cancelled) return;
         }
         const selectionLabels = /^(supplier(?: name)?|submitted by|company|brand(?: name)?|manufacturer|make|product|product type|equipment|model|series)$/i;
@@ -510,7 +594,8 @@ function SimpleSubmittalBuilder({ tenantId }: { tenantId: string }) {
         ];
         const coverLabel = coverHeading.trim() || (kind === "Material" && selectedProducts ? `Material Submittal for ${selectedProducts}` : kindLabel[kind]);
         if (cancelled) return;
-        const out = await buildPdfInWorker({ kindLabel: kindLabel[kind], coverLabel, title, companyName: company?.name, brandName: brand?.name, productName: selectedProducts, fields: coverFields, sections: secs, templates, sourceCover, sourceIndex, useDefaultCover: useDefaultCover && Boolean(company?.tpl.cover), useDefaultIndex: useDefaultIndex && Boolean(company?.tpl.index), companyLogo: await dataUrlToFile(company?.logo, "company.png"), brandLogo: await dataUrlToFile(brand?.logo, "brand.png"), stamp: await dataUrlToFile(company?.stamp, "stamp.png"), stampEveryPage: stampAll, stampCover, stampIndex }, buildController.signal);
+        const rtccInput = await Promise.all(rtcc.map(async round => ({ ...round, sourceFile: await loadSourceDoc(round.source) })));
+        const out = await buildPdfInWorker({ rtcc: rtccInput, kindLabel: kindLabel[kind], coverLabel, title, companyName: company?.name, brandName: brand?.name, productName: selectedProducts, fields: coverFields, sections: secs, templates, sourceCover, sourceIndex, useDefaultCover: useDefaultCover && Boolean(company?.tpl.cover), useDefaultIndex: useDefaultIndex && Boolean(company?.tpl.index), companyLogo: await dataUrlToFile(company?.logo, "company.png"), brandLogo: await dataUrlToFile(brand?.logo, "brand.png"), stamp: await dataUrlToFile(company?.stamp, "stamp.png"), stampEveryPage: stampAll, stampCover, stampIndex }, buildController.signal);
         if (!cancelled) {
           setPdf({ bytes: out.bytes, labels: out.labels });
           setHasPdfIssues(Boolean(missingFiles.length || out.skipped.length));
@@ -519,7 +604,7 @@ function SimpleSubmittalBuilder({ tenantId }: { tenantId: string }) {
             out.skipped.length ? `Could not add: ${out.skipped.join(", ")}. Use PDF, PNG or JPG files.` : "",
           ].filter(Boolean).join(" "));
         }
-      } catch (error) { if (!cancelled) { setPdf(undefined); setHasPdfIssues(true); setNotice(error instanceof Error && /docx|word/i.test(error.message) ? "A Word file could not be converted. Please upload it again, or save it as PDF." : "Preview could not be built. Check the uploaded files."); } }
+      } catch (error) { if (!cancelled) { setPdf(undefined); setHasPdfIssues(true); setNotice(error instanceof Error && /RTCC|supporting document|consultant source/.test(error.message) ? error.message : error instanceof Error && /docx|word/i.test(error.message) ? "A Word file could not be converted. Please upload it again, or save it as PDF." : error instanceof Error ? `PDF assembly failed: ${error.message}` : "Preview could not be built. Check the uploaded files."); } }
       if (!cancelled) setBuilding(false);
     }, pendingChatDownloadId ? 120 : 1000);
     return () => { cancelled = true; clearTimeout(t); buildController.abort(); };
@@ -529,12 +614,36 @@ function SimpleSubmittalBuilder({ tenantId }: { tenantId: string }) {
     if (!file) return;
     setReading(which);
     try {
-      const text = (await extractText(file, readScannedPage)).trim();
-      (which === "cover" ? setCoverText : setIndexText)((t) => (t.trim() ? `${t.trim()}\n${text}` : text));
-      if (which === "cover") { const parsed = localParse(coverText.trim() ? `${coverText.trim()}\n${text}` : text, ""); if (parsed.fields.length) setFields((previous) => mergeCoverFields(previous, parsed.fields, true)); }
-      if (which === "index") { setIndexMode("customer"); setUseDefaultIndex(false); }
-      setNotice(`Read ${file.name}. Check the text, then press Build.`);
+      const text = (await extractSetupText(file, readScannedPage)).trim();
+      (which === "cover" ? setCoverText : setIndexText)(text);
+      if (which === "cover") { const parsed = localParse(text, ""); if (parsed.fields.length) { setFields((previous) => replaceImportedCoverFields(previous, parsed.fields)); appliedCoverText.current = text; } }
+      if (file.type === "application/pdf" || /\.(pdf|png|jpe?g)$/i.test(file.name)) {
+        const id = uid();
+        await uploadSubmittalFile(`doc:${id}`, file);
+        mem.current.set(id, await file.arrayBuffer());
+        const ref = {id,name:file.name,type:file.type || "application/pdf",size:file.size,pages:await countPdfPages(file)};
+        if (which === "cover") {setUploadedCoverDoc(ref);setCoverPageMode(current=>current==="uploaded"?"uploaded":"generated");}
+        else {setUploadedIndexDoc(ref);setIndexPageMode("uploaded");}
+      } else if (which === "cover") {setUploadedCoverDoc(null);setCoverPageMode("generated");}
+      else {setUploadedIndexDoc(null);setIndexPageMode("generated");}
+      if (which === "index") {setIndexMode("customer");setUseDefaultIndex(false);}
+      setNotice(which==="cover" ? `Read ${file.name}. Custom cover is available, but our branded cover remains selected until you choose Custom uploaded cover.` : `Read ${file.name}. Check the text, then press Build.`);
     } catch (e) { setNotice(e instanceof Error ? e.message : "The file could not be read."); }
+    setReading("");
+  };
+
+  const readDividerFile = async (file?: File) => {
+    if (!file) return;
+    setReading("divider");
+    try {
+      if (!(file.type === "application/pdf" || /.(pdf|png|jpe?g)$/i.test(file.name))) throw new Error("Upload the custom divider as PDF, PNG or JPG.");
+      const id = uid();
+      await uploadSubmittalFile(`doc:${id}`, file);
+      mem.current.set(id, await file.arrayBuffer());
+      const ref = {id,name:file.name,type:file.type || "application/pdf",size:file.size,pages:await countPdfPages(file)};
+      setUploadedDividerDoc(ref);
+      setNotice(`Custom divider ${file.name} is available. Our branded divider remains selected until you choose Custom uploaded divider format.`);
+    } catch (e) { setNotice(e instanceof Error ? e.message : "The divider file could not be read."); }
     setReading("");
   };
 
@@ -546,7 +655,7 @@ function SimpleSubmittalBuilder({ tenantId }: { tenantId: string }) {
     try {
       r = localParse(coverText, indexMode === "customer" ? indexText : "");
     } catch { err = "The local reader was used."; r = localParse(coverText, indexMode === "customer" ? indexText : ""); }
-    if (coverText.trim()) setFields((previous) => mergeCoverFields(previous, r.fields, true));
+    if (coverText.trim() && appliedCoverText.current !== coverText && r.fields.length) { setFields((previous) => replaceImportedCoverFields(previous, r.fields)); appliedCoverText.current = coverText; }
     if (r.title) setTitle(r.title);
     let b = brand;
     if (r.brand) { const hit = brands.find((x) => near(x.name, r.brand!)); if (hit) { b = hit; setBrandId(hit.id); } }
@@ -639,15 +748,28 @@ function SimpleSubmittalBuilder({ tenantId }: { tenantId: string }) {
     setCustomProduct("");
   };
 
-  const download = async () => {
-    if (!pdf) return;
+  const currentPdfBytes = async () => {
+    if (editing) await assertInternalReview(editing, editing.issuedPdf ? undefined : {...editing,rtcc,compliance,kind,title:title.trim()||editing.title,coverHeading:coverHeading.trim(),project:fields.find(f=>/^(project|project name)$/i.test(f.label.trim()))?.value||"",indexMode,companyId,brandId,seriesIds,customProducts,stampAll,stampCover,stampIndex,useDefaultCover:useDefaultCover&&Boolean(company?.tpl.cover),useDefaultIndex:useDefaultIndex&&Boolean(company?.tpl.index),coverText,indexText,coverPageMode,indexPageMode,dividerPageMode,coverDoc:uploadedCoverDoc??undefined,indexDoc:uploadedIndexDoc??undefined,dividerDoc:uploadedDividerDoc??undefined,fields,sections});
+    if (editing?.issuedPdf) {
+      const original = await bytesOf(editing.issuedPdf.id);
+      if (!original) throw new Error("Issued PDF is unavailable. Restore the original issued copy.");
+      return new Uint8Array(original);
+    }
+    if (rtccBusy || releaseIssues.length) throw new Error(releaseIssues.join("; ") || "Finish RTCC processing first.");
+    if (!pdf) throw new Error("Build the PDF before sharing or downloading.");
     let bytes = pdf.bytes;
-    if (Object.values(rotations).some((r) => r % 360 !== 0)) {
+    if (!editing?.issuedPdf && Object.values(rotations).some((r) => r % 360 !== 0)) {
       const { PDFDocument, degrees } = await import("pdf-lib");
       const doc = await PDFDocument.load(pdf.bytes.slice());
       doc.getPages().forEach((pg, i) => { const r = rotations[i] ?? 0; if (r % 360) pg.setRotation(degrees((pg.getRotation().angle + r + 360) % 360)); });
       bytes = await doc.save();
     }
+    return bytes;
+  };
+  const download = async () => {
+    if (!pdf) return;
+    let bytes: Uint8Array;
+    try { bytes = await currentPdfBytes(); } catch (error) { setNotice(error instanceof Error ? error.message : "Review is required before download."); return; }
     const url = URL.createObjectURL(new Blob([bytes.slice()], { type: "application/pdf" }));
     const a = document.createElement("a"); a.href = url; a.download = `${(title || kindLabel[kind]).replace(/[^\w\- ]+/g, "").trim() || "submittal"}.pdf`;
     document.body.appendChild(a); a.click(); a.remove();
@@ -680,23 +802,38 @@ function SimpleSubmittalBuilder({ tenantId }: { tenantId: string }) {
   };
 
   const resetEditor = () => {
+    if (!loaded) { setNotice("Company documents are still loading. Please wait before starting a submittal."); return; }
+    setRtccSession(n => n + 1); setRtcc([]); setCompliance(undefined); setRtccBusy(false);
+    setManualShare(null); setManualShareMessage("");
+    appliedCoverText.current = "";
+    setUploadedIndexDoc(null); setUploadedCoverDoc(null); setUploadedDividerDoc(null); setCoverPageMode("generated"); setIndexPageMode("generated"); setDividerPageMode("generated");
     setEditingId(undefined); setKind("Material"); setCoverText(""); setIndexText(""); setFields(coverDefaults.map((f) => ({ ...f }))); setIndexMode("general"); setTitle(""); setCoverHeading(""); setBrandId(""); setSeriesIds([]); setCustomProducts([]); setCustomProduct(""); setUseDefaultCover(false); setUseDefaultIndex(false); setStampAll(false); setStampCover(true); setStampIndex(true);
     setSections(attach(mkSections(indexTemplates.general), [...(company?.docs ?? [])])); setView("edit"); window.scrollTo(0, 0);
   };
-  const shareSavedRecord = async (record: SubmittalRecord) => {
+  const buildSavedRecordPdf = async (record: SubmittalRecord, allowEmptyDividers = false) => {
+    await assertInternalReview(record);
+    if (record.issuedPdf) {
+      const bytes = await bytesOf(record.issuedPdf.id);
+      if (!bytes) throw new Error("The issued PDF is missing. Restore the original issued copy before sharing.");
+      return { bytes: new Uint8Array(bytes), labels: record.issuedLabels ?? [] };
+    }
+    const unresolved = [...(record.technicalIssues ?? []), ...(allowEmptyDividers ? [] : record.sections.filter(s => !s.auto && !s.docs.length && !s.notApplicableReason?.trim()).map(s => `Missing documents: ${s.title}`))];
+    if (unresolved.length) throw new Error(`Open the builder and resolve: ${unresolved.join("; ")}`);
+    const rtcc = record.rtcc ?? [];
+    if (!rtccReady(rtcc)) throw new Error("Open this revision and review its RTCC replies before sharing.");
     const company = companies.find((item) => item.id === record.companyId);
     const brand = brands.find((item) => item.id === record.brandId);
     if (!company) throw new Error("The supplier settings are missing. Open this submittal to review them.");
-    const version = await shareFingerprint(JSON.stringify({ record, company, brand, renderer: "share-v1" }));
-    const cached = cachedSubmittalShare(tenantId, version);
-    if (cached) return cached;
+
     const { kind, title, fields, stampAll } = record;
     const coverHeading = record.coverHeading ?? "";
     const stampCover = record.stampCover ?? true;
     const stampIndex = record.stampIndex ?? true;
     const useDefaultCover = false, useDefaultIndex = false;
     const editing = record;
-    const sections = attach(record.sections, docsForSelection(company, brand, record.seriesIds));
+    const coverPageMode = record.coverPageMode ?? "generated";
+    const uploadedCoverDoc = record.coverDoc;
+    const sections = record.sections.map(section => ({ ...section, docs: section.docs.map(doc => ({ ...doc, auto: false })) }));
     const types = record.seriesIds.filter((id) => /^(default|custom):/.test(id)).map((id) => id.slice(id.indexOf(":") + 1));
     const models = (brand?.series ?? []).filter((item) => record.seriesIds.includes(item.id)).map((item) => item.name);
     const selectedProducts = (types.length ? types : models).join(", ");
@@ -715,21 +852,26 @@ function SimpleSubmittalBuilder({ tenantId }: { tenantId: string }) {
           if (!bytes) { missingFiles.push(ref.name); return undefined; }
           return normalizeUploadData({ bytes, type: ref.type, name: ref.name });
         };
-        const sourceCover = await loadSourceDoc(editing?.coverDoc);
-        const sourceIndex = await loadSourceDoc(editing?.indexDoc);
-        const secs: { title: string; stamp: StampMode | undefined; files: FileData[] }[] = [];
+        const sourceCover = await loadSourceDoc(coverPageMode === "uploaded" ? uploadedCoverDoc ?? undefined : undefined);
+        const sourceIndex = await loadSourceDoc((record.indexPageMode ?? "uploaded") === "uploaded" ? editing?.indexDoc : undefined);
+        if ((record.dividerPageMode ?? "generated") === "generated") delete templates.divider;
+        else if (record.dividerDoc) {
+          const customDivider = await loadSourceDoc(record.dividerDoc);
+          if (customDivider) templates.divider = customDivider;
+        }
+        const secs: { title: string; notApplicableReason?: string; stamp: StampMode | undefined; files: FileData[] }[] = [];
         for (const section of sections.filter((item) => !item.auto)) {
           const files: FileData[] = [];
           for (const d of section.docs) {
             const hit = normCache.current.get(d.id);
-            if (hit) { files.push(hit); continue; }
+            if (hit) { files.push({ ...hit, id: d.id }); continue; }
             const bytes = await bytesOf(d.id);
             if (!bytes) { missingFiles.push(d.name); continue; }
             const normalized = await normalizeUploadData({ bytes, type: d.type, name: d.name });
             if (bytes.byteLength <= 1024 * 1024) normCache.current.set(d.id, normalized);
-            files.push(normalized);
+            files.push({ ...normalized, id: d.id });
           }
-          secs.push({ title: section.title, stamp: section.stamp, files });
+          secs.push({ title: section.title, notApplicableReason: section.docs.length ? undefined : section.notApplicableReason, stamp: section.stamp, files });
           
         }
         const selectionLabels = /^(supplier(?: name)?|submitted by|company|brand(?: name)?|manufacturer|make|product|product type|equipment|model|series)$/i;
@@ -746,25 +888,41 @@ function SimpleSubmittalBuilder({ tenantId }: { tenantId: string }) {
         ];
         const coverLabel = coverHeading.trim() || (kind === "Material" && selectedProducts ? `Material Submittal for ${selectedProducts}` : kindLabel[kind]);
         
-        const out = await buildPdfInWorker({ kindLabel: kindLabel[kind], coverLabel, title, companyName: company?.name, brandName: brand?.name, productName: selectedProducts, fields: coverFields, sections: secs, templates, sourceCover, sourceIndex, useDefaultCover: useDefaultCover && Boolean(company?.tpl.cover), useDefaultIndex: useDefaultIndex && Boolean(company?.tpl.index), companyLogo: await dataUrlToFile(company?.logo, "company.png"), brandLogo: await dataUrlToFile(brand?.logo, "brand.png"), stamp: await dataUrlToFile(company?.stamp, "stamp.png"), stampEveryPage: stampAll, stampCover, stampIndex }, buildController.signal);
+        const rtccInput = await Promise.all(rtcc.map(async round => ({ ...round, sourceFile: await loadSourceDoc(round.source) })));
+        const out = await buildPdfInWorker({ rtcc: rtccInput, kindLabel: kindLabel[kind], coverLabel, title, companyName: company?.name, brandName: brand?.name, productName: selectedProducts, fields: coverFields, sections: secs, templates, sourceCover, sourceIndex, useDefaultCover: useDefaultCover && Boolean(company?.tpl.cover), useDefaultIndex: useDefaultIndex && Boolean(company?.tpl.index), companyLogo: await dataUrlToFile(company?.logo, "company.png"), brandLogo: await dataUrlToFile(brand?.logo, "brand.png"), stamp: await dataUrlToFile(company?.stamp, "stamp.png"), stampEveryPage: stampAll, stampCover, stampIndex }, buildController.signal);
 
     if (missingFiles.length || out.skipped.length) throw new Error(`Cannot share an incomplete PDF. Missing or unreadable files: ${[...missingFiles, ...out.skipped].join(", ")}. Open the submittal and re-upload them.`);
+    return out;
+  };
+  const shareSavedRecord = async (record: SubmittalRecord) => {
+    await assertInternalReview(record);
+    const company = companies.find(item => item.id === record.companyId);
+    const brand = brands.find(item => item.id === record.brandId);
+    const version = await shareFingerprint(JSON.stringify({ record, company, brand, renderer: "share-rtcc-v2" }));
+    const cached = cachedSubmittalShare(tenantId, version);
+    if (cached) return cached;
+    const out = await buildSavedRecordPdf(record, true);
     const result = await shareSubmittalPdf(tenantId, out.bytes);
     rememberSubmittalShare(tenantId, version, result);
     return result;
   };
 
   const loadRecord = async (r: SubmittalRecord, asNew = false) => {
+    setRotations({});
+    setRtccSession(n => n + 1); setRtcc(r.rtcc ?? []); setCompliance(r.compliance); setRtccBusy(false);
+    appliedCoverText.current = r.coverText;
+    setUploadedIndexDoc(r.indexDoc ?? null); setUploadedCoverDoc(r.coverDoc ?? null); setUploadedDividerDoc(r.dividerDoc ?? null); setCoverPageMode(r.coverPageMode ?? "generated"); setIndexPageMode(r.indexPageMode ?? (r.indexDoc ? "uploaded" : "generated")); setDividerPageMode(r.dividerPageMode ?? "generated");
     setKind(r.kind); setCoverText(r.coverText); setIndexText(r.indexText); setFields(r.fields.map((field) => ({ ...field }))); setTitle(r.title); setCoverHeading(r.coverHeading ?? "");
     setIndexMode(r.indexMode ?? (r.indexText ? "customer" : "general"));
     const recordCompany = companies.find((c) => c.id === r.companyId) ?? company;
     const recordBrand = brands.find((b) => b.id === r.brandId);
     if (companies.some((c) => c.id === r.companyId)) setCompanyId(r.companyId);
     setBrandId(r.brandId); setSeriesIds(r.seriesIds); setCustomProducts(r.customProducts ?? []); setCustomProduct(""); setStampAll(r.stampAll); setStampCover(r.stampCover ?? true); setStampIndex(r.stampIndex ?? true); setUseDefaultCover(false); setUseDefaultIndex(false);
-    setSections(attach(r.sections, docsForSelection(recordCompany, recordBrand, r.seriesIds)));
+    // Saved document references are a snapshot, not disposable library suggestions.
+    setSections(r.sections.map(section => ({ ...section, docs: section.docs.map(doc => ({ ...doc, auto: false })) })));
     if (asNew) {
       const now = new Date().toISOString();
-      const copy: SubmittalRecord = { ...r, id: uid(), rev: Math.max(...records.filter((item) => item.ref === r.ref).map((item) => item.rev), r.rev) + 1, status: "Draft", createdAt: now, updatedAt: now, history: [{ status: "Draft", at: now, note: `Resubmission of ${r.ref}${r.rev ? ` Rev ${r.rev}` : ""}` }] };
+      const copy: SubmittalRecord = { ...r, id: uid(), issuedPdf: undefined, issuedLabels: undefined, issuedAt: undefined, rev: Math.max(...records.filter((item) => item.ref === r.ref).map((item) => item.rev), r.rev) + 1, status: "Draft", createdAt: now, updatedAt: now, history: [{ status: "Draft", at: now, note: `Resubmission of ${r.ref}${r.rev ? ` Rev ${r.rev}` : ""}` }] };
       try { await putCloudRecord(tenantId, copy); }
       catch (error) { setNotice(`Revision could not be saved: ${error instanceof Error ? error.message : "Please retry."}`); return; }
       setRecords((l) => [copy, ...l]); setEditingId(copy.id); setNotice(`Revision ${copy.rev} of ${copy.ref} created.`);
@@ -772,17 +930,31 @@ function SimpleSubmittalBuilder({ tenantId }: { tenantId: string }) {
     setView("edit"); window.scrollTo(0, 0);
   };
   const save = async (status?: Status) => {
-    const lp = fields.some((f) => f.value.trim()) ? undefined : localParse(coverText, "");
+    if (savingRecord.current) return;
+    savingRecord.current = true;
+    try {
+    if (editing?.issuedPdf) { setNotice("This revision is issued and locked. Use Revise to make changes."); return; }
+    if (rtccBusy || status === "Submitted" && !rtccReady(rtcc)) { setNotice("Finish and review RTCC replies before submitting."); return; }
+    const lp = appliedCoverText.current === coverText || fields.some((f) => f.value.trim()) ? undefined : localParse(coverText, "");
     if (lp?.fields.length) setFields((current) => mergeCoverFields(current, lp.fields));
     const t = title.trim() || lp?.title || fields.find((f) => /title|subject/i.test(f.label))?.value || (selectedProducts ? `${kindLabel[kind]} for ${selectedProducts}` : kindLabel[kind]);
     const now = new Date().toISOString();
     const allFields = mergeCoverFields(fields, lp?.fields ?? []);
     const project = allFields.find((f) => /^(project|project name)$/i.test(f.label.trim()))?.value ?? "";
-    const base = { kind, title: t, coverHeading: coverHeading.trim(), project, indexMode, companyId, brandId, seriesIds, customProducts, stampAll, stampCover, stampIndex, useDefaultCover: useDefaultCover && Boolean(company?.tpl.cover), useDefaultIndex: useDefaultIndex && Boolean(company?.tpl.index), coverText, indexText, coverDoc: editing?.coverDoc, indexDoc: editing?.indexDoc, fields: allFields, sections, updatedAt: now };
+    let issuedPdf: DocRef | undefined;
+    if (status === "Submitted") {
+      const issues = [...(editing?.technicalIssues ?? []), ...sections.filter(s => !s.auto && !s.docs.length && !s.notApplicableReason?.trim()).map(s => `Missing documents: ${s.title}`)];
+      if (issues.length || !pdf || building || hasPdfIssues) { setNotice(issues.join("; ") || "Build and check the PDF before issuing."); return; }
+      const bytes = await currentPdfBytes(); const id = uid();
+      const file = new File([bytes.slice()], `${editing?.ref || "Submittal"}-issued.pdf`, { type: "application/pdf" });
+      try { await uploadSubmittalFile(`doc:${id}`, file); } catch (error) { setNotice(`Issued PDF could not be saved: ${error instanceof Error ? error.message : "Retry."}`); return; }
+      issuedPdf = { id, name: file.name, type: file.type, size: file.size, pages: pdf.labels.length };
+    }
+    const base = { ...(issuedPdf ? { issuedPdf, issuedLabels: pdf!.labels, issuedAt: now } : {}), rtcc, compliance, kind, title: t, coverHeading: coverHeading.trim(), project, indexMode, companyId, brandId, seriesIds, customProducts, stampAll, stampCover, stampIndex, useDefaultCover: useDefaultCover && Boolean(company?.tpl.cover), useDefaultIndex: useDefaultIndex && Boolean(company?.tpl.index), coverText, indexText, coverPageMode, indexPageMode, dividerPageMode, coverDoc: uploadedCoverDoc ?? undefined, indexDoc: uploadedIndexDoc ?? undefined, dividerDoc: uploadedDividerDoc ?? undefined, fields: allFields, sections, updatedAt: now };
     if (editing) {
       const st = status ?? editing.status;
       const updated: SubmittalRecord = { ...editing, ...base, status: st, history: st !== editing.status ? [...editing.history, { status: st, at: now }] : editing.history };
-      try { await putCloudRecord(tenantId, updated); } catch (error) { setNotice(`Save failed: ${error instanceof Error ? error.message : "Please retry."}`); return; }
+      try { await putCloudRecord(tenantId, updated, editing.updatedAt); } catch (error) { setNotice(`Save failed: ${error instanceof Error ? error.message : "Please retry."}`); return; }
       setRecords((l) => l.map((r) => r.id === updated.id ? updated : r));
       setNotice(`${editing.ref} ${status === "Submitted" ? "submitted" : "saved"}.`);
     } else {
@@ -793,14 +965,74 @@ function SimpleSubmittalBuilder({ tenantId }: { tenantId: string }) {
       setNotice(`${rec.ref} ${st === "Submitted" ? "submitted" : "saved as draft"}.`);
     }
     if (status === "Submitted") setView("list");
+    return true;
+    } catch(error) { setNotice(error instanceof Error ? error.message : "Could not save submittal."); return; }
+    finally { savingRecord.current = false; }
   };
-  const setRecordStatus = async (id: string, s: Status, note: string) => {
-    const current = records.find((r) => r.id === id);
-    if (!current) return;
+  const copyManualShare = async () => {
+    if (manualSharing || !pdf || building || hasPdfIssues || uploadProgress !== null || rtccBusy || releaseIssues.length) return;
+    const key = buildKey + JSON.stringify(rotations);
+    setManualSharing(true); setManualShareMessage("");
+    try {
+      if (editing) await assertInternalReview(editing);
+      const ready = manualShare?.key === key && Date.parse(manualShare.expiresAt) > Date.now() + 60000 ? manualShare : null;
+      const link = ready ? Promise.resolve(ready) : (async () => {
+        if (!editing?.issuedPdf && !await save()) throw new Error("Save failed. Please save the submittal successfully before sharing.");
+        const result = await shareSubmittalPdf(tenantId, await currentPdfBytes());
+        setManualShare({ ...result, key });
+        return result;
+      })();
+      // Start clipboard write in this tap so iOS retains user activation.
+      if (typeof ClipboardItem !== "undefined" && navigator.clipboard?.write) {
+        try {
+          await navigator.clipboard.write([new ClipboardItem({ "text/plain": link.then(result => new Blob([result.url], { type: "text/plain" })) })]);
+          setManualShareMessage("Link copied · valid for 7 days");
+        } catch {
+          await link;
+          setManualShareMessage("Link ready. Tap Copy share link again, or copy the link below.");
+        }
+      } else {
+        const result = await link;
+        try { await navigator.clipboard.writeText(result.url); setManualShareMessage("Link copied · valid for 7 days"); }
+        catch { setManualShareMessage("Link ready. Select and copy the link below."); }
+      }
+    } catch (error) { setManualShareMessage(error instanceof Error ? error.message : "Could not create the share link. Please retry."); }
+    finally { setManualSharing(false); }
+  };
+  const recordNoClientSpecification = async (record: SubmittalRecord) => {
+    if (record.issuedPdf) throw new Error("Create a new revision before changing issued content.");
+    if (record.sections.some(s => indexHeadingIntent(s.title) === "project-spec" && s.docs.length)) throw new Error("This submittal already contains a project specification. Review it before declaring it not supplied.");
     const now = new Date().toISOString();
-    const updated: SubmittalRecord = { ...current, status: s, updatedAt: now, history: [...current.history, { status: s, at: now, ...(note ? { note } : {}) }] };
-    try { await putCloudRecord(tenantId, updated); setRecords((l) => l.map((r) => r.id === id ? updated : r)); }
-    catch (error) { setNotice(`Status update failed: ${error instanceof Error ? error.message : "Please retry."}`); }
+    const reason = "Client specification not provided; project-specific compliance not applicable.";
+    const updated = {...record, updatedAt:now, sections:record.sections.map(s => !s.docs.length && (indexHeadingIntent(s.title) === "project-spec" || isComplianceStatement(s.title) || /^specification$/i.test(s.title.trim())) ? {...s,notApplicableReason:reason} : s), history:[...record.history,{status:record.status,at:now,note:reason}]};
+    await putCloudRecord(tenantId, updated, record.updatedAt);
+    setRecords(list => list.map(r => r.id === record.id ? updated : r));
+  };
+  const statusUpdateLock = useRef(false);
+  const setRecordStatus = async (id: string, s: Status, note: string) => {
+    if (statusUpdateLock.current) throw new Error("A status update is already saving. Please wait.");
+    const current = records.find(r => r.id === id);
+    if (!current) throw new Error("Submittal no longer exists. Refresh the register.");
+    if (current.status === s && !note) return;
+    statusUpdateLock.current = true;
+    try {
+      const release = ["Submitted", "Under review", "Approved", "Approved as noted"].includes(s);
+      if (release && (!rtccReady(current.rtcc ?? []) || current.technicalIssues?.length)) throw new Error("Resolve technical issues and review RTCC replies before submitting.");
+      if (release && !current.issuedPdf && s !== "Submitted") throw new Error("Mark this revision Submitted first to save its issued PDF.");
+      const now = new Date().toISOString();
+      let issued: Partial<SubmittalRecord> = {};
+      if (s === "Submitted" && !current.issuedPdf) {
+        const out = await buildSavedRecordPdf(current);
+        const pdfId = uid();
+        const file = new File([out.bytes.slice()], `${current.ref}-R${current.rev}-issued.pdf`, {type:"application/pdf"});
+        await uploadSubmittalFile(`doc:${pdfId}`, file);
+        issued = {issuedPdf:{id:pdfId,name:file.name,type:file.type,size:file.size,pages:out.labels.length},issuedLabels:out.labels,issuedAt:now};
+      }
+      const updated: SubmittalRecord = {...current,...issued,status:s,updatedAt:now,history:[...current.history,{status:s,at:now,...(note ? {note} : {})}]};
+      await putCloudRecord(tenantId, updated, current.updatedAt);
+      setRecords(list => list.map(r => r.id === id ? updated : r));
+      setNotice(`${current.ref} marked ${s}.`);
+    } finally { statusUpdateLock.current = false; }
   };
 
   const prepareChatRecord = (plan: SubmittalChatPlan, uploads: ChatUpload[] = []): SubmittalRecord => {
@@ -809,8 +1041,10 @@ function SimpleSubmittalBuilder({ tenantId }: { tenantId: string }) {
     if (plan.action !== "create" && plan.action !== "revise") throw new Error("Please describe the submittal you need.");
     const now = new Date().toISOString();
     const chatKind = source?.kind ?? plan.kind;
-    let selectedBrand = brands.find((item) => near(item.name, plan.brand)) ?? brands.find((item) => item.id === source?.brandId);
-    const targetCompany = companies.find((item) => item.id === source?.companyId) ?? company;
+    let selectedBrand = (plan.brandId ? brands.find((item) => item.id === plan.brandId) : undefined) ?? brands.find((item) => item.name.trim().toLowerCase() === plan.brand.trim().toLowerCase()) ?? brands.find((item) => item.id === source?.brandId);
+    const targetCompany = (plan.companyId ? companies.find((item) => item.id === plan.companyId) : undefined) ?? companies.find((item) => item.id === source?.companyId) ?? company;
+    if (plan.companyId && !companies.some(item => item.id === plan.companyId)) throw new Error("Select an available supplier company.");
+    if (plan.brandId && !brands.some(item => item.id === plan.brandId)) throw new Error("Select an available brand.");
     const product = plan.product.trim();
     const scheduleText = uploads.map((upload) => upload.scheduleText ?? upload.documentText ?? "").filter(Boolean).join("\n");
     if (!selectedBrand && scheduleText) {
@@ -870,9 +1104,11 @@ function SimpleSubmittalBuilder({ tenantId }: { tenantId: string }) {
     const importedChatFields = plan.fields.filter((item) => item.label.trim() && item.value.trim());
     const chatFields = mergeCoverFields(source?.fields ?? coverDefaults, importedChatFields, true)
       .filter((field) => field.value.trim());
-    if (plan.brand.trim() || selectedBrand) {
-      const existing = chatFields.find((field) => coverKey(field.label) === "brandname");
-      if (existing) existing.value = plan.brand.trim() || selectedBrand!.name;
+    for (const [label, value, key] of [["Supplier Name", targetCompany?.name, "suppliername"], ["Brand Name", selectedBrand?.name, "brandname"]]) {
+      if (!value) continue;
+      const existing = chatFields.find(field => coverKey(field.label) === key);
+      if (existing) existing.value = value;
+      else chatFields.push({ label: label!, value });
     }
     // Use the exact same Company → Brand → selected Series document pool as
     // the manual builder. Do not apply an AI-only filename certificate filter:
@@ -897,6 +1133,8 @@ function SimpleSubmittalBuilder({ tenantId }: { tenantId: string }) {
       useDefaultCover: false, useDefaultIndex: false, indexMode: mode,
       coverText: source?.coverText ?? "", indexText: mode === "customer" ? requested.join("\n") : (source?.indexText ?? ""),
       createdAt: now, updatedAt: now,
+      technicalIssues: plan.technicalIssues ?? [],
+      rtcc: source?.rtcc ?? [],
       history: [{ status: "Draft", at: now, note: source ? `Chat revision of ${source.ref} Rev ${source.rev}` : "Created by submittal chat" }],
     };
   };
@@ -981,6 +1219,7 @@ function SimpleSubmittalBuilder({ tenantId }: { tenantId: string }) {
         .filter((section) => /\b(?:test|performance|product)\b.*\b(?:report|certificat)/i.test(section.title))
         .flatMap((section) => section.docs.filter((doc) => doc.auto).map((doc) => doc.name))
         .filter((name) => {
+          if (availableDocs.some(doc => doc.name === name && isCompanyCertificate(doc))) return false;
           const selected = detectedModels.series;
           const model = selected.length ? selected : [plan.product].filter(Boolean);
           const compact = name.toUpperCase().replace(/[^A-Z0-9]/g, "");
@@ -991,7 +1230,10 @@ function SimpleSubmittalBuilder({ tenantId }: { tenantId: string }) {
   const applyChatPlan = async (plan: SubmittalChatPlan, uploads: ChatUpload[], omitEmpty: boolean, destination: "pdf" | "builder", confirmedCertificateMapping: boolean): Promise<string> => {
     const review = inspectChatPlan(plan, uploads, omitEmpty);
     if (destination === "pdf") {
-      // Missing client fields and empty/missing index sections are warnings only.
+      const technical = [...(plan.technicalIssues ?? []), ...review.unresolvedModels, ...review.unreadableSchedules, ...review.seriesConflicts];
+      if (technical.length) throw new Error(`Technical review required: ${[...new Set(technical)].join("; ")}. Open the builder to resolve these items.`);
+      if (review.emptyCount) throw new Error("Some dividers have no documents. Upload them or explicitly remove the divider before final assembly.");
+      // Missing client fields remain optional.
       // Build with whatever the client supplied; keep empty dividers in the PDF.
       if (review.unassignedFiles.length) throw new Error(`Choose a divider for: ${review.unassignedFiles.join(", ")}.`);
     }
@@ -1010,10 +1252,10 @@ function SimpleSubmittalBuilder({ tenantId }: { tenantId: string }) {
       if (file.size <= 1024 * 1024) mem.current.set(id, await file.arrayBuffer());
       const ref: DocRef = { id, name: file.name, type: file.type || (/\.pdf$/i.test(file.name) ? "application/pdf" : ""), size: file.size, pages: await countPdfPages(file) };
       if (kind === "cover") {
-        record.coverDoc = ref;
+        record.coverDoc = ref; record.coverPageMode = upload.pageMode ?? "uploaded";
         record.coverText = upload.documentText ?? upload.scheduleText ?? record.coverText;
       } else {
-        record.indexDoc = ref;
+        record.indexDoc = ref; record.indexPageMode = upload.pageMode ?? "uploaded";
         record.indexText = upload.documentText ?? upload.scheduleText ?? record.indexText;
         record.indexMode = "customer";
       }
@@ -1037,15 +1279,14 @@ function SimpleSubmittalBuilder({ tenantId }: { tenantId: string }) {
       if (file.size <= 1024 * 1024) mem.current.set(id, await file.arrayBuffer());
       target.docs.push({ id, name: file.name, type: file.type || (/\.pdf$/i.test(file.name) ? "application/pdf" : ""), size: file.size, pages: await countPdfPages(file) });
     }
+    await putCloudRecord(tenantId, record);
+    setFailedChatPdfId(undefined); setChatPdfError("");
     setPdf(undefined); setHasPdfIssues(false);
     setRecords((items) => [record, ...items]);
     // Use the exact core-builder state immediately so PDF assembly can start
     // without waiting on the cloud metadata write.
     await loadRecord(record);
     if (destination === "pdf") {
-      void putCloudRecord(tenantId, record).catch((error) => {
-        setNotice(`Cloud save failed: ${error instanceof Error ? error.message : "Please retry save."}`);
-      });
       // Use the same automatic core-builder flow on desktop and mobile.
       // The manual download button remains available as a fallback if the browser
       // suppresses a programmatic download.
@@ -1055,7 +1296,6 @@ function SimpleSubmittalBuilder({ tenantId }: { tenantId: string }) {
       setNotice(`${record.ref} Rev ${record.rev} · Building combined PDF…`);
       return `${record.ref} Rev ${record.rev} · Core builder is assembling and will download the combined PDF automatically.`;
     }
-    await putCloudRecord(tenantId, record);
     setPendingChatDownloadId(undefined);
     setNotice(`${record.ref} Rev ${record.rev} opened in the builder. Edit the cover, index and documents, then download the PDF.`);
     return `${record.ref} Rev ${record.rev} saved and opened in the full builder.`;
@@ -1065,13 +1305,15 @@ function SimpleSubmittalBuilder({ tenantId }: { tenantId: string }) {
     if (largeMode && manualBuildKey !== buildKey) { setManualBuildKey(buildKey); return; }
     if (building) return;
     if (pdf && !hasPdfIssues) {
+      setFailedChatPdfId(undefined); setChatPdfError("");
       setLastChatPdfReadyId(pendingChatDownloadId);
       setPreparedChatPdfId(undefined);
       setPendingChatDownloadId(undefined);
       void download();
     } else if (hasPdfIssues) {
+      setFailedChatPdfId(pendingChatDownloadId);
+      setChatPdfError(notice || "PDF assembly failed. Check uploaded files and retry.");
       setPendingChatDownloadId(undefined);
-      setNotice("Some files could not be included. Review the builder notice, correct them and download the PDF.");
     }
   }, [pendingChatDownloadId, editingId, largeMode, manualBuildKey, buildKey, building, pdf, hasPdfIssues]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -1107,42 +1349,67 @@ function SimpleSubmittalBuilder({ tenantId }: { tenantId: string }) {
         <label htmlFor={`${which}-paste`} className="text-[11px] font-bold uppercase text-muted-foreground">{label}</label>
         <label className="flex cursor-pointer items-center gap-1 shrink-0 whitespace-nowrap rounded-full bg-grad-teal px-3 py-1.5 text-[11px] font-bold text-primary-foreground shadow-clay-sm transition hover:-translate-y-0.5">
           {reading === which ? <Loader2 className="size-3.5 animate-spin" /> : <FileUp className="size-3.5" />} Upload file
-          <input type="file" accept=".pdf,.txt,text/plain" className="hidden" aria-label={`Upload ${which} file`} onChange={(e) => { void readFile(which, e.target.files?.[0]); e.target.value = ""; }} />
+          <input type="file" accept=".pdf,.txt,.png,.jpg,.jpeg,text/plain,image/png,image/jpeg" className="hidden" aria-label={`Upload ${which} file`} onChange={(e) => { void readFile(which, e.target.files?.[0]); e.target.value = ""; }} />
         </label>
       </div>
-      <Textarea id={`${which}-paste`} value={value} onChange={(e) => { const content = e.target.value; set(content); if (which === "cover") { const parsed = localParse(content, ""); if (parsed.fields.length) setFields((previous) => mergeCoverFields(previous, parsed.fields, true)); } if (which === "index" && content.trim()) { setIndexMode("customer"); setUseDefaultIndex(false); } }} placeholder={placeholder} className="mt-1.5 min-h-28 rounded-2xl border-0 bg-background/70 px-4 py-3 text-sm font-semibold shadow-none" />
+      <label className="mt-2 block text-sm font-semibold">{which === "cover" ? "Cover page output" : "Index page output"}
+        <select className="mt-1 w-full rounded-lg border bg-background p-2" value={which === "cover" ? coverPageMode : indexPageMode} onChange={e => (which === "cover" ? setCoverPageMode : setIndexPageMode)(e.target.value as "uploaded" | "generated")}>
+          <option value="generated">{which === "cover" ? "Our branded cover format" : "Generate our branded index from details"}</option>
+          <option value="uploaded" disabled={which === "cover" ? !uploadedCoverDoc : !uploadedIndexDoc}>{which === "cover" ? "Custom uploaded cover format" : "Use uploaded index layout"}</option>
+        </select>
+        <span className="mt-1 block text-xs font-normal text-muted-foreground">{(which === "cover" ? coverPageMode : indexPageMode) === "uploaded" ? (which === "cover" ? "Uses the uploaded custom cover artwork exactly as supplied." : "Original layout is preserved; stamp and page-number settings still apply. Original index numbers are not rewritten.") : (which === "cover" ? "Uses our standard branded cover with the selected company/brand logos, editable project details and stamp settings." : "Uses extracted/edited details. Generated index page numbers match the assembled PDF.")}</span>
+      </label>
+      <Textarea id={`${which}-paste`} value={value} onChange={(e) => { const content = e.target.value; set(content); if (which === "cover") { setCoverPageMode("generated"); const parsed = localParse(content, ""); if (parsed.fields.length) { setFields((previous) => replaceImportedCoverFields(previous, parsed.fields)); appliedCoverText.current = content; } } if (which === "index" && content.trim()) { setIndexPageMode("generated"); setIndexMode("customer"); setUseDefaultIndex(false); } }} placeholder={placeholder} className="mt-1.5 min-h-28 rounded-2xl border-0 bg-background/70 px-4 py-3 text-sm font-semibold shadow-none" />
     </div>
   );
 
   return (
-    <MainLayout><div className="submittal-lite min-h-screen bg-background text-foreground">
-      <div className="mx-auto min-h-screen max-w-7xl pb-28 lg:pb-8">
+    <MainLayout focusMode={focusedEditor}><div className="submittal-lite min-h-screen bg-background text-foreground">
+      <div className={`mx-auto min-h-screen w-full pb-28 lg:pb-8 ${view !== "list" ? "max-w-none" : "max-w-7xl"}`}>
         <header className="flex items-center gap-3 px-5 pb-4 pt-5 lg:px-8">
           {company?.logo ? <img src={company.logo} alt="Company logo" className="size-12 rounded-2xl bg-card object-contain p-1 shadow-clay-sm" /> : <button type="button" onClick={() => openMgr("companies")} className="grid size-12 place-items-center rounded-2xl border-2 border-dashed border-primary text-primary" aria-label="Add your company logo"><ImagePlus className="size-5" /></button>}
           <div className="min-w-0 leading-tight"><h1 className="truncate font-display text-[19px] font-semibold">{company?.name.trim() || "Submittal Control"}</h1><p className="truncate text-xs font-semibold text-muted-foreground">Submittal register & builder</p></div>
           <div className="ml-auto hidden items-center gap-2 lg:flex">
             <Button variant={view === "list" ? "default" : "outline"} size="sm" onClick={() => setView("list")}><LayoutGrid /> Submittals</Button>
-            <Button variant={view === "edit" && !editingId ? "default" : "outline"} size="sm" onClick={resetEditor}><FilePlus2 /> New</Button>
+            <Button variant={view === "edit" && !editingId ? "default" : "outline"} size="sm" disabled={!loaded} onClick={resetEditor}><FilePlus2 /> New</Button>
             <Button variant="outline" size="sm" onClick={() => openMgr("brands")}><Tag /> Brands</Button>
           </div>
-          <Button variant="outline" size="sm" className="ml-auto lg:ml-0" onClick={() => setChatOpen(true)}><Sparkles /> Create by chat</Button>
+          <Button variant="outline" size="sm" className="ml-auto lg:ml-0" disabled={!loaded} onClick={() => setChatOpen(true)}><Sparkles /> Create by chat</Button>
           <Button variant="outline" size="icon" className="size-10 rounded-full" onClick={() => openMgr("companies")} aria-label="Companies and brands"><Settings2 /></Button>
         </header>
 
+        <div className="mx-5 mb-3 flex flex-wrap items-center gap-3 text-xs lg:mx-8"><Button variant="outline" size="sm" onClick={recoverEditor}>Recover unsaved work</Button>{view === "edit" && !editing?.issuedPdf && <span>{recoveryNotice}</span>}</div>
         {notice && <div role="status" className="mx-5 mb-4 flex items-center justify-between rounded-2xl bg-accent/45 px-4 py-3 text-sm font-bold lg:mx-8"><span>{notice}</span><Button variant="ghost" size="icon" onClick={() => setNotice("")} aria-label="Dismiss message"><X /></Button></div>}
 
+        <nav aria-label="Submittal Control sections" className="mx-3 mb-4 flex flex-wrap gap-2 sm:mx-5 lg:mx-8"><Button disabled={!loaded} variant={view==='list'?'default':'outline'} onClick={()=>setView('list')}>Submittals</Button><Button disabled={!loaded} variant={view==='compliance'?'default':'outline'} onClick={()=>setView('compliance')}>Compliance Statement</Button><Button disabled={!loaded} variant={view==='rtcc'?'default':'outline'} onClick={()=>setView('rtcc')}>RTCC</Button></nav>
+        {loaded&&(['compliance','rtcc'] as const).filter(mode=>openedReplyBuilders.includes(mode)).map(mode=><div key={`${tenantId}:${mode}`} hidden={view!==mode}><StandaloneReplyBuilder suggestedTargetId={editingId} tenantId={tenantId} kind={mode} companies={companies} brands={brands} records={records} bytesOf={bytesOf} onMerged={next=>setRecords(items=>[next,...items.filter(r=>r.id!==next.id)])} onOpenSubmittal={record=>void loadRecord(record)}/></div>)}
+        {view === "list" && <details className="mx-5 mb-4 min-w-0 rounded-xl border p-3 lg:mx-8"><summary className="cursor-pointer text-sm font-semibold">Optional team tools & AI usage</summary><p className="my-2 text-xs text-muted-foreground">Assign a colleague to review a saved draft, or combine issued submittals into one package. These tools are optional.</p><AiUsageDashboard key={tenantId} tenantId={tenantId}/>{loaded && <TeamWorkflow key={`team:${tenantId}`} tenantId={tenantId} records={records} onEdit={record=>void loadRecord(record)}/>}</details>}
         {view === "edit" ? (
-          <main className="grid gap-5 px-5 lg:grid-cols-[minmax(0,1fr)_minmax(380px,0.9fr)] lg:px-8">
-            <div className="flex items-center gap-3 rounded-3xl bg-grad-primary p-4 text-primary-foreground shadow-clay lg:col-span-2">
+          <main className={`grid min-w-0 grid-cols-1 gap-5 px-3 sm:px-5 [&>*]:min-w-0 lg:px-8 ${focusedEditor ? "" : "lg:grid-cols-[minmax(0,1fr)_minmax(380px,0.9fr)]"}`}>
+            <div className={`flex flex-wrap items-center gap-3 rounded-3xl bg-grad-primary p-4 text-primary-foreground shadow-clay ${focusedEditor ? "sticky top-0 z-20" : "lg:col-span-2"}`}>
               <Button variant="ghost" size="icon" className="text-primary-foreground hover:bg-primary-foreground/15 hover:text-primary-foreground" onClick={() => setView("list")} aria-label="Back to submittals"><ArrowLeft /></Button>
               <div className="min-w-0 flex-1">
                 <p className="font-mono text-xs font-bold text-primary-foreground/85">{editing ? `${editing.ref}${editing.rev ? ` · Rev ${editing.rev}` : ""}` : `${nextRef(kind, records)} · new`}</p>
                 <p className="truncate font-display text-lg font-semibold">{title || "Untitled submittal"}</p>
               </div>
               {editing && <span className="hidden items-center gap-1.5 rounded-full bg-background/95 px-3 py-1 text-[10px] font-extrabold text-foreground shadow-clay-sm ring-1 ring-primary/30 sm:inline-flex"><span className={`size-1.5 rounded-full ${statusDot(editing.status)}`} aria-hidden />{editing.status}</span>}
+              <Button type="button" variant="outline" size="sm" className="min-h-11 bg-white text-primary hover:bg-white/90 hover:text-primary" aria-pressed={focusedEditor} onClick={() => setFullWindow(value => !value)}>{focusedEditor ? <Minimize2 /> : <Maximize2 />}{focusedEditor ? "Restore view" : "Full window"}</Button>
+              {focusedEditor && <Button type="button" variant="outline" size="sm" className="min-h-11 bg-white text-primary hover:bg-white/90 hover:text-primary" aria-expanded={previewInFullWindow} aria-controls="submittal-editor-preview" onClick={() => setPreviewInFullWindow(value => !value)}>{previewInFullWindow ? "Hide PDF preview" : "Show PDF preview below"}</Button>}
               <Button variant="outline" size="sm" className="bg-white text-primary hover:bg-white/90 hover:text-primary" onClick={() => void save()}><Save /> Save</Button>
+              <Button variant="outline" size="sm" className="bg-white text-primary hover:bg-white/90 hover:text-primary" onClick={() => void copyManualShare()} disabled={manualSharing || !pdf || building || hasPdfIssues || uploadProgress !== null || rtccBusy || !!releaseIssues.length}>{manualSharing ? <Loader2 className="animate-spin" /> : <LinkIcon />} {manualSharing ? "Preparing link…" : "Copy share link"}</Button>
             </div>
-            <div className="space-y-5">
+            <div className="min-w-0 space-y-5">
+              {editing?.issuedPdf && <div className="rounded-xl border border-amber-300 bg-amber-50/60 p-3 space-y-2"><p className="font-semibold">This issued revision is locked to protect the submitted PDF.</p><p className="text-sm">To change cover, index, documents or project details, create the next draft revision. The issued copy remains unchanged.</p><div className="flex flex-wrap gap-2"><Button onClick={()=>void loadRecord(editing,true)}>Create new revision & edit</Button><Button variant="outline" onClick={() => setView('rtcc')}>Open RTCC Builder</Button></div></div>}
+              {editing && <RevisionComparison key={editing.id} records={records} current={{...editing,title,kind,project:fields.find(f=>/^(project|project name)$/i.test(f.label.trim()))?.value||"",companyId,brandId,seriesIds,customProducts,fields,sections,rtcc,coverText,indexText,coverHeading,indexMode,stampAll,stampCover,stampIndex,useDefaultCover,useDefaultIndex,coverPageMode,indexPageMode,dividerPageMode,coverDoc:uploadedCoverDoc??undefined,indexDoc:uploadedIndexDoc??undefined,dividerDoc:uploadedDividerDoc??undefined}}/>}
+              <EngineerReview sections={sections} rounds={rtcc} technicalIssues={editing?.technicalIssues} fileError={hasPdfIssues} building={building} issued={!!editing?.issuedPdf} uploadBusy={uploadProgress !== null || rtccBusy} onUpload={sectionId=>{if(uploadProgress !== null || editing?.issuedPdf)return;barTarget.current=sectionId;barFileRef.current?.click();}}/>
+              <fieldset disabled={!!editing?.issuedPdf} className="min-w-0 space-y-5 [&_input]:min-w-0 [&_select]:min-w-0 [&_select]:max-w-full [&_button]:whitespace-normal [&_button]:h-auto [&_button]:min-h-9">
+              <ProjectDetailsReuse records={records} disabled={!!editing?.issuedPdf || !!editing?.coverDoc} onApply={imported=>{setFields(previous=>replaceImportedCoverFields(previous,imported));setCoverText("");appliedCoverText.current="";setNotice("Project details copied. Supplier, brand and document selections remain separately controlled.");}}/>
+              {!!editing?.technicalIssues?.length && <div className="rounded-xl border border-amber-400 p-3 space-y-2"><strong>Technical review required</strong><ul>{editing.technicalIssues.map((issue,i)=><li key={i} className="text-sm">{issue}</li>)}</ul><Textarea value={technicalResolution} onChange={e=>setTechnicalResolution(e.target.value)} placeholder="After correcting the documents, record what you checked and resolved."/><Button disabled={technicalResolution.trim().length < 20} onClick={async()=>{
+                const now = new Date().toISOString();
+                const updated = { ...editing, technicalIssues: [], updatedAt: now, history: [...editing.history, { status: editing.status, at: now, note: `Technical review resolved: ${technicalResolution.trim()}` }] };
+                try { await putCloudRecord(tenantId, updated, editing.updatedAt); setRecords(items=>items.map(r=>r.id===updated.id?updated:r)); setTechnicalResolution(""); setNotice("Technical resolution saved. Save document changes and rebuild before issuing."); } catch(e) { setNotice(e instanceof Error ? e.message : "Could not save review."); }
+              }}>Confirm corrections and record review</Button></div>}
+              <div className="rounded-xl border p-4 space-y-2"><p className="font-semibold">Compliance & RTCC are separate builders</p><p className="text-sm">Save this submittal, then open a builder and find it by reference number to copy existing replies or merge a completed document.</p><div className="flex flex-wrap gap-2"><Button variant="outline" onClick={()=>setView('compliance')}>Open Compliance Statement Builder</Button><Button variant="outline" onClick={()=>setView('rtcc')}>Open RTCC Builder</Button></div></div>
               <div className="grid gap-3 rounded-2xl bg-card p-4 shadow-clay-sm sm:grid-cols-2">
                 <label className="text-xs font-bold">Submittal title
                   <Input aria-label="Submittal title" value={title} onChange={(event) => setTitle(event.target.value)} placeholder="e.g. KINAIR KVF-P Fan" className="mt-1" />
@@ -1194,13 +1461,23 @@ function SimpleSubmittalBuilder({ tenantId }: { tenantId: string }) {
 
               <section className="space-y-3 rounded-3xl bg-card/90 p-4 shadow-clay ring-1 ring-border/60 backdrop-blur">
                 {pasteBox("cover", "2 · Cover page details — paste or upload", coverText, setCoverText, "Project Name: Marina Towers\nClient Name: ...\nMEP Consultant: ...\nMain Contractor: ...\nMEP Contractor: ...\nSupplier Name: ...\nBrand Name: ...\nSubmittal Title: Air handling units")}
+                <div className="rounded-2xl border border-primary/20 bg-background/70 p-3">
+                  <div className="flex flex-wrap items-center justify-between gap-2"><div><p className="text-xs font-bold">Divider page format</p><p className="text-[11px] text-muted-foreground">Choose our standard divider or a custom uploaded divider background. Section titles, logos and stamp settings still follow the submittal.</p></div>
+                    <label className="cursor-pointer rounded-full bg-grad-teal px-3 py-1.5 text-[11px] font-bold text-primary-foreground shadow-clay-sm">{reading==="divider"?"Reading…":"Upload custom divider"}<input type="file" accept=".pdf,.png,.jpg,.jpeg,application/pdf,image/png,image/jpeg" className="hidden" aria-label="Upload custom divider" onChange={e=>{void readDividerFile(e.target.files?.[0]);e.target.value="";}}/></label>
+                  </div>
+                  <select aria-label="Divider page output" className="mt-2 w-full rounded-lg border bg-background p-2" value={dividerPageMode} onChange={e=>setDividerPageMode(e.target.value as "uploaded"|"generated")}>
+                    <option value="generated">Our branded divider format</option>
+                    <option value="uploaded" disabled={!uploadedDividerDoc&&!company?.tpl.divider}>Custom uploaded divider format</option>
+                  </select>
+                  <p className="mt-1 text-xs text-muted-foreground">{dividerPageMode==="uploaded"?(uploadedDividerDoc?`Using custom divider: ${uploadedDividerDoc.name}`:"Using the custom divider saved under the selected company."):"Using our standard branded divider format. Uploaded custom artwork stays available but is not used until selected."}</p>
+                </div>
                 <div className="rounded-2xl bg-background/70 p-3">
                   <p className="text-xs font-bold">3 · Index source</p>
-                  <p className="mt-1 text-[11px] text-muted-foreground">General Specification is ready by default. Choose Project Specification + Compliance, or paste/upload a customer's index below.</p>
-                  <p className="mt-2 text-xs font-semibold text-primary">Using now: {indexMode === "general" ? "General Specification" : indexMode === "project" ? "Project Specification + Compliance" : "Customer index"}</p>
+                  <p className="mt-1 text-[11px] text-muted-foreground">Choose the specification basis and whether the client supplied an index. For a custom client index, paste or upload its exact headings below.</p>
+                  <p className="mt-2 text-xs font-semibold text-primary">Using now: {indexMode === "general" ? "General specification — no client index" : indexMode === "project" ? "Project specification — no client index" : "Project specification — custom client index"}</p>
                   <div className="mt-2 flex flex-wrap gap-2">
-                    {([["general", "General Specification"], ["project", "Project Specification + Compliance"], ["customer", "Customer index"]] as const).map(([mode, label]) => (
-                      <Button key={mode} type="button" size="sm" variant={indexMode === mode ? "default" : "outline"} aria-pressed={indexMode === mode} onClick={() => {
+                    {([["general", "General specification — no client index"], ["project", "Project specification — no client index"], ["customer", "Project specification — custom client index"]] as const).map(([mode, label]) => (
+                      <Button key={mode} type="button" size="sm" className="h-auto min-h-9 whitespace-normal text-left" variant={indexMode === mode ? "default" : "outline"} aria-pressed={indexMode === mode} onClick={() => {
                         setIndexMode(mode);
                         if (mode !== "customer") {
                           appliedCustomerIndexText.current = "";
@@ -1213,7 +1490,7 @@ function SimpleSubmittalBuilder({ tenantId }: { tenantId: string }) {
                   <div className="mt-3 grid gap-3 lg:grid-cols-2">
                     {(["general", "project"] as const).map((key) => <div key={key} className="rounded-xl border border-border bg-card p-3">
                       <div className="flex items-center justify-between gap-2">
-                        <p className="text-xs font-bold">{key === "general" ? "General Specification" : "Project Specification + Compliance"}</p>
+                        <p className="text-xs font-bold">{key === "general" ? "General specification — no client index" : "Project specification — no client index"}</p>
                         <span className="text-[11px] text-muted-foreground">{indexTemplates[key].length} saved headings</span>
                       </div>
                       <p className="mt-1 text-[11px] text-muted-foreground">One heading per line. Edit here, then save to use this standard later.</p>
@@ -1248,7 +1525,7 @@ function SimpleSubmittalBuilder({ tenantId }: { tenantId: string }) {
               {fields.length > 0 && (
                 <section className="rounded-3xl bg-card/90 p-4 shadow-clay ring-1 ring-border/60 backdrop-blur">
                   <p className="mb-2 text-[11px] font-bold uppercase text-muted-foreground">Cover fields — type directly or paste/upload above</p>
-                  <div className="space-y-2">{fields.map((f, i) => <div key={i} className="grid grid-cols-[auto_0.8fr_1.4fr_auto] items-center gap-2" onDragOver={(event) => { if (dragged.current?.kind === "field") { event.preventDefault(); event.dataTransfer.dropEffect = "move"; } }} onDrop={(event) => { if (dragged.current?.kind !== "field") return; event.preventDefault(); onDropItem(dragged.current, { kind: "field", index: i }); dragged.current = null; }}><span draggable aria-label={`Drag cover field ${f.label || i + 1}`} title="Drag to reorder cover fields" className="cursor-grab touch-none text-primary active:cursor-grabbing" onDragStart={(event) => onBeginDrag(event, { kind: "field", index: i })} onDragEnd={() => { dragged.current = null; }}><GripVertical className="size-4" /></span><Input value={f.label} onChange={(e) => setFields((fs) => fs.map((x, j) => (j === i ? { ...x, label: e.target.value } : x)))} className="h-10 rounded-xl bg-background/70 text-xs font-bold" /><Input value={f.value} placeholder={/supplier/i.test(f.label) ? company?.name || "Supplier" : /brand/i.test(f.label) ? brand?.name || "Brand" : "Type here"} aria-label={`${f.label} value`} onChange={(e) => setFields((fs) => fs.map((x, j) => (j === i ? { ...x, value: e.target.value } : x)))} className="h-10 rounded-xl bg-background/70 text-xs" /><Button variant="ghost" size="icon" onClick={() => setFields((fs) => fs.filter((_, j) => j !== i))} aria-label="Remove field"><X /></Button></div>)}</div>
+                  <div className="space-y-2">{fields.map((f, i) => <div key={i} className="grid grid-cols-[auto_minmax(0,0.8fr)_minmax(0,1.4fr)_auto] items-center gap-2" onDragOver={(event) => { if (dragged.current?.kind === "field") { event.preventDefault(); event.dataTransfer.dropEffect = "move"; } }} onDrop={(event) => { if (dragged.current?.kind !== "field") return; event.preventDefault(); onDropItem(dragged.current, { kind: "field", index: i }); dragged.current = null; }}><span draggable aria-label={`Drag cover field ${f.label || i + 1}`} title="Drag to reorder cover fields" className="cursor-grab touch-none text-primary active:cursor-grabbing" onDragStart={(event) => onBeginDrag(event, { kind: "field", index: i })} onDragEnd={() => { dragged.current = null; }}><GripVertical className="size-4" /></span><Input value={f.label} onChange={(e) => setFields((fs) => fs.map((x, j) => (j === i ? { ...x, label: e.target.value } : x)))} className="h-10 rounded-xl bg-background/70 text-xs font-bold" /><Input value={f.value} placeholder={/supplier/i.test(f.label) ? company?.name || "Supplier" : /brand/i.test(f.label) ? brand?.name || "Brand" : "Type here"} aria-label={`${f.label} value`} onChange={(e) => setFields((fs) => fs.map((x, j) => (j === i ? { ...x, value: e.target.value } : x)))} className="h-10 rounded-xl bg-background/70 text-xs" /><Button variant="ghost" size="icon" onClick={() => setFields((fs) => fs.filter((_, j) => j !== i))} aria-label="Remove field"><X /></Button></div>)}</div>
                   <Button variant="ghost" size="sm" className="mt-2" onClick={() => setFields((fs) => [...fs, { label: "", value: "" }])}><Plus /> Add field</Button>
                 </section>
               )}
@@ -1276,24 +1553,32 @@ function SimpleSubmittalBuilder({ tenantId }: { tenantId: string }) {
                   
                 <Button variant="ghost" size="sm" className="mt-2" onClick={() => insertBar(sections.length)}><Plus /> Add divider</Button>
               </section>
+              </fieldset>
             </div>
 
-            <div className="lg:sticky lg:top-4 lg:self-start">
+            <div id="submittal-editor-preview" hidden={focusedEditor && !previewInFullWindow} className={focusedEditor ? "min-w-0" : "lg:sticky lg:top-4 lg:self-start"}>
               {largeMode && <div className="mb-3 rounded-xl bg-secondary p-3 text-sm"><p className="font-bold">{mobileMode ? "Mobile lightweight mode" : `Large submittal · ${pageTotal} source pages`}</p><p className="mt-1 text-xs">{mobileMode ? "Preview is deferred to keep the phone responsive. Build the PDF only when you need it." : "The PDF builds when requested so editing and upload stay responsive."}</p><Button className="mt-2" disabled={building || uploadProgress !== null} onClick={() => setManualBuildKey(buildKey)}>{building ? "Building…" : "Build PDF preview"}</Button></div>}
+              {!!releaseIssues.length && <div role="status" className="mb-3 rounded-xl border border-amber-400 p-3 text-sm"><strong>Before download / share / issue:</strong><ul>{releaseIssues.map((issue,i)=><li key={i}>{issue}</li>)}</ul></div>}
               {uploadProgress !== null && <p role="status" className="mb-3 text-sm">Uploading document: {uploadProgress}%</p>}
-              <PdfPreview bytes={pdf?.bytes} labels={pdf?.labels ?? []} building={building} rotations={rotations} onRotate={(i, d) => setRotations((r) => ({ ...r, [i]: ((r[i] ?? 0) + d + 360) % 360 }))} />
-              <div className="mt-4 grid grid-cols-2 gap-3"><Button variant="default" size="default" onClick={() => void download()} disabled={!pdf || building || hasPdfIssues}><Download /> Download PDF</Button><Button variant="outline" size="default" onClick={() => void save("Submitted")} disabled={!pdf || building || hasPdfIssues}><Check /> Mark submitted</Button></div>
+              <PdfPreview bytes={pdf?.bytes} labels={pdf?.labels ?? []} building={building} rotations={rotations} onRotate={(i, d) => !editing?.issuedPdf && setRotations((r) => ({ ...r, [i]: ((r[i] ?? 0) + d + 360) % 360 }))} />
+              <div className="mt-4 grid grid-cols-2 gap-3"><Button variant="default" size="default" onClick={() => void download()} disabled={!pdf || building || hasPdfIssues || rtccBusy || !!releaseIssues.length}><Download /> Download PDF</Button><Button variant="outline" size="default" onClick={() => void save("Submitted")} disabled={!pdf || building || hasPdfIssues || rtccBusy || !!releaseIssues.length}><Check /> Mark submitted</Button></div>
               <Button variant="ghost" className="mt-2 w-full" onClick={() => save()}><Save /> {editing ? "Save changes" : "Save as draft"}</Button>
+              <div className="mt-3 space-y-2 rounded-xl border bg-card p-3">
+                <Button variant="outline" className="w-full" onClick={() => void copyManualShare()} disabled={manualSharing || !pdf || building || hasPdfIssues || uploadProgress !== null || rtccBusy || !!releaseIssues.length}>{manualSharing ? <Loader2 className="animate-spin" /> : <LinkIcon />} {manualSharing ? "Preparing link…" : "Copy share link"}</Button>
+                <p className="text-center text-xs text-muted-foreground">Saves current changes · branded link · valid for 7 days</p>
+                {manualShareMessage && <p role="status" className="text-sm">{manualShareMessage}</p>}
+                {manualShare?.key === buildKey + JSON.stringify(rotations) && <Input aria-label="Submittal share link" readOnly value={manualShare.url} onFocus={event => event.target.select()} />}
+              </div>
             </div>
           </main>
-        ) : (
-          <SubmittalsHome onShare={shareSavedRecord} records={records} companies={companies} brands={brands} onNew={resetEditor} onEdit={(r) => void loadRecord(r)} onDuplicate={(r) => void loadRecord(r, true)} onDelete={(id) => void deleteRecord(id)} onStatus={(id, status, note) => void setRecordStatus(id, status, note)} />
-        )}
+        ) : view === "list" ? (
+          <SubmittalsHome onNoClientSpecification={recordNoClientSpecification} onShare={shareSavedRecord} records={records} companies={companies} brands={brands} onNew={resetEditor} onEdit={(r) => void loadRecord(r)} onDuplicate={(r) => void loadRecord(r, true)} onDelete={(id) => void deleteRecord(id)} onStatus={setRecordStatus} />
+        ) : null}
 
         <nav className="fixed inset-x-0 bottom-0 z-30 border-t border-border bg-card/95 px-5 py-2 backdrop-blur lg:hidden">
           <div className="mx-auto grid max-w-md grid-cols-3 gap-2">
             <Button variant="ghost" className={`h-14 flex-col gap-0.5 rounded-xl text-[10px] font-bold ${view === "list" ? "bg-secondary text-primary" : "text-muted-foreground"}`} onClick={() => setView("list")}><LayoutGrid className="size-5" />Submittals</Button>
-            <Button variant="default" className="h-14 flex-col gap-0.5 rounded-xl text-[10px] font-bold" onClick={resetEditor}><FilePlus2 className="size-5" />New</Button>
+            <Button variant="default" className="h-14 flex-col gap-0.5 rounded-xl text-[10px] font-bold" disabled={!loaded} onClick={resetEditor}><FilePlus2 className="size-5" />New</Button>
             <Button variant="ghost" className="h-14 flex-col gap-0.5 rounded-xl text-[10px] font-bold text-muted-foreground" onClick={() => openMgr("brands")}><Library className="size-5" />Library</Button>
           </div>
         </nav>
@@ -1302,19 +1587,25 @@ function SimpleSubmittalBuilder({ tenantId }: { tenantId: string }) {
       {!chatOpen && <button
         type="button"
         aria-label="Open KINAIR submittal AI chat"
-        onClick={() => setChatOpen(true)}
+        disabled={!loaded} onClick={() => setChatOpen(true)}
         className="fixed bottom-24 right-4 z-40 flex max-w-[calc(100vw-2rem)] items-center gap-3 rounded-2xl border border-primary/20 bg-card px-4 py-3 text-left shadow-xl transition hover:-translate-y-0.5 hover:border-primary lg:bottom-6 lg:right-6"
       >
         <span className="grid size-10 shrink-0 place-items-center rounded-xl bg-primary text-primary-foreground"><Sparkles className="size-5" /></span>
-        <span className="min-w-0">
+        <span className="hidden min-w-0 sm:block">
           <span className="block text-sm font-bold">Ask KINAIR Submittal AI</span>
           <span className="block truncate text-[11px] text-muted-foreground">Standard index · Missing files · Final PDF</span>
         </span>
       </button>}
-      {chatMounted && <SubmittalChat open={chatOpen} onOpenChange={setChatOpen} records={records} brands={brands.map((brand) => brand.name)} seriesCatalogue={brands.flatMap((brand) => brand.series.map((series) => series.name))} modelCatalog={modelCatalog} tenantId={tenantId} currentRecordId={view === "edit" ? editingId : undefined} inspectPlan={inspectChatPlan} onApply={applyChatPlan} pdfBuilding={Boolean(pendingChatDownloadId)} pdfReady={Boolean(lastChatPdfReadyId && editingId === lastChatPdfReadyId && pdf && !building && !hasPdfIssues)} pdfPrepared={Boolean(preparedChatPdfId && editingId === preparedChatPdfId)} pdfFailed={Boolean(pendingChatDownloadId && hasPdfIssues && !building)} mobileMode={mobileMode} scheduleBranding={{ companyName: company?.name, companyLogo: company?.logo, brandLogo: brand?.logo }} onSharePdf={async () => {
+      {chatMounted && <SubmittalChat companyOptions={companies} brandOptions={brands} selectedCompanyId={companyId} selectedBrandId={brandId} onCompanyChange={setCompanyId} onBrandChange={setBrandId} open={chatOpen} onOpenChange={setChatOpen} records={records} brands={brands.map((brand) => brand.name)} seriesCatalogue={brands.flatMap((brand) => brand.series.map((series) => series.name))} modelCatalog={modelCatalog} tenantId={tenantId} currentRecordId={view === "edit" ? editingId : undefined} inspectPlan={inspectChatPlan} onApply={applyChatPlan} pdfBuilding={Boolean(pendingChatDownloadId)} pdfReady={Boolean(lastChatPdfReadyId && editingId === lastChatPdfReadyId && pdf && !building && !hasPdfIssues)} pdfPrepared={Boolean(preparedChatPdfId && editingId === preparedChatPdfId)} pdfFailed={Boolean(failedChatPdfId && editingId === failedChatPdfId)} pdfError={chatPdfError} mobileMode={mobileMode} scheduleBranding={{ companyName: company?.name, companyLogo: company?.logo, brandLogo: brand?.logo, stamp: company?.stamp }} onSharePdf={async () => {
+        if (rtccBusy || releaseIssues.length) throw new Error(releaseIssues.join("; ") || "Finish RTCC processing first.");
         if (!pdf || building || hasPdfIssues || !lastChatPdfReadyId || editingId !== lastChatPdfReadyId) throw new Error("Build the final submittal PDF before sharing.");
         return shareSubmittalPdf(tenantId, pdf.bytes);
       }} onDownloadPdf={() => {
+        if (failedChatPdfId && editingId === failedChatPdfId) {
+          setHasPdfIssues(false); setChatPdfError(""); setPdf(undefined);
+          setPendingChatDownloadId(failedChatPdfId); setFailedChatPdfId(undefined);
+          setManualBuildKey(buildKey); return;
+        }
         if (preparedChatPdfId && editingId === preparedChatPdfId && (!pdf || largeMode)) {
           setPreparedChatPdfId(undefined);
           setPendingChatDownloadId(preparedChatPdfId);
@@ -1322,7 +1613,7 @@ function SimpleSubmittalBuilder({ tenantId }: { tenantId: string }) {
           return;
         }
         void download();
-      }} onOpenBuilder={() => { resetEditor(); setChatOpen(false); }} />}
+      }} onOpenCompliance={() => {setChatOpen(false);setView('compliance');}} onOpenRtcc={() => {setChatOpen(false);setView('rtcc');}} onOpenBuilder={() => { resetEditor(); setChatOpen(false); }} />}
       <LibraryManager open={mgrOpen} onClose={() => setMgrOpen(false)} tab={mgrTab} setTab={setMgrTab} companies={companies} setCompanies={(fn) => setCompanies((c) => { const n = fn(c); if (!n.some((x) => x.id === companyId)) setCompanyId(n[0]?.id ?? ""); return n; })} brands={brands} setBrands={setBrands} />
       <DocPicker open={!!pickFor} onClose={() => setPickFor(undefined)} title={pickSection?.title ?? ""}
         groups={[
@@ -1336,11 +1627,15 @@ function SimpleSubmittalBuilder({ tenantId }: { tenantId: string }) {
 }
 
 export default function SubmittalControlPage() {
-  const { user, isLoading, tenantId } = useAuth();
+  const { user, isLoading, tenantId, canAccessSubmittal } = useAuth();
   setSubmittalStorageTenantId(tenantId);
   if (isLoading) return null;
   if (!user) return <Navigate to="/login" replace />;
+  if (!canAccessSubmittal) return <Navigate to="/" replace />;
   if (!tenantId) return <MainLayout><p className="p-6">Your workspace could not be loaded. Please sign in again.</p></MainLayout>;
-  return <SimpleSubmittalBuilder tenantId={tenantId} />;
+  return <SimpleSubmittalBuilder key={tenantId} tenantId={tenantId} />;
 }
+
+
+
 

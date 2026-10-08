@@ -1,0 +1,6 @@
+const {test}=require('node:test'),assert=require('node:assert/strict'),fs=require('node:fs'),ts=require('typescript');
+require.extensions['.ts']=(m,f)=>m._compile(ts.transpileModule(fs.readFileSync(f,'utf8'),{compilerOptions:{target:99,module:1}}).outputText,f);
+const {parsePageSelection}=require('../src/lib/submittal-lite/rtcc.ts');
+test('default RTCC pages include every page and explicit selection is preserved',()=>{assert.deepEqual(parsePageSelection('all',4),[0,1,2,3]);assert.deepEqual(parsePageSelection('',3),[0,1,2]);assert.deepEqual(parsePageSelection('1-2,4',4),[0,1,3]);assert.throws(()=>parsePageSelection('1-5',4));});
+test('RTCC and responsive components parse',()=>{for(const f of ['RtccEditor','EngineerReview','ProjectDetailsReuse']){const result=ts.transpileModule(fs.readFileSync(`reset-fix/src/components/submittal-lite/${f}.tsx`,'utf8'),{reportDiagnostics:true,compilerOptions:{jsx:4,target:99,module:1}});assert.equal(result.diagnostics.length,0,JSON.stringify(result.diagnostics));}});
+test('empty annotation-only consultant area does not create a colon comment',()=>{const {splitConsultantComments}=require('../src/lib/submittal-lite/rtcc.ts');assert.deepEqual(splitConsultantComments("CONSULTANT COMMENTS:\nENGINEERS'/RE REVIEW:\nCode 1 No comments"),[]);});

@@ -28,11 +28,12 @@ const sections = [
 ] as const;
 
 export default function SubmittalControlPage() {
-  const { user, isLoading } = useAuth();
+  const { user, isLoading, canAccessSubmittal } = useAuth();
   const { packages, isLoading: packagesLoading } = useSubmittals();
   const [section,setSection] = useState<Section>('builder');
   if (isLoading) return <MainLayout><div className="flex h-64 items-center justify-center">Loading…</div></MainLayout>;
   if (!user) return <Navigate to="/login" replace />;
+  if (!canAccessSubmittal) return <Navigate to="/" replace />;
   const rows = packages;
   return <MainLayout>
     <header className="border-b bg-gradient-to-r from-primary/10 via-primary/5 to-background px-4 py-4 sm:py-7"><div className="mx-auto flex max-w-[1600px] items-start gap-3 sm:items-center"><FileText className="h-7 w-7 shrink-0 text-primary sm:h-8 sm:w-8"/><div className="min-w-0"><h1 className="text-2xl font-bold sm:text-3xl">Submittal Control</h1><p className="hidden text-sm text-muted-foreground sm:block sm:text-base">Controlled Regular, PQ and O&amp;M document packages.</p></div></div></header>

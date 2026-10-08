@@ -13,12 +13,15 @@ export async function loadCloudRecords(tenantId: string): Promise<SubmittalRecor
   return (data ?? []).map((row) => row.data as SubmittalRecord);
 }
 
-export async function putCloudRecord(tenantId: string, record: SubmittalRecord) {
-  const { error } = await supabase.from("submittal_lite_records").upsert({
-    id: record.id, tenant_id: tenantId, ref: record.ref, rev: record.rev,
-    data: record, updated_at: record.updatedAt,
-  }, { onConflict: "id" });
-  if (error) throw error;
+export async function putCloudRecord(tenantId: string, record: SubmittalRecord, expectedUpdatedAt?: string) {
+  const row = { id: record.id, tenant_id: tenantId, ref: record.ref, rev: record.rev,
+    data: { ...record, ...(expectedUpdatedAt ? { _expectedUpdatedAt: expectedUpdatedAt } : {}) }, updated_at: record.updatedAt };
+  const request = expectedUpdatedAt
+    ? supabase.from("submittal_lite_records").update(row).eq("tenant_id", tenantId).eq("id", record.id).eq("updated_at", expectedUpdatedAt)
+    : supabase.from("submittal_lite_records").insert(row);
+  const { data, error } = await request.select("id");
+  if (error) throw new Error(error.code === "23505" ? "This reference/revision already exists. Refresh the register and retry." : error.message);
+  if (!data?.length) throw new Error("This draft was deleted or changed in another tab. Refresh before saving. Your changes were not overwritten.");
 }
 
 export async function removeCloudRecord(tenantId: string, id: string) {
@@ -27,25 +30,38 @@ export async function removeCloudRecord(tenantId: string, id: string) {
   if (!data?.length) throw new Error("Deletion was not confirmed. The draft may already be deleted, or your account may not have delete permission. Refresh the list.");
 }
 
+const settingsVersions = new Map<string, string | null>();
+const settingsSnapshots = new Map<string, string>();
+
 export async function loadCloudSettings(tenantId: string): Promise<CloudSettings | null> {
-  const { data, error } = await supabase.from("submittal_lite_settings").select("data").eq("tenant_id", tenantId).maybeSingle();
+  const { data, error } = await supabase.from("submittal_lite_settings").select("data,updated_at").eq("tenant_id", tenantId).maybeSingle();
   if (error) throw error;
-  return data?.data as CloudSettings ?? null;
+  settingsVersions.set(tenantId, data?.updated_at ?? null);
+  const settings = data?.data as CloudSettings ?? null;
+  settingsSnapshots.set(tenantId, JSON.stringify(settings));
+  return settings;
 }
 
-// Serialize workspace settings writes so a slow autosave cannot overwrite a newer template.
 const settingsWrites = new Map<string, Promise<void>>();
 
 export async function putCloudSettings(tenantId: string, settings: CloudSettings) {
+  // Snapshot at enqueue time: subsequent UI edits must not mutate a pending write.
+  const serialized = JSON.stringify(settings);
   const previous = settingsWrites.get(tenantId) ?? Promise.resolve();
   const current = previous.catch(() => {}).then(async () => {
-    const { error } = await supabase.from("submittal_lite_settings").upsert({
-      tenant_id: tenantId, data: settings, updated_at: new Date().toISOString(),
-    }, { onConflict: "tenant_id" });
-    if (error) throw error;
+    if (!settingsVersions.has(tenantId)) throw new Error("Load the company library before saving.");
+    if (settingsSnapshots.get(tenantId) === serialized) return;
+    const expected = settingsVersions.get(tenantId);
+    const row = {tenant_id:tenantId,data:{...JSON.parse(serialized),...(expected ? {_expectedUpdatedAt:expected} : {})},updated_at:new Date().toISOString()};
+    const request = expected
+      ? supabase.from("submittal_lite_settings").update(row).eq("tenant_id",tenantId).eq("updated_at",expected)
+      : supabase.from("submittal_lite_settings").insert(row);
+    const {data,error} = await request.select("updated_at");
+    if (error || !data?.length) throw new Error("Company/brand library changed in another session. Your older copy was not saved. Refresh before editing.");
+    settingsVersions.set(tenantId,data[0].updated_at);
+    settingsSnapshots.set(tenantId,serialized);
   });
-  settingsWrites.set(tenantId, current);
-  try { await current; }
-  finally { if (settingsWrites.get(tenantId) === current) settingsWrites.delete(tenantId); }
+  settingsWrites.set(tenantId,current);
+  try {await current;}
+  finally {if(settingsWrites.get(tenantId)===current)settingsWrites.delete(tenantId);}
 }
-

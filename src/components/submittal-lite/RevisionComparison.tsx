@@ -1,0 +1,9 @@
+import { useState } from 'react';
+import type { SubmittalRecord } from '@/lib/submittal-lite/records';
+import { compareRevisions } from '@/lib/submittal-lite/advanced';
+export function RevisionComparison({current,records}:{current:SubmittalRecord;records:SubmittalRecord[]}){
+ const previous=records.filter(r=>r.ref===current.ref&&r.rev<current.rev).sort((a,b)=>b.rev-a.rev);
+ const [chosen,setChosen]=useState('');const before=previous.find(r=>r.id===chosen)||previous[0];
+ const changes=before?compareRevisions(before,current):[];
+ return <details className="rounded-xl border bg-card p-4"><summary className="cursor-pointer font-semibold">Revision comparison</summary>{!before?<p className="mt-3 text-sm">No earlier saved revision is available for this reference.</p>:<div className="mt-3 space-y-3"><label className="block text-sm">Compare current editor (Rev {current.rev}) with <select className="rounded border bg-background p-2" value={before.id} onChange={e=>setChosen(e.target.value)}>{previous.map(r=><option key={r.id} value={r.id}>Rev {r.rev} · {r.status}</option>)}</select></label><p className="text-xs text-muted-foreground">Shows project details, document identities/order, settings and RTCC changes, including unsaved edits. It does not compare text or drawings inside uploaded PDFs.</p><div className="max-h-[32rem] overflow-auto"><table className="w-full text-xs border-collapse"><thead><tr>{['Changed item',`Rev ${before.rev}`,`Current Rev ${current.rev}`].map(h=><th key={h} className="border bg-muted p-2 text-left">{h}</th>)}</tr></thead><tbody>{changes.map((c,i)=><tr key={i}><th className="border p-2 text-left align-top">{c.area}</th><td className="border p-2 align-top whitespace-pre-wrap break-all">{c.before}</td><td className="border p-2 align-top whitespace-pre-wrap break-all">{c.after}</td></tr>)}</tbody></table>{!changes.length&&<p className="p-3 text-sm">No content changes found.</p>}</div></div>}</details>;
+}

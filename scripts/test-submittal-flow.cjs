@@ -13,6 +13,9 @@ function transpile(source, fileName = 'test.ts') {
   assert.deepEqual(result.diagnostics.filter(d => d.category === ts.DiagnosticCategory.Error), []);
   return result.outputText;
 }
+const ocrContext = { exports: {} };
+vm.createContext(ocrContext);
+vm.runInContext(ts.transpileModule(fs.readFileSync(path.join(root, 'src/lib/submittal-lite/schedule-series.ts'), 'utf8'), {compilerOptions:{module:ts.ModuleKind.CommonJS,target:99}}).outputText, ocrContext);
 const libraryContext = { exports: {} };
 vm.createContext(libraryContext);
 vm.runInContext(ts.transpileModule(fs.readFileSync(path.join(root, 'src/lib/submittal-lite/library.ts'), 'utf8').replace(/^import .*;$/gm, ''), {compilerOptions:{module:ts.ModuleKind.CommonJS,target:99}}).outputText, libraryContext);
@@ -25,6 +28,7 @@ function declaration(name) {
   }
   visit(source);
   assert.ok(found, name);
+  if (name === "parsePastedIndexSections") return fs.readFileSync(path.join(root, "src/lib/submittal-lite/setup-parser.ts"), "utf8").replace(/export /g, "") + "\n" + found.getText(source);
   return ts.isVariableDeclaration(found) ? `const ${found.getText(source)};` : found.getText(source);
 }
 function flow(question, uploads = [], history = [], aiPlan, index = {}) {
@@ -32,27 +36,27 @@ function flow(question, uploads = [], history = [], aiPlan, index = {}) {
   const noop = () => {};
   const selection = index.selection ?? { items: [{ product: 'fan', tag: 'EF-1', airflow: 100, airflow_unit:'CMH', static_pressure: 50, pressure_unit:'Pa' }], provider: 'test' };
   const context = {
-    scheduleBranding:{}, scheduleMode:index.scheduleMode ?? "uploaded", submittalKind: index.kind ?? "Material",
+    companyOptions:index.companyOptions, brandOptions:index.brandOptions, selectedCompanyId:index.companyId, selectedBrandId:index.brandId, scheduleBranding:{}, scheduleMode:index.scheduleMode ?? "uploaded", submittalKind: index.kind ?? "Material",
     setTdsWarnings:()=>{}, sharing:false, setShareResult:()=>{},setShareError:()=>{},setShareCopied:()=>{}, completed: index.completed ?? false, freshSession: false, setCompleted: noop, setShowSavedPdf: noop, finishSubmittal: noop,
-    coverDetailsText: index.cover ?? "", indexChoice: index.mode ?? null, customIndexText: index.text ?? "", uploads, input: question, busy: false, applying: false, messages: history, plan: null,
+    coverDetailsText: index.cover ?? "", indexChoice: index.mode ?? null, customIndexText: index.text ?? "", uploads, input: question, busy: false, applying: false, messages: history, plan: index.plan ?? null, composePending: false, review: null, tdsWarnings: [],
     setInput: noop, setSetupOpen: noop, setBusy: noop, setMessages: fn => { calls.messages = typeof fn === "function" ? fn(calls.messages) : fn; },
     prepareUploadsForSend: async () => uploads,
     uniqueProjectDetails: fields => fields, parseSourceReferenceFields: () => [],
-    readSelectionAssistantSchedule: async (text) => { calls.selected.push(text); return selection; },
+    readSelectionAssistantSchedule: async (text) => { calls.selected.push(text); if(index.textFails) throw Error('Selection Assistant could not read the schedule rows.'); return selection; },
     readSelectionAssistantAttachment: async (file, prompt, mode, forceVision) => { (calls.recoveryModes??=[]).push(mode); calls.recoveryMode=mode; calls.forceVision=forceVision; calls.attachments.push(file); return (mode === "openai_terra" && index.mediumFails) ? { ...selection, items: selection.items.map(item=>({...item})) } : index.recovered ?? selection; },
     makeAssistantSubmittalTds: async (items) => { calls.tdsItems=items; return ({ file: { name: 'KINAIR-Selector-TDS.pdf' }, scheduleFile: { name: 'KINAIR-Material-Schedule.pdf' }, models: ['KVF-100P'], missing: [], corrections: [] }); },
     setActiveProvider: noop, database: {}, airModels: [], airBrands: [], airSeries: [], airDimensions: [], dimensionsMap: {}, tenant: {},
-    setSelectionArtifacts: noop, setUploads: noop, modelCatalog: [{}], tenantId: 'test', seriesCatalogue: ['KVF-P'], brands: ['KINAIR'],
+    setSelectionArtifacts: noop, setUploads: noop, normalizeOcrModelCodes: ocrContext.exports.normalizeOcrModelCodes, modelCatalog: index.catalog ?? [] , loadSelectorModelCatalogue: async () => index.catalog ?? [], tenantId: 'test', seriesCatalogue: ['KVF-P'], brands: ['KINAIR'],
     detectScheduleSeries: () => ({ series: ['KVF-P'] }), inferMaterialTypes: () => ['Fan'],
     isSelectorSeries: () => true, records: [], currentRecordId: undefined, aiMode: 'auto', availableModels: [],
-    supabase: { functions: { invoke: async () => ({ data: { plan: aiPlan } }) } },
+    supabase: { functions: { invoke: async (_name, request) => { (calls.invocations ??= []).push(request.body); return { data: request.body.action === "conversation" ? (index.conversation ?? {intent:"answer",reply:"I can explain the current checklist."}) : { plan: aiPlan } }; } } },
     setPlan: noop, setComposePending: noop, omitEmpty: false,
     inspectPlan: () => ({ sections:['Technical data sheet','Material schedule'], assignments:[], sectionStatus: [{ title: 'Technical data sheet', count: index.missing ? 0 : 1 }, { title: 'Material schedule', count: 1 }], unassignedFiles: [] }),
     autoFinish: { current: true }, setApplying: noop, confirmedCertificateMapping: false,
     onApply: async (...args) => { calls.applied.push(args); return 'assembled'; }, setOmitEmpty: noop, setConfirmedCertificateMapping: noop,
   };
   vm.createContext(context);
-  vm.runInContext(transpile(declaration('parseClientProjectFields') + declaration('parsePastedIndexSections') + declaration('ask') + '\nglobalThis.run = ask;'), context);
+  vm.runInContext(transpile(declaration('submittalMessageIntent') + declaration('parseClientProjectFields') + declaration('parsePastedIndexSections') + declaration('ask') + '\nglobalThis.run = ask;'), context);
   return { calls, run: context.run };
 }
 test('both changed frontend files parse and transpile', () => { transpile(chat, 'chat.tsx'); transpile(stream); });
@@ -335,7 +339,7 @@ async function semanticCheck(responses, mode='auto') {
  payload:{action:'match_sections',sections:[{title:'Country of Origin',intent:'origin'}],documents:[doc]},
  z:{array:()=>shape,object:()=>shape,string:()=>shape,number:()=>shape},createOpenAI:()=>name=>name,
  generateObject:async args=>{calls.push(args.model);return {object:{matches:responses[calls.length-1]??[]}}}};
- vm.createContext(ctx);vm.runInContext(transpile('async function run(){'+edge.slice(start,end)+'}\nglobalThis.run=run;'),ctx);
+ vm.createContext(ctx);vm.runInContext(transpile('async function run(){'+edge.slice(edge.indexOf('    const tierCandidates ='),edge.indexOf('    const modelCandidates ='))+edge.slice(start,end)+'}\nglobalThis.run=run;'),ctx);
  return {calls,result:await (await ctx.run()).json()};
 }
 test('semantic fallback escalates cheap to balanced and stops after evidenced match',async()=>{
@@ -348,4 +352,103 @@ test('semantic fallback rejects invented sections and evidence; local mode makes
  const r=await semanticCheck([[bad],[{...bad,section:'Country of Origin',evidence:'invented evidence'}],[]]);
  assert.equal(r.result.matches.length,0);
  const local=await semanticCheck([], 'local');assert.equal(local.calls.length,0);
+});
+test('project index cannot auto-attach shared general compliance to a generic compliance divider',()=>{
+ const page=fs.readFileSync(path.join(root,'src/pages/SubmittalControlPage.tsx'),'utf8');
+ const ast=ts.createSourceFile('page.tsx',page,99,true,ts.ScriptKind.TSX);
+ const fn=ast.statements.find(n=>ts.isFunctionDeclaration(n)&&n.name?.text==='attach');
+ const ctx={matches:libraryContext.exports.matches,indexHeadingIntent:libraryContext.exports.indexHeadingIntent,isComplianceStatement:x=>/compliance/i.test(x),logicalFileNameKey:x=>x.toLowerCase()};vm.createContext(ctx);
+ vm.runInContext(transpile(fn.getText(ast))+'\nglobalThis.run=attach;',ctx);
+ const general={id:'g',name:'General Compliance Statement.pdf',category:'General Compliance Statement',type:'application/pdf'};
+ const project={id:'p',name:'Project Compliance Statement.pdf',category:'Compliance Statement',type:'application/pdf'};
+ const sections=[{id:'s',title:'Project Specification',docs:[]},{id:'c',title:'Compliance Statement',docs:[]}];
+ const result=ctx.run(sections,[general,project]);assert.deepEqual(Array.from(result[1].docs,d=>d.id),['p']);
+ assert.equal(ctx.run([{id:'g',title:'General Compliance Statement',docs:[]}],[general])[0].docs.length,1);
+});
+
+test('ordinary questions use conversation and never assemble a PDF', async () => {
+ const f=flow('How does the custom index work?'); await f.run();
+ assert.equal(f.calls.invocations[0].action,'conversation');
+ assert.equal(f.calls.applied.length,0); assert.equal(f.calls.selected.length,0);
+ assert.match(f.calls.messages.at(-1).text,/explain/);
+});
+test('reported missing TDS retries source selection and waits for review', async () => {
+ const existing={action:'create',kind:'Material',title:'Warehouse',product:'KVF-P',fields:[],sections:['Technical data sheet','Material schedule'],indexMode:'customer',omitSections:[],reply:''};
+ const f=flow('TDS is missing, please fix it', [{file:{name:'schedule.pdf'},kind:'support',sectionTitle:'Material schedule',scheduleText:'KVF-100P Airflow 100 CMH ESP 50 Pa',selectionItems:[{product:'fan',existing_selection:'KVF-100P'}]}], [], undefined, {plan:existing,completed:true});
+ await f.run(); assert.ok(f.calls.tdsItems?.length); assert.equal(f.calls.applied.length,0);
+ assert.ok(f.calls.messages.some(m=>/recheck/i.test(m.text)));
+});
+test('completed submittal retains source files for follow-up repairs', () => {
+ const source=declaration('finishSubmittal');
+ assert.doesNotMatch(source,/setUploads\(\[\]\)|setPlan\(null\)|setCustomIndexText\(""\)/);
+ assert.match(declaration('startNewSubmittal'),/setUploads\(\[\]\)/);
+});
+
+async function conversationCheck(mode='auto',gemini=false) {
+ const edge=fs.readFileSync(path.join(root,'supabase/functions/submittal-assistant/index.ts'),'utf8');
+ const start=edge.indexOf('    if (payload.action === "conversation")');const end=edge.indexOf('    if (payload.action === "match_sections")',start);
+ const shape={max(){return this},min(){return this}};const calls=[];
+ const ctx={Response,AbortSignal,console:{warn(){}},headers:{},mode,keys:{openai:'test'},models:['cheap','balanced','premium'].map((tier,i)=>({provider:'openai',tier,model_id:tier,cost_rank:i})),
+ payload:{action:'conversation',checklist:{sectionStatus:[{title:'Trade license',count:0}]}},message:'Why is the license missing?',history:[],draftPlan:null,
+ z:{enum:()=>shape,object:()=>shape,string:()=>shape},createOpenAI:()=>name=>name,
+ generateObject:async args=>{calls.push(args.model);if(calls.length===1)throw Error('provider down');return {object:{intent:'repair',reply:'I will recheck the license match.'}}}};
+ if(gemini){ctx.keys.gemini='test';ctx.models.push({provider:'google',tier:'free',model_id:'gemini-flash-lite-latest',cost_rank:0});ctx.createGoogleGenerativeAI=()=>name=>name;}
+ vm.createContext(ctx);vm.runInContext(transpile('async function run(){'+edge.slice(edge.indexOf('    const tierCandidates ='),edge.indexOf('    const modelCandidates ='))+edge.slice(start,end)+'}\nglobalThis.run=run;'),ctx);
+ return {calls,result:await (await ctx.run()).json()};
+}
+test('conversation falls back one tier after failure and returns repair intent',async()=>{
+ const r=await conversationCheck();assert.deepEqual(r.calls,['cheap','balanced']);assert.equal(r.result.intent,'repair');
+});
+test('local-only conversation exposes missing divider without cloud calls',async()=>{
+ const r=await conversationCheck('local');assert.equal(r.calls.length,0);assert.match(r.result.reply,/Trade license/);
+});
+
+test('company certificates join the test package across products, without changing category',()=>{
+ for (const [name,category] of [['AMCA Member Plaque.pdf','Membership Certificate'],['TUV Fire Test.pdf','Product Certificate'],['Fire testing.pdf','Test Certificate'],['ISO-KME.pdf','ISO Certificate']]) {
+   const doc={id:'c',name,category,libraryScope:'company'};
+   assert.equal(libraryContext.exports.matches('TEST REPORTS & TEST CERTIFICATES',doc),true,name);
+   assert.equal(libraryContext.exports.matches('Certificates',doc),true,name);
+   assert.equal(doc.category,category);
+ }
+ assert.equal(libraryContext.exports.matches('Test Certificate',{name:'AMCA Member Plaque.pdf',category:'Membership Certificate'}),false);
+ assert.equal(libraryContext.exports.matches('Trade License',{name:'TUV Fire Test.pdf',category:'Product Certificate',libraryScope:'company'}),false);
+});
+test('chat stops preparation until supplier and brand are selected',async()=>{
+ const f=flow('Build submittal\nProject: New',[],[],undefined,{companyOptions:[{id:'c',name:'Kinetics'}],brandOptions:[{id:'b',name:'KINAIR'}],companyId:'c'});
+ await f.run();assert.equal(f.calls.applied.length,0);assert.match(f.calls.messages.at(-1).text,/select the supplier company and brand/);
+});
+test('chat plan uses explicit company and brand IDs',async()=>{
+ const f=flow('Build submittal\nProject: New',[],[],undefined,{companyOptions:[{id:'c',name:'Kinetics'}],brandOptions:[{id:'b',name:'Selected Brand'}],companyId:'c',brandId:'b'});
+ await f.run();assert.equal(f.calls.applied.length,1);const plan=f.calls.applied[0][0];assert.equal(plan.companyId,'c');assert.equal(plan.brandId,'b');assert.equal(plan.brand,'Selected Brand');
+});
+
+test('Gemini limit uses Luna before any higher-cost tier',async()=>{const r=await conversationCheck('auto',true);assert.deepEqual(r.calls,['gemini-flash-lite-latest','cheap']);assert.equal(r.result.intent,'repair');});
+
+test('OCR correction reaches TDS with the unique catalogue model and preserves tag', async()=>{const f=flow('Build material submittal\nProject: Warehouse\nFan 100 L/s 50 Pa',[],[],undefined,{catalog:[{code:'KVF-150P',series:'KVF-P'}],selection:{provider:'test',items:[{product:'fan',tag:'KEF-01',existing_selection:'KEF-150P',airflow:100,airflow_unit:'L/s',static_pressure:50,pressure_unit:'Pa'}]}});await f.run();assert.equal(f.calls.tdsItems[0].existing_selection,'KVF-150P');assert.equal(f.calls.tdsItems[0].tag,'KEF-01');});
+test('valid catalogue KEF model is never replaced with KVF',()=>{assert.equal(ocrContext.exports.normalizeOcrModelCodes('KEF-150P',[{code:'KEF-150P'},{code:'KVF-150P'}]),'KEF-150P');});
+
+test('failed text schedule reading retries original visually before TDS',async()=>{const f=flow('Build material submittal\nProject: Warehouse',[{file:{name:'fan schedule.pdf'},sectionTitle:'Material schedule',sourceRole:'schedule',scheduleText:'Unreadable table text'}],[],undefined,{textFails:true});await f.run();assert.equal(f.calls.forceVision,true);assert.ok(f.calls.tdsItems.length);assert.equal(f.calls.applied.length,1);});
+
+function recoveryReader() {
+  const ast=ts.createSourceFile('reader.ts',stream,ts.ScriptTarget.Latest,true);
+  const fn=ast.statements.find(n=>ts.isFunctionDeclaration(n)&&n.name.text==='recoverScheduleRead');
+  const ctx={Error}; vm.createContext(ctx);
+  vm.runInContext(transpile(fn.getText(ast))+'\nglobalThis.run=recoverScheduleRead;',ctx);return ctx.run;
+}
+test('empty Gemini extraction retries cheap OpenAI and stops on rows',async()=>{
+  const calls=[];const result=await recoveryReader()('auto',false,async mode=>{calls.push(mode);return mode==='gemini'?null:{items:[{product:'fan',existing_selection:'KVF-150P'}],provider:'OpenAI'};});
+  assert.deepEqual(calls,['gemini','openai_luna']);assert.equal(result.items[0].existing_selection,'KVF-150P');
+});
+test('failed and empty reads escalate through medium and premium',async()=>{
+  const calls=[];await recoveryReader()('auto',false,async mode=>{calls.push(mode);if(mode==='gemini')throw Error('HTTP 429');return mode==='openai_sol'?{items:[{product:'fan'}],provider:'OpenAI'}:{items:[]};});
+  assert.deepEqual(calls,['gemini','openai_luna','openai_terra','openai_sol']);
+});
+test('all failed tiers return attempt reasons instead of silent TDS omission',async()=>{
+  await assert.rejects(recoveryReader()('auto',false,async()=>null),/openai_sol: no readable equipment rows/);
+});
+test('classification probes do not spend on premium for non-schedule documents',async()=>{
+  const calls=[];assert.equal(await recoveryReader()('auto',true,async mode=>{calls.push(mode);return null;}),null);assert.deepEqual(calls,['gemini']);
+});
+test('authentication failure stops retrying providers',async()=>{
+  const calls=[];await assert.rejects(recoveryReader()('auto',false,async mode=>{calls.push(mode);throw Error('Selection Assistant returned HTTP 401.');}),/401/);assert.deepEqual(calls,['gemini']);
 });

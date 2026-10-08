@@ -6,20 +6,21 @@ import { UpdateBanner } from '@/components/offline/UpdateBanner';
 
 interface MainLayoutProps {
   children: ReactNode;
+  focusMode?: boolean;
 }
 
-export function MainLayout({ children }: MainLayoutProps) {
+export function MainLayout({ children, focusMode = false }: MainLayoutProps) {
   return (
     <div className="min-h-screen flex flex-col bg-background">
       <UpdateBanner />
       <OfflineSyncBar />
 
-      <Header />
+      {!focusMode && <Header />}
       <main className="flex-1">
         {children}
       </main>
 
-      <Footer />
+      {!focusMode && <Footer />}
     </div>
   );
 }
